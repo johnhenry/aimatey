@@ -16,8 +16,8 @@ npm install @johnhenry/aimatey-backend
 Backend adapters translate aimatey's Intermediate Representation (IR) into provider-specific API calls. This allows you to switch AI providers without changing your application code.
 
 **Supported Providers (24+):**
-- OpenAI (GPT-4, GPT-3.5)
-- Anthropic (Claude 3.5 Sonnet, Opus, Haiku)
+- OpenAI (GPT-6 Astra, GPT-5.6 family)
+- Anthropic (Claude Fable 5.1, Opus 5, Haiku 4.5)
 - Google (Gemini 1.5 Pro, Flash)
 - Groq (Llama 3, Mixtral)
 - DeepSeek (V3, Chat)
@@ -62,7 +62,7 @@ const backend = new OpenAIBackendAdapter({
   apiKey: process.env.OPENAI_API_KEY,   // Required
   baseURL: 'https://api.openai.com/v1', // Optional
   timeout: 60000,                       // Optional (default: 30000)
-  defaultModel: 'gpt-4o',               // Optional
+  defaultModel: 'gpt-6-astra',          // Optional
   headers: { 'OpenAI-Organization': 'org-xxx' }, // Optional; there is no `organization` field
 });
 ```
@@ -74,27 +74,26 @@ are not in that list go in `custom` or `headers`.
 
 ### Available Models
 
-- **GPT-4 Turbo**: `gpt-4-turbo`, `gpt-4-turbo-preview`
-- **GPT-4**: `gpt-4`, `gpt-4-0613`
-- **GPT-3.5 Turbo**: `gpt-3.5-turbo`, `gpt-3.5-turbo-16k`
-- **GPT-4 Vision**: `gpt-4-vision-preview`
+`DEFAULT_OPENAI_MODELS` ships this catalog (`@johnhenry/aimatey-backend`'s `shared.ts`, refreshed 2026-09-11):
+
+- **GPT-6 Astra**: `gpt-6-astra` (flagship, supersedes the GPT-5.6 family)
+- **GPT-5.6 Sol**: `gpt-5.6-sol`
+- **GPT-5.6 Terra**: `gpt-5.6-terra`
+- **GPT-5.6 Luna**: `gpt-5.6-luna` (fast, low-cost tier)
 
 ### Features
 
 - ✅ Chat completions
 - ✅ Streaming
 - ✅ Function calling
-- ✅ Vision (GPT-4 Vision)
+- ✅ Vision
 - ✅ JSON mode
 - ✅ Seed for reproducibility
 
-### Pricing (per 1M tokens)
-
-| Model | Input | Output |
-|-------|-------|--------|
-| GPT-4 Turbo | $10 | $30 |
-| GPT-4 | $30 | $60 |
-| GPT-3.5 Turbo | $0.50 | $1.50 |
+Pricing changes often enough that a static table here goes stale fast (this
+page's previous one did) — check [OpenAI's own pricing page](https://openai.com/api/pricing/)
+for current per-model rates, or call `backend.estimateCost(request)`, which
+prices against the same model registry the adapter itself uses.
 
 ## Anthropic Backend
 
@@ -118,10 +117,14 @@ const backend = new AnthropicBackendAdapter({
 
 ### Available Models
 
-- **Claude 3.5 Sonnet**: `claude-3-5-sonnet-20241022` (Latest, most capable)
-- **Claude 3 Opus**: `claude-3-opus-20240229` (Highest intelligence)
-- **Claude 3 Sonnet**: `claude-3-sonnet-20240229` (Balanced)
-- **Claude 3 Haiku**: `claude-3-haiku-20240307` (Fastest, cheapest)
+`DEFAULT_ANTHROPIC_MODELS` ships this catalog (`@johnhenry/aimatey-backend`'s `shared.ts`, refreshed 2026-09-11); `claude-haiku-4-5-20251001` is the adapter's own fallback default when no model is specified:
+
+- **Claude Fable 5.1**: `claude-fable-5-1` (Anthropic's most capable widely-released model)
+- **Claude Fable 5**: `claude-fable-5` (predecessor to Fable 5.1, still served)
+- **Claude Opus 5**: `claude-opus-5` (general-purpose flagship-tier default)
+- **Claude Opus 4.8**: `claude-opus-4-8` (most capable Opus 4.x tier)
+- **Claude Sonnet 5**: `claude-sonnet-5` (default Anthropic model, 1M-token context window)
+- **Claude Haiku 4.5**: `claude-haiku-4-5-20251001` (fastest and most affordable current-generation model)
 
 ### Features
 
@@ -132,14 +135,8 @@ const backend = new AnthropicBackendAdapter({
 - ✅ 200K context window
 - ✅ System prompts
 
-### Pricing (per 1M tokens)
-
-| Model | Input | Output |
-|-------|-------|--------|
-| Claude 3.5 Sonnet | $3 | $15 |
-| Claude 3 Opus | $15 | $75 |
-| Claude 3 Sonnet | $3 | $15 |
-| Claude 3 Haiku | $0.25 | $1.25 |
+Check [Anthropic's own pricing page](https://www.anthropic.com/pricing) for
+current per-model rates, or call `backend.estimateCost(request)`.
 
 ## Google Gemini Backend
 
@@ -519,7 +516,7 @@ const bridge = new Bridge(
 const longDocument = fs.readFileSync('long-doc.txt', 'utf-8');
 
 const response = await bridge.chat({
-  model: 'claude-3-5-sonnet-20241022',
+  model: 'claude-haiku-4-5-20251001',
   messages: [
     { role: 'user', content: `Summarize this:\n\n${longDocument}` }
   ]

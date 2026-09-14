@@ -185,8 +185,8 @@ router
 
 router.setModelMapping({
   'gpt-4': 'openai',
-  'gpt-4o-mini': 'openai',
-  'claude-3-5-sonnet-20241022': 'anthropic',
+  'gpt-5.6-luna': 'openai',
+  'claude-haiku-4-5-20251001': 'anthropic',
 });
 ```
 

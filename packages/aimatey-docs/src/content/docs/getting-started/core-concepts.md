@@ -19,7 +19,7 @@ Every AI provider has their own API format:
 
 // Anthropic format
 {
-  model: "claude-3-5-sonnet-20241022",
+  model: "claude-haiku-4-5-20251001",
   messages: [{ role: "user", content: "Hello" }],
   max_tokens: 100
 }
@@ -113,7 +113,7 @@ const irRequest = {
     { role: 'user', content: 'Hello!' }
   ],
   parameters: {
-    model: 'claude-3-5-sonnet-20241022',
+    model: 'claude-haiku-4-5-20251001',
     temperature: 0.7,
     maxTokens: 100
   },

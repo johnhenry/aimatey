@@ -320,7 +320,7 @@ Both `providerDetails` and `httpContext` are exposed on the error.
 import { ProviderError } from '@johnhenry/aimatey-errors';
 
 try {
-  await bridge.chat({ model: 'claude-3-5-sonnet-20241022', messages });
+  await bridge.chat({ model: 'claude-haiku-4-5-20251001', messages });
 } catch (error) {
   if (error instanceof ProviderError) {
     console.error('Provider:', error.providerDetails?.provider);

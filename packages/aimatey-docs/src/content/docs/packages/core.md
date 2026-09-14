@@ -253,7 +253,7 @@ Routes on the requested model name, using the router's model mapping:
 const router = new Router({ routingStrategy: 'model-based' });
 router.setModelMapping({
   'gpt-4': 'openai',
-  'claude-3-5-sonnet-20241022': 'anthropic'
+  'claude-haiku-4-5-20251001': 'anthropic'
 });
 ```
 

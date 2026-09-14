@@ -46,7 +46,7 @@ const bridge = new Bridge(
 
 // Make a request using OpenAI format
 const response = await bridge.chat({
-  model: 'gpt-4', // Will be mapped to claude-3-5-sonnet
+  model: 'gpt-4', // Will be mapped to claude-opus-5
   messages: [
     { role: 'user', content: 'What is aimatey?' }
   ]
@@ -101,7 +101,7 @@ const response = await backend.execute({
     { role: 'user', content: 'Hello!' }
   ],
   parameters: {
-    model: 'claude-3-5-sonnet-20241022'
+    model: 'claude-haiku-4-5-20251001'
   },
   metadata: {
     requestId: crypto.randomUUID(),
@@ -241,7 +241,7 @@ const bridge = new Bridge(
 
 // Now use Anthropic's API format
 const response = await bridge.chat({
-  model: 'claude-3-5-sonnet-20241022',
+  model: 'claude-haiku-4-5-20251001',
   max_tokens: 100,
   messages: [
     { role: 'user', content: 'Hello!' }
@@ -308,8 +308,8 @@ npm install @johnhenry/aimatey-core @johnhenry/aimatey-frontend @johnhenry/aimat
 ### Model Mapping
 
 By default, models are automatically mapped between providers:
-- `gpt-4` → `claude-3-5-sonnet-20241022` (OpenAI → Anthropic)
-- `gpt-3.5-turbo` → `claude-3-haiku-20240307` (OpenAI → Anthropic)
+- `gpt-4` → `claude-opus-5` (OpenAI → Anthropic)
+- `gpt-3.5-turbo` → `claude-haiku-4-5-20251001` (OpenAI → Anthropic)
 
 To use specific models, check the [Backend Adapters](/packages/backend) documentation.
 

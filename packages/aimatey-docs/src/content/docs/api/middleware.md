@@ -573,7 +573,7 @@ const validation = createValidationMiddleware({
   validateIRFormat: true,
   maxMessages: 50,
   maxMessageLength: 10_000,
-  allowedModels: ['gpt-4', 'gpt-4o'],
+  allowedModels: ['gpt-6-astra', 'gpt-5.6-sol'],
   allowedRoles: ['system', 'user', 'assistant'],
   temperatureRange: [0, 2],
   detectPII: true,
