@@ -149,7 +149,7 @@ Execute a request using the IR format directly (bypassing the frontend adapter).
 const irResponse = await bridge.executeIR({
   messages: [{ role: 'user', content: 'Hello' }],
   parameters: {
-    model: 'claude-3-5-sonnet-20241022',
+    model: 'claude-haiku-4-5-20251001',
     temperature: 0.7
   },
   metadata: {
@@ -180,7 +180,7 @@ it returns the stream synchronously, so the call itself is not awaited.
 ```typescript
 const stream = bridge.executeIRStream({
   messages: [{ role: 'user', content: 'Hello' }],
-  parameters: { model: 'claude-3-5-sonnet-20241022' },
+  parameters: { model: 'claude-haiku-4-5-20251001' },
   metadata: { requestId: 'req_2', timestamp: Date.now() },
   stream: true
 });
