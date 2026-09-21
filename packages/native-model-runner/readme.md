@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-native-model-runner
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-native-model-runner.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-native-model-runner)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-native-model-runner.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-native.model-runner@0.2.1`.
 
 Base class for wrapping **any local model CLI or binary** as an Aimatey backend — llama.cpp's

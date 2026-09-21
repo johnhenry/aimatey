@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-react-stream
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-react-stream.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-react-stream)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-react-stream.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-react.stream@0.2.2`.
 
 React components and utilities for streaming AI responses.

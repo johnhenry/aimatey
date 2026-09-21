@@ -4,16 +4,16 @@ Universal AI Adapter System: a provider-agnostic interface for AI APIs.
 Frontend adapters translate client formats (OpenAI, Anthropic, Gemini, Mistral, Ollama, Chrome AI)
 into a universal Intermediate Representation (IR); the Bridge/Router core applies middleware,
 routing strategies, circuit breaking, and fallback; backend adapters execute the IR against
-24 provider APIs.
+30 provider APIs.
 
 ## Repository layout
 
-- **Monorepo**: npm workspaces (`packages/*`) + Turbo + Changesets. 22 published packages.
+- **Monorepo**: npm workspaces (`packages/*`) + Turbo + Changesets. 23 published packages.
 - Key packages:
   - `packages/aimatey-types` — all type definitions, IR schema (`src/ir.ts`)
   - `packages/aimatey-core` — Bridge, Router, MiddlewareStack
   - `packages/aimatey-errors`, `packages/aimatey-utils` — errors and shared utilities
-  - `packages/backend` (`@johnhenry/aimatey-backend`) — 24 backend provider adapters (subpath exports)
+  - `packages/backend` (`@johnhenry/aimatey-backend`) — 30 backend provider adapters (subpath exports)
   - `packages/frontend` (`@johnhenry/aimatey-frontend`) — 7 frontend request-format adapters
   - `packages/middleware` — 10 middleware types (logging, caching, retry, cost tracking, …)
   - `packages/http.core` + `packages/http` — framework-agnostic HTTP handler + 6 framework adapters

@@ -53,7 +53,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [24, 25]
+        # engines.node >=26.0.0 -- test the floor version directly rather
+        # than a matrix of now-unsupported older majors.
+        node-version: [26]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -74,11 +76,11 @@ jobs:
         run: npm test
 
       - name: Generate coverage report
-        if: matrix.node-version == 24
+        if: matrix.node-version == 26
         run: npm run test:coverage
 
       - name: Upload coverage to Codecov
-        if: matrix.node-version == 24
+        if: matrix.node-version == 26
         uses: codecov/codecov-action@v4
         with:
           file: ./coverage/lcov.info

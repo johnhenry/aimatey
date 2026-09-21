@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-native-apple
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-native-apple.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-native-apple)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-native-apple.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-native.apple@0.2.1`.
 
 Run Aimatey against Apple's on-device Foundation Models (Apple Intelligence) — no API key, no

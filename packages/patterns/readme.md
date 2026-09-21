@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-patterns
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-patterns.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-patterns)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-patterns.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-patterns@0.2.1`.
 
 Production integration patterns for the [aimatey](https://github.com/johnhenry/aimatey)

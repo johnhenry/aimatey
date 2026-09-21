@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-errors
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-errors.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-errors)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-errors.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-errors@0.2.1`.
 
 Error classes and error handling utilities

@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-testing
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-testing.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-testing)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-testing.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-testing@0.2.2`.
 
 Testing utilities, mocks, and fixtures for aimatey

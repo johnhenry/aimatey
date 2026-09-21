@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-http
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-http.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-http)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-http.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-http@0.3.1`.
 
 HTTP framework adapters for Aimatey - Universal AI Adapter System.

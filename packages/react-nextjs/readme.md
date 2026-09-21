@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-react-nextjs
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-react-nextjs.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-react-nextjs)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-react-nextjs.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-react.nextjs@0.2.2`.
 
 Next.js App Router integration for AI chat.

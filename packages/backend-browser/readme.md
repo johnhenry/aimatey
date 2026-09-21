@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-backend-browser
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-backend-browser.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-backend-browser)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-backend-browser.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-backend.browser@0.5.1`.
 
 Browser-compatible backend adapters for Aimatey - Universal AI Adapter System.

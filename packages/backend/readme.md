@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-backend
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-backend.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-backend)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-backend.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-backend@0.9.0`.
 
 Server-side backend provider adapters for Aimatey - Universal AI Adapter System.

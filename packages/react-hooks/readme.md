@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-react-hooks
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-react-hooks.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-react-hooks)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-react-hooks.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-react.hooks@0.2.2`.
 
 Additional specialized React hooks for AI applications.

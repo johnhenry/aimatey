@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-mcp
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-mcp.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-mcp)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-mcp.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-mcp@0.1.0`.
 
 MCP (Model Context Protocol) tool-calling for the [aimatey](https://github.com/johnhenry/aimatey)

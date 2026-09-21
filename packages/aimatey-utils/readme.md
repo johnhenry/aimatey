@@ -1,10 +1,26 @@
 # @johnhenry/aimatey-utils
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-utils.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-utils)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-utils.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-utils@0.5.0`.
 
 Shared utility functions for streaming, validation, and conversions.
 
 Part of the [aimatey](https://github.com/johnhenry/aimatey) monorepo.
+
+## Contents
+
+- [Installation](#installation)
+- [Stream Utilities](#stream-utilities)
+- [Stream Accumulator](#stream-accumulator)
+- [Content Utilities](#content-utilities)
+- [Stream Splitting](#stream-splitting)
+- [Model Registry](#model-registry)
+- [Schema & Validation Utilities](#schema-validation-utilities)
+- [Types](#types)
+- [API Reference](#api-reference)
+- [License](#license)
 
 ## Installation
 

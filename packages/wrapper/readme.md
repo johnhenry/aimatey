@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-wrapper
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-wrapper.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-wrapper)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-wrapper.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-wrapper@0.2.4`.
 
 SDK wrappers and utilities for Aimatey - Universal AI Adapter System.

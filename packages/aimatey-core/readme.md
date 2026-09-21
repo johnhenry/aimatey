@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-core
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-core.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-core)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-core.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-core@0.3.4`.
 
 Core Bridge, Router, and MiddlewareStack implementations

@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-frontend
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-frontend.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-frontend)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-frontend.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-frontend@0.4.1`.
 
 Frontend adapters for Aimatey - Universal AI Adapter System.

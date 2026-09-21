@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-middleware
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-middleware.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-middleware)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-middleware.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-middleware@0.3.1`.
 
 Middleware components for Aimatey - Universal AI Adapter System.

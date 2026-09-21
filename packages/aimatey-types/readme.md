@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-types
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-types.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-types)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-types.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-types@0.5.1`.
 
 TypeScript type definitions for the aimatey ecosystem

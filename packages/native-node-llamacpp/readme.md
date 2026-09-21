@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-native-node-llamacpp
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-native-node-llamacpp.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-native-node-llamacpp)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-native-node-llamacpp.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-native.node-llamacpp@0.2.2`.
 
 Run Aimatey against local GGUF models via [node-llama-cpp](https://github.com/withcatai/node-llama-cpp) —

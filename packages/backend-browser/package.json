@@ -99,7 +99,7 @@
     "directory": "packages/backend-browser"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=26.0.0"
   },
   "browser": "./dist/esm/index.js",
   "peerDependencies": {

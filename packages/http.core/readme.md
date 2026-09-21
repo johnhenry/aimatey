@@ -1,5 +1,8 @@
 # @johnhenry/aimatey-http-core
 
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Faimatey-http-core.svg)](https://www.npmjs.com/package/@johnhenry/aimatey-http-core)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Faimatey-http-core.svg)](LICENSE)
+
 > **Note:** Previously published as `aimatey-http.core@0.3.1`.
 
 Core HTTP utilities shared across integrations
