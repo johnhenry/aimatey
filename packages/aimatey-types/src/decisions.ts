@@ -115,11 +115,14 @@ export interface IRDecisionRequest {
 /**
  * A single typed answer, shaped by which question primitive produced it.
  *
- * `probabilities` is the full distribution over `criteria`
- * (`choice`: per-option; `score`: per-level); `confidence` is the
- * probability mass on the winning answer specifically. Both are omitted
- * for `noul`, where the probability itself *is* the answer — there is no
- * separate "confidence in the yes/no" to report.
+ * `probabilities` is the full distribution over `criteria` (`choice`:
+ * per-option; `score`: per-level); `confidence` is the probability mass on
+ * the winning answer specifically. Both are omitted for `noul`, where the
+ * probability itself *is* the answer -- but `confidence` alone is still a
+ * real, separate quantity there (`max(p, 1-p)`, i.e. distance from 0.5,
+ * not the same number as `value`): Jev's wire format doesn't report it,
+ * Laya's does, so it's optional rather than absent -- a provider that has
+ * it should not have to throw it away to fit this type.
  */
 export type IRDecisionAnswer =
   | {
@@ -140,6 +143,12 @@ export type IRDecisionAnswer =
       readonly type: 'noul';
       /** Calibrated probability that the answer is "yes", in `[0, 1]`. */
       readonly value: number;
+      /**
+       * `max(value, 1 - value)` -- how far the answer sits from a coin
+       * flip, as opposed to `value` itself (which side it landed on).
+       * Optional: not every provider reports it (Jev doesn't; Laya does).
+       */
+      readonly confidence?: number;
     };
 
 /**

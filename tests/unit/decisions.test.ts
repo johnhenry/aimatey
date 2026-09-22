@@ -4,7 +4,8 @@
  * Covers the decision capability guards (supportsDecisions/supportsChat/
  * supportsChatStream), Bridge.decide (middleware chain, unsupported-backend
  * error), the TypeSafe (Jev) backend adapter's request/response mapping and
- * HTTP error handling, and the TypeSafe frontend adapter's translation.
+ * HTTP error handling, the TypeSafe frontend adapter's translation, and the
+ * Laya frontend adapter's translation (no backend yet -- see laya.ts).
  *
  * Mirrors tests/unit/embeddings.test.ts's structure for the sibling
  * capability.
@@ -14,7 +15,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Bridge } from '@johnhenry/aimatey-core';
 import { OpenAIFrontendAdapter } from '@johnhenry/aimatey-frontend';
 import { TypeSafeBackendAdapter } from '@johnhenry/aimatey-backend';
-import { TypeSafeFrontendAdapter } from '@johnhenry/aimatey-frontend';
+import { TypeSafeFrontendAdapter, LayaFrontendAdapter } from '@johnhenry/aimatey-frontend';
 import { GroqBackendAdapter } from '@johnhenry/aimatey-backend';
 import { supportsDecisions, supportsChat, supportsChatStream } from '@johnhenry/aimatey-utils';
 import type {
@@ -302,5 +303,126 @@ describe('TypeSafeFrontendAdapter', () => {
     });
     expect(sdkResponse.answers.urgent).toEqual({ noul: 0.98 });
     expect(sdkResponse.model).toBe('jev-1.13.0');
+  });
+});
+
+// ============================================================================
+// Laya frontend adapter (no backend yet -- see packages/frontend/src/adapters/laya.ts)
+// ============================================================================
+
+describe('LayaFrontendAdapter', () => {
+  it('translates a Router.predict()-shaped call into IR, routing hints into custom', async () => {
+    const adapter = new LayaFrontendAdapter();
+    const ir = await adapter.toIR({
+      state: { message: 'I was charged twice' },
+      questions: { urgent: { type: 'noul', instructions: 'Is this urgent?' } },
+      model: 'multilingual',
+      task: 'customer_service',
+      lang: 'de',
+    });
+
+    expect(ir.state).toEqual({ message: 'I was charged twice' });
+    expect(ir.parameters?.model).toBe('multilingual');
+    expect(ir.parameters?.custom).toEqual({ task: 'customer_service', lang: 'de' });
+    expect(ir.metadata.provenance?.frontend).toBe('laya-frontend');
+  });
+
+  it('omits custom entirely when no routing hints are given', async () => {
+    const adapter = new LayaFrontendAdapter();
+    const ir = await adapter.toIR({
+      state: 'hello',
+      questions: { q: { type: 'noul', instructions: 'x' } },
+    });
+    expect(ir.parameters?.custom).toEqual({});
+  });
+
+  it('reconstructs a choice answer as-is', async () => {
+    const adapter = new LayaFrontendAdapter();
+    const laya = await adapter.fromIR({
+      answers: {
+        department: { type: 'choice', value: 'billing', probabilities: { billing: 0.9, technical: 0.1 }, confidence: 0.9 },
+      },
+      model: 'laya-rl-agent',
+      metadata: { requestId: 'r', timestamp: 0 },
+    });
+
+    expect(laya.answers.department).toEqual({
+      type: 'choice',
+      choice: 'billing',
+      probabilities: { billing: 0.9, technical: 0.1 },
+      confidence: 0.9,
+    });
+    expect(laya.usage).toEqual({ input_tokens: 0, output_tokens: 0 });
+  });
+
+  it('reconstructs a score answer, using the original question to build a real legend', async () => {
+    const adapter = new LayaFrontendAdapter();
+    const originalRequest = {
+      state: 'x',
+      questions: {
+        frustration: {
+          type: 'score' as const,
+          instructions: 'How frustrated?',
+          criteria: ['calm', 'annoyed', 'furious'],
+        },
+      },
+      metadata: { requestId: 'r', timestamp: 0 },
+    };
+    const laya = await adapter.fromIR(
+      {
+        answers: {
+          frustration: { type: 'score', value: 1.2, probabilities: [0.1, 0.3, 0.6], confidence: 0.6 },
+        },
+        model: 'laya-rl-agent',
+        metadata: { requestId: 'r', timestamp: 0 },
+      },
+      originalRequest
+    );
+
+    expect(laya.answers.frustration).toEqual({
+      type: 'score',
+      score: 1.2,
+      legend: { '0': 'calm', '1': 'annoyed', '2': 'furious' },
+      probabilities: { '0': 0.1, '1': 0.3, '2': 0.6 },
+      confidence: 0.6,
+    });
+  });
+
+  it('falls back to numeric-string labels for a score legend without the original request', async () => {
+    const adapter = new LayaFrontendAdapter();
+    const laya = await adapter.fromIR({
+      answers: {
+        frustration: { type: 'score', value: 1.2, probabilities: [0.1, 0.3, 0.6], confidence: 0.6 },
+      },
+      model: 'laya-rl-agent',
+      metadata: { requestId: 'r', timestamp: 0 },
+    });
+
+    expect(laya.answers.frustration).toMatchObject({
+      legend: { '0': '0', '1': '1', '2': '2' },
+      probabilities: { '0': 0.1, '1': 0.3, '2': 0.6 },
+    });
+  });
+
+  it('derives noul confidence when the source backend did not report one (e.g. Jev)', async () => {
+    const adapter = new LayaFrontendAdapter();
+    const laya = await adapter.fromIR({
+      answers: { refund: { type: 'noul', value: 0.98 } }, // no confidence, like Jev's answers
+      model: 'jev-1.13.0',
+      metadata: { requestId: 'r', timestamp: 0 },
+    });
+
+    expect(laya.answers.refund).toEqual({ type: 'noul', noul: 0.98, confidence: 0.98 });
+  });
+
+  it('passes noul confidence through as-is when the source backend already reported one', async () => {
+    const adapter = new LayaFrontendAdapter();
+    const laya = await adapter.fromIR({
+      answers: { refund: { type: 'noul', value: 0.6, confidence: 0.6 } },
+      model: 'laya-rl-agent',
+      metadata: { requestId: 'r', timestamp: 0 },
+    });
+
+    expect(laya.answers.refund).toEqual({ type: 'noul', noul: 0.6, confidence: 0.6 });
   });
 });

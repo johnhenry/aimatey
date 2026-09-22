@@ -29,6 +29,7 @@ Frontend adapters convert provider-specific request formats to the Universal IR 
 - **Chrome AI** - Chrome AI format
 - **Generic** - Passthrough adapter for IR format
 - **TypeSafe (Jev)** - `@typesafe-ai/sdk`-shaped typed-decision calls, translated to the Decision IR (not chat -- see `packages/backend`'s "Typed-Decision Models" section)
+- **Laya** - `Router.predict()`/`Agent.system_one()`-shaped typed-decision calls, translated to the Decision IR. Frontend only for now -- Laya has no hosted API, so there's no backend to pair it with yet (see `laya.ts`'s module comment for what a future `LayaBackendAdapter` needs)
 
 ## Usage
 

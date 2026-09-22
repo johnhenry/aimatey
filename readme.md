@@ -490,6 +490,7 @@ import { OpenAIFrontendAdapter, AnthropicFrontendAdapter } from '@johnhenry/aima
 - Chrome AI format
 - Generic (IR passthrough)
 - TypeSafe (Jev) -- `@typesafe-ai/sdk`-shaped calls, translated to the Decision IR
+- Laya -- `Router.predict()`-shaped calls, translated to the Decision IR (frontend only; no hosted API to pair a backend with yet)
 
 ### HTTP Integrations
 
