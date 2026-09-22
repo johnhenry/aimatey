@@ -4,11 +4,41 @@
 
 # aimatey - Universal AI Adapter System
 
+[![CI](https://github.com/johnhenry/aimatey/actions/workflows/ci.yml/badge.svg)](https://github.com/johnhenry/aimatey/actions/workflows/ci.yml)
+[![license](https://img.shields.io/github/license/johnhenry/aimatey.svg)](LICENSE)
+
+Full documentation: [opensource.johnhenry.me/aimatey](https://opensource.johnhenry.me/aimatey/)
+
 Provider-agnostic interface for AI APIs. Write once, run anywhere.
 
 > **Note:** All packages in this monorepo now publish under the `@johnhenry` npm scope
 > (e.g. `aimatey-core` → `@johnhenry/aimatey-core`), restarting at version `0.0.0`. See each
-> package's readme.md for its prior unscoped name and last published version.
+> package's readme.md for its prior unscoped name and last published version. The root
+> `aimatey-monorepo` package itself is private and not published to npm -- see
+> [Which package do I want?](#which-package-do-i-want) below for the individual published
+> packages, each of which carries its own npm badge on its own readme.
+
+## Which package do I want?
+
+| I want to... | Start with |
+|---|---|
+| Call any provider through one interface | [`aimatey-core`](./packages/aimatey-core) (`@johnhenry/aimatey-core`) -- `Bridge`, `Router`, `MiddlewareStack`; everything else builds on it |
+| Get started with the least setup | [`aimatey`](./packages/aimatey) (`@johnhenry/aimatey`) -- the umbrella package that re-exports the common pieces |
+| Add a specific provider's backend | [`backend`](./packages/backend) (`@johnhenry/aimatey-backend`) -- all 30 server-side provider adapters, or its subpath imports |
+| Run in the browser | [`backend-browser`](./packages/backend-browser) (`@johnhenry/aimatey-backend-browser`) -- the browser-safe adapter subset (Chrome AI, LiteRT-LM, mock/function) |
+| Accept a client's request format (OpenAI/Anthropic/Gemini/...) | [`frontend`](./packages/frontend) (`@johnhenry/aimatey-frontend`) |
+| Add logging, caching, retry, cost tracking, or PII redaction | [`middleware`](./packages/middleware) (`@johnhenry/aimatey-middleware`) -- all 10 middleware types in one package |
+| Route LLM-authored code into a sandbox for tool calling | [`@johnhenry/aimatey-middleware-andbox`](https://github.com/johnhenry/aimatey-middleware-andbox) -- separate repo, not in this monorepo; see [Family](#family) |
+| Serve an OpenAI-compatible HTTP API | [`http`](./packages/http) (`@johnhenry/aimatey-http`) plus [`http.core`](./packages/http.core) -- framework adapters for Express/Fastify/Hono/Koa/Node/Deno |
+| Use it from React | [`react-core`](./packages/react-core) first (`useChat`/`useCompletion`); `react-hooks`, `react-stream`, `react-nextjs` add more |
+| Drop in as an OpenAI/Anthropic SDK replacement | [`wrapper`](./packages/wrapper) (`@johnhenry/aimatey-wrapper`) |
+| Call MCP tools from the agentic tool loop | [`mcp`](./packages/mcp) (`@johnhenry/aimatey-mcp`) |
+| Use a validated production pattern (routing, batching, failover) | [`patterns`](./packages/patterns) (`@johnhenry/aimatey-patterns`) |
+| Run a local model (llama.cpp, Apple MLX) | `native-node-llamacpp` / `native-apple` / `native-model-runner` |
+| Convert between request/response formats from the CLI | [`cli`](./packages/cli) (`@johnhenry/aimatey-cli`, binary `ai-matey`) |
+
+The [`## Package Reference`](#package-reference) tables below group every
+package by category with links to its own readme.
 
 ## Why aimatey?
 
@@ -631,6 +661,143 @@ npm test
 # Run linter
 npm run lint
 ```
+
+## Adding a new backend adapter
+
+The five backend adapters added in this repo's own recent history (Inception
+Labs/Mercury, Moonshot AI/Kimi, SambaNova, GitHub Models, and Alibaba Cloud
+Model Studio/DashScope — see `CHANGELOG.md`) are the real worked examples
+this section walks through; every existing adapter in
+[`packages/backend/src/providers`](./packages/backend/src/providers)
+follows one of the same two shapes.
+
+**Smallest: the provider is OpenAI-compatible.** `GroqBackendAdapter`
+(`packages/backend/src/providers/groq.ts`) is the template — it `extends
+OpenAIBackendAdapter` and overrides only the base URL and, where needed, a
+default-model mapping in the constructor. DashScope (Alibaba Cloud Model
+Studio) shipped the same way: OpenAI-compatible mode means a thin subclass,
+not a new request/response translation layer. The test for which case
+you're in: does the provider's HTTP API already speak the OpenAI chat-
+completions shape? If yes, subclassing `OpenAIBackendAdapter` is the whole
+adapter.
+
+**A genuinely new shape: `AWSBedrockBackendAdapter`**
+(`packages/backend/src/providers/aws-bedrock.ts`). Bedrock's request
+signing (SigV4) and response envelope have nothing in common with the
+OpenAI shape, so this one implements `BackendAdapter` directly rather than
+subclassing anything. Every backend adapter, whichever shape it follows,
+touches the same four places:
+
+1. **`packages/backend/src/providers/<provider>.ts`** — the adapter class
+   itself: a `<Provider>BackendAdapter` implementing (or, for an
+   OpenAI-compatible provider, inheriting) `BackendAdapter<Request,
+   Response>` from `@johnhenry/aimatey-types`, taking an
+   `ApiKeyBackendAdapterConfig` (or the provider-specific config shape, e.g.
+   Bedrock's AWS credentials) in its constructor.
+2. **`packages/backend/src/index.ts`** — one `export * from
+   './providers/<provider>.js';` line, alongside every other adapter.
+3. **`packages/backend/readme.md`** — add the provider to the categorized
+   list (Commercial APIs / Cloud Providers / Fast Inference / Aggregators /
+   Specialized / Local), and to this root readme's own "Included Providers"
+   list if it changes the count.
+4. **The one part that isn't boilerplate: response and streaming
+   translation.** Converting the provider's actual response shape (and, for
+   `executeStream()`, its chunk format) into aimatey's Universal IR is the
+   real work — token usage extraction, tool-call translation, and finish-
+   reason mapping are where providers disagree the most. `estimateTokens()`
+   in `packages/backend/src/shared.ts` is the shared fallback when a
+   provider doesn't return usage data itself; reuse it rather than writing
+   a new estimator per adapter.
+
+**Tests.** Each adapter has its own test file exercising request
+construction, response parsing, and error mapping against fixtures rather
+than live provider calls (live credentials aren't available in CI). A
+browser-safe subset of adapters lives in the separate
+`packages/backend-browser` package — if the new provider has a
+browser-compatible mode (no server-only signing, no secrets that can't be
+scoped to the client), consider whether it belongs there too, following
+`packages/backend-browser`'s own existing adapters as the template rather
+than this section (server-side adapters and browser-side adapters are
+different `BackendAdapter` implementations, not the same class reused).
+
+New **frontend** adapters (accepting a different client request format) and
+new **middleware** types follow the same numbered shape, in
+`packages/frontend/src/` and `packages/middleware/src/` respectively — one
+file per adapter/middleware, one export line, one readme entry, and the
+same "find the one part that isn't boilerplate" question (for a frontend
+adapter: translating the client's request shape into Universal IR; for
+middleware: the `before`/`after` hook logic itself).
+
+## Security model
+
+aimatey's core (`Bridge`, `Router`, `MiddlewareStack`) does not sanitize,
+redact, or inspect message content, and does not add HTTP security headers,
+by default. Every guarantee below is opt-in, through
+`@johnhenry/aimatey-middleware`'s `createSecurityMiddleware()`. Read this
+before assuming a `bridge.use(...)`-free pipeline is protected.
+
+**What aimatey guarantees:**
+
+- **API keys and credentials are passed straight through to the configured
+  backend adapter's own SDK/HTTP client and nowhere else.** `Bridge` and
+  `Router` route IR requests between frontend and backend adapters; neither
+  layer logs, persists, or forwards credentials independently of the
+  backend adapter you constructed with them.
+- **`createSecurityMiddleware()`, once registered, redacts PII from message
+  content before the request reaches the backend by default**
+  (`redactPII: true`) — matches are replaced with `[REDACTED_<TYPE>]` using
+  `DEFAULT_PII_PATTERNS`, tuned for precision on developer text (vendor-
+  prefixed API keys rather than any 32+ character alphanumeric run, so
+  commit hashes/UUIDs/base64 ids survive). A `content-redacted` `IRWarning`
+  is attached to `request.metadata.warnings` whenever redaction fires, so
+  it's observable, not silent.
+- **`sanitizeContent` (on by default when the security middleware is
+  registered) strips null bytes and zero-width characters and normalizes
+  CRLF** — zero-width characters are a standard way to smuggle instructions
+  past a human reviewer, and this closes that specific channel.
+- **The CSP/HSTS/X-Frame-Options response-header policy is computed by a
+  pure function, `buildSecurityHeaders()`**, so it can be unit-tested and
+  wired into `new CoreHTTPHandler({ headers: buildSecurityHeaders() })`
+  without the middleware needing to reach into your HTTP layer itself.
+
+**What is still yours:**
+
+- **None of the above runs unless you call `bridge.use(createSecurityMiddleware(...))`.**
+  A `Bridge` with no middleware registered forwards message content to the
+  backend adapter completely unmodified.
+- **Prompt-injection detection is a regex heuristic, not a guarantee.**
+  `DEFAULT_INJECTION_PATTERNS` catches some phrase patterns (e.g.
+  "disregard all") but not arbitrary rephrasings, and its default action is
+  `promptInjectionAction: 'warn'` (log and let the request through), not
+  `'block'` — a heuristic that throws by default is a bad default for a
+  middleware you register once and forget. Use `'block'`, or tune
+  `injectionPatterns` for your own traffic, once you've measured false
+  positives against real traffic.
+- **PII detection is pattern-based and has known, documented edge cases** —
+  e.g. an unmarked four-segment version string (`1.2.3.4`) reads as an IP
+  address; there is no ML-based or context-aware detection here. Supply
+  your own `piiPatterns` where the defaults' false positives or false
+  negatives matter for your traffic, and watch for the `content-redacted`
+  warning to see when redaction actually fired.
+- **The response-header policy is advisory until you wire it in.** Computing
+  `buildSecurityHeaders()` does not, by itself, cause any header to be sent
+  — CSP/HSTS/X-Frame-Options are meaningless as request headers to a
+  provider API, so this middleware never sends them anywhere; only your own
+  HTTP handler applying the computed policy makes it real.
+
+## Family
+
+aimatey is the middleware host that a sibling package plugs into for
+sandboxed, code-based tool execution.
+
+- **[`@johnhenry/aimatey-middleware-andbox`](https://github.com/johnhenry/aimatey-middleware-andbox)** —
+  a separate repo, not a workspace in this monorepo. It depends on this
+  package's middleware interface shape (an object with a `before`/`after`
+  hook, registered via `bridge.use(...)`) and on
+  [`@johnhenry/andbox`](https://github.com/johnhenry/andbox) for the actual
+  sandboxed execution — see that package's own readme for how the two
+  combine, and its `## Security model` for what the resulting pipeline
+  does and does not guarantee.
 
 ## License
 
