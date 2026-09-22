@@ -9,10 +9,29 @@
 import * as readline from 'node:readline';
 import type { BackendAdapter } from '@johnhenry/aimatey-types';
 import type { IRMessage } from '@johnhenry/aimatey-types';
+import { supportsChat, supportsChatStream } from '@johnhenry/aimatey-utils';
+import { AdapterError, ErrorCode } from '@johnhenry/aimatey-errors';
 import { translateModel, type ModelMapping } from '../../utils/model-translation.js';
 import { colorize, style } from '../../utils/output-formatter.js';
 import { stateManager } from '../../utils/state-manager.js';
 import { isModelRunner } from '../../utils/backend-loader.js';
+
+/**
+ * `execute`/`executeStream` are optional on `BackendAdapter` (a
+ * decision-only backend like Jev/Laya has neither) -- the `ollama run`
+ * command is chat-only, so fail with a clear message up front rather than
+ * mid-response.
+ */
+function requireChatBackend(backend: BackendAdapter): void {
+  if (!supportsChat(backend) || !supportsChatStream(backend)) {
+    throw new AdapterError({
+      code: ErrorCode.UNSUPPORTED_FEATURE,
+      message: `Backend '${backend.metadata.name}' does not support chat -- 'ollama run' requires a chat-capable backend (both execute and executeStream)`,
+      isRetryable: false,
+      provenance: { backend: backend.metadata.name },
+    });
+  }
+}
 
 export interface RunCommandOptions {
   /**
@@ -151,6 +170,7 @@ async function runSinglePrompt(options: {
   noStream?: boolean;
 }): Promise<void> {
   const { backend, model, prompt, system, json, noStream } = options;
+  requireChatBackend(backend);
 
   // Build messages
   const messages: IRMessage[] = [];
@@ -167,7 +187,8 @@ async function runSinglePrompt(options: {
 
     if (noStream || json) {
       // Non-streaming
-      const response = await backend.execute({
+      // Non-null: requireChatBackend() already verified chat support.
+      const response = await backend.execute!({
         messages,
         parameters: { model },
         metadata,
@@ -183,7 +204,8 @@ async function runSinglePrompt(options: {
       }
     } else {
       // Streaming (default for Ollama compatibility)
-      for await (const chunk of backend.executeStream({
+      // Non-null: requireChatBackend() already verified chat support.
+      for await (const chunk of backend.executeStream!({
         messages,
         parameters: { model },
         metadata,
@@ -213,6 +235,7 @@ async function runInteractive(options: {
   noStream?: boolean;
 }): Promise<void> {
   const { backend, model, originalModel, system, noStream } = options;
+  requireChatBackend(backend);
 
   // Conversation history
   const messages: IRMessage[] = [];
@@ -293,7 +316,8 @@ async function runInteractive(options: {
 
       if (noStream) {
         // Non-streaming
-        const response = await backend.execute({
+        // Non-null: requireChatBackend() already verified chat support.
+        const response = await backend.execute!({
           messages,
           parameters: { model },
           metadata,
@@ -306,7 +330,8 @@ async function runInteractive(options: {
         }
       } else {
         // Streaming
-        for await (const chunk of backend.executeStream({
+        // Non-null: requireChatBackend() already verified chat support.
+        for await (const chunk of backend.executeStream!({
           messages,
           parameters: { model },
           metadata,

@@ -30,7 +30,12 @@ import type {
   ParallelDispatchResult,
 } from '@johnhenry/aimatey-types';
 import { AdapterError, ErrorCode, RouterError } from '@johnhenry/aimatey-errors';
-import { createWarning, supportsEmbeddings } from '@johnhenry/aimatey-utils';
+import {
+  createWarning,
+  supportsEmbeddings,
+  supportsChat,
+  supportsChatStream,
+} from '@johnhenry/aimatey-utils';
 import type { IREmbedRequest, IREmbedResponse } from '@johnhenry/aimatey-types';
 import type { TranslationResult } from './model-translation.js';
 import type { AIModel } from '@johnhenry/aimatey-types';
@@ -1539,6 +1544,15 @@ export class Router implements IRouter {
     state.totalRequests++;
     const startTime = Date.now();
 
+    if (!supportsChat(state.adapter)) {
+      throw new AdapterError({
+        code: ErrorCode.UNSUPPORTED_FEATURE,
+        message: `Backend '${state.adapter.metadata.name}' does not support chat`,
+        isRetryable: false,
+        provenance: { backend: state.adapter.metadata.name },
+      });
+    }
+
     try {
       const response = await state.adapter.execute(request, signal);
       await this.recordSuccess(state, request, startTime);
@@ -1680,6 +1694,15 @@ export class Router implements IRouter {
   ): IRChatStream {
     state.totalRequests++;
     const startTime = Date.now();
+
+    if (!supportsChatStream(state.adapter)) {
+      throw new AdapterError({
+        code: ErrorCode.UNSUPPORTED_FEATURE,
+        message: `Backend '${state.adapter.metadata.name}' does not support streaming chat`,
+        isRetryable: false,
+        provenance: { backend: state.adapter.metadata.name },
+      });
+    }
 
     let settled = false;
 

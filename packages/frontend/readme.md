@@ -28,6 +28,7 @@ Frontend adapters convert provider-specific request formats to the Universal IR 
 - **Ollama** - Ollama API format
 - **Chrome AI** - Chrome AI format
 - **Generic** - Passthrough adapter for IR format
+- **TypeSafe (Jev)** - `@typesafe-ai/sdk`-shaped typed-decision calls, translated to the Decision IR (not chat -- see `packages/backend`'s "Typed-Decision Models" section)
 
 ## Usage
 

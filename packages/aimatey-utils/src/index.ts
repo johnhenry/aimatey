@@ -33,6 +33,9 @@ export * from './model-cache.js';
 // Embedding utilities
 export * from './embeddings.js';
 
+// Decision utilities
+export * from './decisions.js';
+
 // Tool-calling helpers
 export * from './tools.js';
 

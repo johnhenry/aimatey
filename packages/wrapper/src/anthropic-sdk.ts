@@ -22,6 +22,8 @@ import {
   type AnthropicStreamEvent,
   type AnthropicContentBlock,
 } from '@johnhenry/aimatey-frontend';
+import { supportsChat, supportsChatStream } from '@johnhenry/aimatey-utils';
+import { AdapterError, ErrorCode } from '@johnhenry/aimatey-errors';
 
 // ============================================================================
 // Re-export types from frontend adapter
@@ -130,6 +132,14 @@ export class Messages {
   private adapter: AnthropicFrontendAdapter;
 
   constructor(backend: BackendAdapter, config: AnthropicSDKConfig = {}) {
+    if (!supportsChat(backend) || !supportsChatStream(backend)) {
+      throw new AdapterError({
+        code: ErrorCode.UNSUPPORTED_FEATURE,
+        message: `Backend '${backend.metadata.name}' does not support chat -- the Anthropic SDK wrapper requires a chat-capable backend (both execute and executeStream)`,
+        isRetryable: false,
+        provenance: { backend: backend.metadata.name },
+      });
+    }
     this.backend = backend;
     this.config = config;
     this.adapter = new AnthropicFrontendAdapter();
@@ -182,8 +192,8 @@ export class Messages {
     // Use frontend adapter to convert to IR
     const irRequest = await this.adapter.toIR(request);
 
-    // Execute via backend
-    const irResponse = await this.backend.execute(irRequest);
+    // Execute via backend (non-null: constructor verified chat support)
+    const irResponse = await this.backend.execute!(irRequest);
 
     // Use frontend adapter to convert back to Anthropic format
     const anthropicResponse = await this.adapter.fromIR(irResponse);
@@ -227,8 +237,8 @@ export class Messages {
       irRequest = { ...irRequest, streamMode: this.config.streamMode };
     }
 
-    // Execute streaming via backend
-    const irStream = this.backend.executeStream(irRequest);
+    // Execute streaming via backend (non-null: constructor verified chat support)
+    const irStream = this.backend.executeStream!(irRequest);
 
     // Use frontend adapter to convert stream
     for await (const event of this.adapter.fromIRStream(irStream)) {

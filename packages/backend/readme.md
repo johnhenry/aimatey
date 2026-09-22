@@ -17,7 +17,7 @@ npm install @johnhenry/aimatey-backend
 
 ## Included Providers
 
-This package includes adapters for **30 AI providers**:
+This package includes adapters for **30 chat providers**, plus 1 typed-decision provider:
 
 ### Commercial APIs
 - **OpenAI** - GPT-5.6 family
@@ -60,6 +60,17 @@ This package includes adapters for **30 AI providers**:
 - **Ollama** - Local model hosting
 - **LM Studio** - Local desktop inference
 - **OmniRoute** - Self-hosted gateway fronting 290+ providers (90+ free), no API key required by default
+
+### Typed-Decision Models
+
+Not chat: given a state and typed questions (`choice`/`score`/`noul`), these
+answer with calibrated probabilities in a single forward pass -- see
+`decide()` on `BackendAdapter` and `Bridge.decide()`, not `execute()`/
+`chat()`. A backend in this category implements only `metadata` and
+`decide()`; `fromIR`/`toIR`/`execute`/`executeStream` are all optional
+precisely so it isn't forced to fake a chat capability it doesn't have.
+
+- **TypeSafe (Jev)** - "System One" typed decisions, 70-500ms latency, input-token-only pricing
 
 For browser-compatible adapters (Chrome AI, Function, Mock), see [`@johnhenry/aimatey-backend-browser`](../backend-browser).
 

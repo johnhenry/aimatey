@@ -16,6 +16,8 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import type { BackendAdapter } from '@johnhenry/aimatey-types';
 import type { IRChatRequest } from '@johnhenry/aimatey-types';
+import { supportsChat, supportsChatStream } from '@johnhenry/aimatey-utils';
+import { AdapterError, ErrorCode } from '@johnhenry/aimatey-errors';
 import { loadBackend } from './utils/backend-loader.js';
 import { success, error as errorLog, info } from './utils/output-formatter.js';
 import {
@@ -181,6 +183,15 @@ export function providerRequestToIR(data: any, format: string): IRChatRequest {
  * Create request handler for the proxy server.
  */
 export function createHandler(backend: BackendAdapter, format: string, verbose: boolean) {
+  if (!supportsChat(backend) || !supportsChatStream(backend)) {
+    throw new AdapterError({
+      code: ErrorCode.UNSUPPORTED_FEATURE,
+      message: `Backend '${backend.metadata.name}' does not support chat -- the proxy server requires a chat-capable backend (both execute and executeStream)`,
+      isRetryable: false,
+      provenance: { backend: backend.metadata.name },
+    });
+  }
+
   return async (req: IncomingMessage, res: ServerResponse) => {
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -221,7 +232,7 @@ export function createHandler(backend: BackendAdapter, format: string, verbose: 
           Connection: 'keep-alive',
         });
 
-        // Execute streaming request
+        // Execute streaming request (non-null: createHandler verified chat support)
         const stream = backend.executeStream(irRequest);
 
         for await (const chunk of stream) {
@@ -267,7 +278,7 @@ export function createHandler(backend: BackendAdapter, format: string, verbose: 
           }
         }
       } else {
-        // Handle non-streaming
+        // Handle non-streaming (non-null: createHandler verified chat support)
         const irResponse = await backend.execute(irRequest);
 
         // Convert response back to provider format

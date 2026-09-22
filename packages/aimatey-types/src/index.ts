@@ -18,6 +18,7 @@ export * from './adapters.js';
 // Model types
 export * from './models.js';
 export * from './embeddings.js';
+export * from './decisions.js';
 export * from './tools.js';
 
 // Error types (type definitions only, implementations in errors/)

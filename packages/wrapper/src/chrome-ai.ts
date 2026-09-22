@@ -12,6 +12,8 @@ import type {
   IRMessage,
   StreamMode,
 } from '@johnhenry/aimatey-types';
+import { supportsChat, supportsChatStream } from '@johnhenry/aimatey-utils';
+import { AdapterError, ErrorCode } from '@johnhenry/aimatey-errors';
 
 // ============================================================================
 // Types
@@ -55,6 +57,14 @@ class ChromeAISessionImpl implements ChromeAISession {
   private destroyed = false;
 
   constructor(backend: BackendAdapter, options: ChromeAICreateOptions) {
+    if (!supportsChat(backend) || !supportsChatStream(backend)) {
+      throw new AdapterError({
+        code: ErrorCode.UNSUPPORTED_FEATURE,
+        message: `Backend '${backend.metadata.name}' does not support chat -- the Chrome AI wrapper requires a chat-capable backend (both execute and executeStream)`,
+        isRetryable: false,
+        provenance: { backend: backend.metadata.name },
+      });
+    }
     this.backend = backend;
     this.options = options;
     this.conversationHistory =
@@ -89,7 +99,8 @@ class ChromeAISessionImpl implements ChromeAISession {
       },
     };
 
-    const response = await this.backend.execute(request);
+    // Non-null: constructor verified chat support.
+    const response = await this.backend.execute!(request);
     this.conversationHistory.push(response.message);
 
     return typeof response.message.content === 'string'
@@ -132,7 +143,8 @@ class ChromeAISessionImpl implements ChromeAISession {
     return new ReadableStream<string>({
       async start(controller) {
         try {
-          const stream = backend.executeStream(request);
+          // Non-null: constructor verified chat support.
+          const stream = backend.executeStream!(request);
 
           for await (const chunk of stream) {
             if (chunk.type === 'content') {

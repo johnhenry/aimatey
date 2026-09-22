@@ -623,6 +623,19 @@ export interface IRCapabilities {
   readonly supportsEmbeddingDimensions?: boolean;
 
   /**
+   * Whether the backend can answer typed-decision requests (implements
+   * `decide()`) — see `decisions.ts`. A "System One" model (Jev, Laya),
+   * not a chat model; a backend can support this without supporting
+   * chat at all.
+   */
+  readonly decisions?: boolean;
+
+  /**
+   * Decision model ids offered by the backend.
+   */
+  readonly decisionModels?: readonly string[];
+
+  /**
    * Maximum context window size (tokens).
    */
   readonly maxContextTokens?: number;

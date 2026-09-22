@@ -56,12 +56,21 @@ import {
   chunkEmbedInputs,
   normalizeDimensions,
   createWarning,
+  supportsChat,
+  supportsChatStream,
+  supportsDecisions,
 } from '@johnhenry/aimatey-utils';
 import type {
   EmbedMiddleware,
   EmbedOptions,
   IREmbedRequest,
   IREmbedResponse,
+} from '@johnhenry/aimatey-types';
+import type {
+  DecisionMiddleware,
+  DecisionOptions,
+  IRDecisionRequest,
+  IRDecisionResponse,
 } from '@johnhenry/aimatey-types';
 
 // ============================================================================
@@ -81,6 +90,7 @@ export class Bridge<
   readonly config: BridgeConfig;
   private middlewareStack: MiddlewareStack;
   private embedMiddleware: EmbedMiddleware[] = [];
+  private decisionMiddleware: DecisionMiddleware[] = [];
 
   // Statistics tracking
   private _totalRequests = 0;
@@ -151,6 +161,19 @@ export class Bridge<
 
       // Step 2: Ensure metadata has requestId and timestamp
       enrichedRequest = this.enrichRequest(irRequest, options);
+
+      // Step 2.5: A backend without execute() (e.g. a decision-only backend
+      // like Jev/Laya) cannot serve a chat request at all -- fail before
+      // entering the retry loop rather than retrying something that can
+      // never succeed.
+      if (!supportsChat(this.backend)) {
+        throw new AdapterError({
+          code: ErrorCode.UNSUPPORTED_FEATURE,
+          message: `Backend '${this.backend.metadata.name}' does not support chat`,
+          isRetryable: false,
+          provenance: { backend: this.backend.metadata.name },
+        });
+      }
     } catch (error) {
       this.recordPreflightFailure(error, startTime, BridgeEventType.REQUEST_ERROR, irRequest);
       throw error;
@@ -188,7 +211,10 @@ export class Bridge<
         // history prepending - actually reach the backend.
         const irResponse = await this.middlewareStack.execute(context, async () => {
           // Call backend adapter
-          const response = await this.backend.execute(context.request, options?.signal);
+          // Non-null: chat() and executeIR() both check `backend.execute` exists
+          // before reaching this closure -- TS narrowing doesn't survive the
+          // closure boundary, so this asserts what the earlier guard verified.
+          const response = await this.backend.execute!(context.request, options?.signal);
           this.narrowContextBackend(context, response.metadata.provenance?.backend);
           return response;
         });
@@ -315,6 +341,17 @@ export class Bridge<
 
       // Step 3: Ensure metadata has requestId and timestamp
       enrichedRequest = this.enrichRequest(streamingRequest, options);
+
+      // Step 3.5: A backend without executeStream() (e.g. a decision-only
+      // backend like Jev/Laya) cannot serve a streaming chat request.
+      if (!supportsChatStream(this.backend)) {
+        throw new AdapterError({
+          code: ErrorCode.UNSUPPORTED_FEATURE,
+          message: `Backend '${this.backend.metadata.name}' does not support streaming chat`,
+          isRetryable: false,
+          provenance: { backend: this.backend.metadata.name },
+        });
+      }
     } catch (error) {
       this.recordPreflightFailure(error, startTime, BridgeEventType.STREAM_ERROR, irRequest);
       throw error;
@@ -349,7 +386,9 @@ export class Bridge<
         // Call backend adapter streaming
         Promise.resolve(
           this.trackContextBackend(
-            this.backend.executeStream(context.request, options?.signal),
+            // Non-null: chatStream() and executeIRStream() both check
+            // `backend.executeStream` exists before reaching this point.
+            this.backend.executeStream!(context.request, options?.signal),
             context
           )
         )
@@ -813,6 +852,15 @@ export class Bridge<
    * reports as the one request the caller made rather than one per turn.
    */
   async executeIR(request: IRChatRequest, options?: RequestOptions): Promise<IRChatResponse> {
+    if (!supportsChat(this.backend)) {
+      throw new AdapterError({
+        code: ErrorCode.UNSUPPORTED_FEATURE,
+        message: `Backend '${this.backend.metadata.name}' does not support chat`,
+        isRetryable: false,
+        provenance: { backend: this.backend.metadata.name },
+      });
+    }
+
     const enrichedRequest = this.enrichRequest(request, options);
 
     validateIRChatRequest(enrichedRequest, {
@@ -827,7 +875,10 @@ export class Bridge<
     );
 
     const irResponse = await this.middlewareStack.execute(context, async () => {
-      const response = await this.backend.execute(context.request, options?.signal);
+      // Non-null: chat() and executeIR() both check `backend.execute` exists
+      // before reaching this closure -- TS narrowing doesn't survive the
+      // closure boundary, so this asserts what the earlier guard verified.
+      const response = await this.backend.execute!(context.request, options?.signal);
       this.narrowContextBackend(context, response.metadata.provenance?.backend);
       return response;
     });
@@ -848,6 +899,15 @@ export class Bridge<
    * Like {@link executeIR}, it stays outside bridge statistics and the event stream.
    */
   async *executeIRStream(request: IRChatRequest, options?: RequestOptions): IRChatStream {
+    if (!supportsChatStream(this.backend)) {
+      throw new AdapterError({
+        code: ErrorCode.UNSUPPORTED_FEATURE,
+        message: `Backend '${this.backend.metadata.name}' does not support streaming chat`,
+        isRetryable: false,
+        provenance: { backend: this.backend.metadata.name },
+      });
+    }
+
     const streamingRequest: IRChatRequest = { ...request, stream: true };
     const enrichedRequest = this.enrichRequest(streamingRequest, options);
 
@@ -865,7 +925,8 @@ export class Bridge<
     const irStream = await this.middlewareStack.executeStream(context, () =>
       Promise.resolve(
         this.trackContextBackend(
-          this.backend.executeStream(context.request, options?.signal),
+          // Non-null: the guard above already verified this exists.
+          this.backend.executeStream!(context.request, options?.signal),
           context
         )
       )
@@ -1049,6 +1110,76 @@ export class Bridge<
     }
 
     return response;
+  }
+
+  // ==========================================================================
+  // Decisions
+  // ==========================================================================
+
+  /**
+   * Register decision middleware (runs outermost-first).
+   */
+  useDecision(middleware: DecisionMiddleware): this {
+    this.decisionMiddleware.push(middleware);
+    return this;
+  }
+
+  /**
+   * Answer typed questions about a state in a single call.
+   *
+   * Builds the IR request directly — like `embed()`, no frontend adapter
+   * is involved, since a decision request has no chat-shaped equivalent
+   * to translate from. Unlike `embed()`, the backend need not support
+   * chat at all: `decide()` only requires `capabilities.decisions` and a
+   * `decide()` method.
+   *
+   * @throws AdapterError UNSUPPORTED_FEATURE when the backend lacks decide()
+   */
+  async decide(
+    state: unknown,
+    questions: IRDecisionRequest['questions'],
+    options: DecisionOptions = {}
+  ): Promise<IRDecisionResponse> {
+    const backend = this.backend;
+    if (!supportsDecisions(backend)) {
+      throw new AdapterError({
+        code: ErrorCode.UNSUPPORTED_FEATURE,
+        message: `Backend '${backend.metadata.name}' does not support typed decisions`,
+        isRetryable: false,
+        provenance: { backend: backend.metadata.name },
+      });
+    }
+
+    const request: IRDecisionRequest = {
+      state,
+      questions,
+      parameters: {
+        model: options.model,
+        custom: options.custom,
+      },
+      metadata: {
+        requestId: this.generateRequestId(),
+        timestamp: Date.now(),
+        provenance: { frontend: this.frontend.metadata.name },
+        principal: options.principal,
+        custom: options.metadata,
+      },
+    };
+
+    const execute = (finalRequest: IRDecisionRequest): Promise<IRDecisionResponse> =>
+      backend.decide(finalRequest, options.signal).then((response) => ({
+        ...response,
+        metadata: {
+          ...response.metadata,
+          provenance: { ...response.metadata.provenance, backend: backend.metadata.name },
+        },
+      }));
+
+    const chain = this.decisionMiddleware.reduceRight<
+      (request: IRDecisionRequest) => Promise<IRDecisionResponse>
+    >((next, middleware) => (req) => middleware(req, next), execute);
+
+    return chain(request);
   }
 
   // ==========================================================================

@@ -243,7 +243,7 @@ export interface ModelRegistryEntry {
   readonly family: string;
 
   /** What the model does. Defaults to 'chat'. */
-  readonly kind?: 'chat' | 'embedding';
+  readonly kind?: 'chat' | 'embedding' | 'decision';
 
   /** Alternate identifiers that resolve to this entry (e.g. 'claude-sonnet-4-5'). */
   readonly aliases?: readonly string[];

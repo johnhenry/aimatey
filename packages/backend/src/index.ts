@@ -45,6 +45,7 @@ export * from './providers/sambanova.js';
 export * from './providers/github-models.js';
 export * from './providers/dashscope.js';
 export * from './providers/omniroute.js';
+export * from './providers/typesafe.js';
 
 // Note: The following adapters have been moved to aimatey-backend.browser:
 // - chrome-ai (Chrome's built-in AI)

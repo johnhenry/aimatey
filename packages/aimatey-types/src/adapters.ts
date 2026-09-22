@@ -14,6 +14,7 @@
 
 import type { IRChatRequest, IRChatResponse, IRChatStream, IRCapabilities } from './ir.js';
 import type { IREmbedRequest, IREmbedResponse } from './embeddings.js';
+import type { IRDecisionRequest, IRDecisionResponse } from './decisions.js';
 import type { AIModel, ListModelsOptions, ListModelsResult } from './models.js';
 import type { StreamingConfig, StreamConversionOptions } from './streaming.js';
 
@@ -309,7 +310,14 @@ export interface BackendAdapter<TRequest = unknown, TResponse = unknown> {
   readonly metadata: AdapterMetadata;
 
   /**
-   * Convert universal IR request to provider-specific format.
+   * Convert universal IR request to provider-specific format (optional).
+   *
+   * Optional because chat is one capability among several a backend can
+   * offer (see `embed?`/`decide?` below) — a decision-only backend (Jev,
+   * Laya) has no chat request to convert and legitimately omits this
+   * rather than faking one. Present whenever `execute`/`executeStream`
+   * are; advertise chat support via `capabilities` fields such as
+   * `maxContextTokens`/`systemMessageStrategy` being meaningful.
    *
    * Useful for:
    * - Debugging: Inspect what will be sent to the provider
@@ -321,10 +329,11 @@ export interface BackendAdapter<TRequest = unknown, TResponse = unknown> {
    * @throws {ValidationError} If request is invalid for this provider
    * @throws {AdapterConversionError} If conversion fails
    */
-  fromIR(request: IRChatRequest): TRequest;
+  fromIR?(request: IRChatRequest): TRequest;
 
   /**
-   * Convert provider-specific response to universal IR.
+   * Convert provider-specific response to universal IR (optional — see
+   * {@link BackendAdapter.fromIR} for why).
    *
    * Useful for:
    * - Testing: Convert mock provider responses to IR
@@ -337,10 +346,16 @@ export interface BackendAdapter<TRequest = unknown, TResponse = unknown> {
    * @returns Universal IR response
    * @throws {AdapterConversionError} If conversion fails
    */
-  toIR(response: TResponse, originalRequest: IRChatRequest, latencyMs: number): IRChatResponse;
+  toIR?(response: TResponse, originalRequest: IRChatRequest, latencyMs: number): IRChatResponse;
 
   /**
-   * Execute non-streaming chat completion request.
+   * Execute non-streaming chat completion request (optional).
+   *
+   * Optional for the same reason as {@link BackendAdapter.fromIR}: chat is
+   * not the only capability a backend can implement. `Bridge.chat()`
+   * checks for this before calling it and throws `UNSUPPORTED_FEATURE`
+   * (the same pattern `Bridge.embed()`/`Bridge.decide()` already use) if a
+   * backend that lacks it is used for a chat request.
    *
    * @param request Universal IR request
    * @param signal Optional AbortSignal for cancellation
@@ -351,10 +366,11 @@ export interface BackendAdapter<TRequest = unknown, TResponse = unknown> {
    * @throws {NetworkError} If network request fails
    * @throws {AdapterConversionError} If response parsing fails
    */
-  execute(request: IRChatRequest, signal?: AbortSignal): Promise<IRChatResponse>;
+  execute?(request: IRChatRequest, signal?: AbortSignal): Promise<IRChatResponse>;
 
   /**
-   * Execute streaming chat completion request.
+   * Execute streaming chat completion request (optional — see
+   * {@link BackendAdapter.execute} for why).
    *
    * @param request Universal IR request
    * @param signal Optional AbortSignal for cancellation
@@ -365,7 +381,7 @@ export interface BackendAdapter<TRequest = unknown, TResponse = unknown> {
    * @throws {NetworkError} If network request fails
    * @throws {StreamError} If stream parsing or processing fails
    */
-  executeStream(request: IRChatRequest, signal?: AbortSignal): IRChatStream;
+  executeStream?(request: IRChatRequest, signal?: AbortSignal): IRChatStream;
 
   /**
    * Optional: Health check to verify backend is available.
@@ -410,6 +426,22 @@ export interface BackendAdapter<TRequest = unknown, TResponse = unknown> {
    * Estimate the cost of an embedding request in USD (optional).
    */
   estimateEmbedCost?(request: IREmbedRequest): Promise<number | null>;
+
+  /**
+   * Answer a typed-decision request (optional capability).
+   *
+   * Present when the provider offers a "System One" typed-decision API
+   * (Jev, Laya); advertise it via `capabilities.decisions`. Unlike
+   * `embed?`, a backend can implement this with **no** chat support at
+   * all — `fromIR`/`toIR`/`execute`/`executeStream` are all optional
+   * precisely so a decision-only backend isn't forced to fake them.
+   */
+  decide?(request: IRDecisionRequest, signal?: AbortSignal): Promise<IRDecisionResponse>;
+
+  /**
+   * Estimate the cost of a decision request in USD (optional).
+   */
+  estimateDecisionCost?(request: IRDecisionRequest): Promise<number | null>;
 }
 
 // ============================================================================

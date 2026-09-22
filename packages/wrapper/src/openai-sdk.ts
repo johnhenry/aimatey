@@ -21,6 +21,8 @@ import {
   type OpenAIRequest,
   type OpenAIMessage,
 } from '@johnhenry/aimatey-frontend';
+import { supportsChat, supportsChatStream } from '@johnhenry/aimatey-utils';
+import { AdapterError, ErrorCode } from '@johnhenry/aimatey-errors';
 
 // ============================================================================
 // Re-export types from frontend adapter
@@ -154,6 +156,14 @@ export class ChatCompletions {
   private adapter: OpenAIFrontendAdapter;
 
   constructor(backend: BackendAdapter, config: OpenAISDKConfig = {}) {
+    if (!supportsChat(backend) || !supportsChatStream(backend)) {
+      throw new AdapterError({
+        code: ErrorCode.UNSUPPORTED_FEATURE,
+        message: `Backend '${backend.metadata.name}' does not support chat -- the OpenAI SDK wrapper requires a chat-capable backend (both execute and executeStream)`,
+        isRetryable: false,
+        provenance: { backend: backend.metadata.name },
+      });
+    }
     this.backend = backend;
     this.config = config;
     this.adapter = new OpenAIFrontendAdapter();
@@ -205,7 +215,8 @@ export class ChatCompletions {
     const irRequest = await this.adapter.toIR(request);
 
     // Execute via backend
-    const irResponse = await this.backend.execute(irRequest);
+    // Non-null: constructor verified chat support.
+    const irResponse = await this.backend.execute!(irRequest);
 
     // Use frontend adapter to convert back to OpenAI format
     const openaiResponse = await this.adapter.fromIR(irResponse);
@@ -256,7 +267,8 @@ export class ChatCompletions {
     }
 
     // Execute streaming via backend
-    const irStream = this.backend.executeStream(irRequest);
+    // Non-null: constructor verified chat support.
+    const irStream = this.backend.executeStream!(irRequest);
 
     // Use frontend adapter to convert stream
     for await (const chunk of this.adapter.fromIRStream(irStream)) {

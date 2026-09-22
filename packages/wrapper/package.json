@@ -99,7 +99,8 @@
   "dependencies": {
     "@johnhenry/aimatey-types": "^0.5.0",
     "@johnhenry/aimatey-utils": "^0.4.0",
-    "@johnhenry/aimatey-frontend": "^0.2.1"
+    "@johnhenry/aimatey-frontend": "^0.2.1",
+    "@johnhenry/aimatey-errors": "^0.2.2"
   },
   "devDependencies": {
     "@johnhenry/aimatey-testing": "^0.1.4",

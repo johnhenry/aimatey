@@ -460,6 +460,9 @@ import { OpenAIBackendAdapter } from '@johnhenry/aimatey-backend/openai';
 - Alibaba Cloud Model Studio / DashScope (Qwen)
 - OmniRoute (self-hosted gateway, 290+ providers, no API key required by default)
 
+**Typed-decision (not chat) provider:**
+- TypeSafe (Jev) -- typed `choice`/`score`/`noul` questions over a state, answered with calibrated probabilities via `Bridge.decide()`, not `chat()`
+
 **Browser-Compatible Package:** [`@johnhenry/aimatey-backend-browser`](./packages/backend-browser)
 
 Subset of adapters that work in browser environments:
@@ -486,6 +489,7 @@ import { OpenAIFrontendAdapter, AnthropicFrontendAdapter } from '@johnhenry/aima
 - Ollama format
 - Chrome AI format
 - Generic (IR passthrough)
+- TypeSafe (Jev) -- `@typesafe-ai/sdk`-shaped calls, translated to the Decision IR
 
 ### HTTP Integrations
 

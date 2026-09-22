@@ -9,8 +9,9 @@
  * @module
  */
 
-import { AdapterError } from '@johnhenry/aimatey-errors';
+import { AdapterError, ErrorCode } from '@johnhenry/aimatey-errors';
 import type { BackendAdapter, Middleware } from '@johnhenry/aimatey-types';
+import { supportsChat } from '@johnhenry/aimatey-utils';
 
 /**
  * Configuration for the failover middleware.
@@ -58,6 +59,18 @@ export function createFailoverMiddleware(config: FailoverConfig): Middleware {
       for (const fallback of config.fallbacks) {
         config.onFailover?.({ to: fallback.metadata.name, error: lastError });
         try {
+          // A fallback that can't do chat at all (e.g. a decision-only
+          // backend like Jev/Laya misconfigured into a chat fallback
+          // chain) is treated the same as any other failed hop -- move to
+          // the next fallback rather than crash the whole chain.
+          if (!supportsChat(fallback)) {
+            throw new AdapterError({
+              code: ErrorCode.UNSUPPORTED_FEATURE,
+              message: `Fallback backend '${fallback.metadata.name}' does not support chat`,
+              isRetryable: true,
+              provenance: { backend: fallback.metadata.name },
+            });
+          }
           return await fallback.execute(context.request, context.signal);
         } catch (fallbackError) {
           lastError =

@@ -7,7 +7,8 @@
  */
 
 import type { BackendAdapter, IRChatRequest, IRMessage } from '@johnhenry/aimatey-types';
-import { trimHistory } from '@johnhenry/aimatey-utils';
+import { trimHistory, supportsChat, supportsChatStream } from '@johnhenry/aimatey-utils';
+import { AdapterError, ErrorCode } from '@johnhenry/aimatey-errors';
 
 // ============================================================================
 // Types
@@ -59,6 +60,14 @@ class LegacyChromeAISessionImpl implements LegacyChromeAISession {
   private _tokensSoFar = 0;
 
   constructor(backend: BackendAdapter, options: LegacyChromeAICreateOptions) {
+    if (!supportsChat(backend) || !supportsChatStream(backend)) {
+      throw new AdapterError({
+        code: ErrorCode.UNSUPPORTED_FEATURE,
+        message: `Backend '${backend.metadata.name}' does not support chat -- the Chrome AI (legacy) wrapper requires a chat-capable backend (both execute and executeStream)`,
+        isRetryable: false,
+        provenance: { backend: backend.metadata.name },
+      });
+    }
     this.backend = backend;
     this.options = options;
     this.conversationHistory =
@@ -102,7 +111,8 @@ class LegacyChromeAISessionImpl implements LegacyChromeAISession {
       },
     };
 
-    const response = await this.backend.execute(request);
+    // Non-null: constructor verified chat support.
+    const response = await this.backend.execute!(request);
     this.conversationHistory.push(response.message);
 
     if (this.options.maxHistorySize !== undefined && this.options.maxHistorySize !== -1) {
@@ -155,7 +165,8 @@ class LegacyChromeAISessionImpl implements LegacyChromeAISession {
 
     let fullContent = '';
 
-    const stream = this.backend.executeStream(request);
+    // Non-null: constructor verified chat support.
+    const stream = this.backend.executeStream!(request);
 
     for await (const chunk of stream) {
       if (chunk.type === 'content') {

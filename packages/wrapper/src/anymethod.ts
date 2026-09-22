@@ -7,7 +7,8 @@
  */
 
 import type { BackendAdapter, IRChatRequest, IRMessage } from '@johnhenry/aimatey-types';
-import { trimHistory } from '@johnhenry/aimatey-utils';
+import { trimHistory, supportsChat, supportsChatStream } from '@johnhenry/aimatey-utils';
+import { AdapterError, ErrorCode } from '@johnhenry/aimatey-errors';
 
 // ============================================================================
 // Types
@@ -70,6 +71,15 @@ export function formatMethodPrompt(methodName: string, args: unknown[]): string 
 // ============================================================================
 
 export function createAnymethod(backend: BackendAdapter, config: AnymethodConfig = {}): Anymethod {
+  if (!supportsChat(backend) || !supportsChatStream(backend)) {
+    throw new AdapterError({
+      code: ErrorCode.UNSUPPORTED_FEATURE,
+      message: `Backend '${backend.metadata.name}' does not support chat -- anymethod requires a chat-capable backend (both execute and executeStream)`,
+      isRetryable: false,
+      provenance: { backend: backend.metadata.name },
+    });
+  }
+
   const {
     model,
     temperature,
@@ -103,7 +113,8 @@ export function createAnymethod(backend: BackendAdapter, config: AnymethodConfig
       },
     };
 
-    const response = await backend.execute(request);
+    // Non-null: createAnymethod's guard verified chat support.
+    const response = await backend.execute!(request);
     conversationHistory.push(response.message);
 
     if (maxHistorySize !== undefined && maxHistorySize !== -1) {
@@ -143,7 +154,8 @@ export function createAnymethod(backend: BackendAdapter, config: AnymethodConfig
 
     let fullContent = '';
 
-    const stream = backend.executeStream(request);
+    // Non-null: createAnymethod's guard verified chat support.
+    const stream = backend.executeStream!(request);
 
     for await (const chunk of stream) {
       if (chunk.type === 'content') {
