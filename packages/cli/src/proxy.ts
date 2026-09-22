@@ -60,7 +60,7 @@ async function readBody(req: IncomingMessage): Promise<any> {
 /**
  * Convert provider request to IR.
  */
-function providerRequestToIR(data: any, format: string): IRChatRequest {
+export function providerRequestToIR(data: any, format: string): IRChatRequest {
   switch (format) {
     case 'openai':
       return {
@@ -180,7 +180,7 @@ function providerRequestToIR(data: any, format: string): IRChatRequest {
 /**
  * Create request handler for the proxy server.
  */
-function createHandler(backend: BackendAdapter, format: string, verbose: boolean) {
+export function createHandler(backend: BackendAdapter, format: string, verbose: boolean) {
   return async (req: IncomingMessage, res: ServerResponse) => {
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
