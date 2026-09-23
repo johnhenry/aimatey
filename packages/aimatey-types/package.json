@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-types",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Type definitions for Aimatey - Universal AI Adapter System",
   "type": "module",
   "main": "./dist/cjs/index.js",

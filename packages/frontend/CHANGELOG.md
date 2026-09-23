@@ -1,5 +1,39 @@
 # @johnhenry/aimatey-frontend
 
+## 0.3.0
+
+### Minor Changes
+
+- 7cc27f9: Add `LayaFrontendAdapter`, translating `Router.predict()`/`Agent.system_one()`-shaped calls (ConvAI's Laya, a self-hosted typed-decision model) into the Decision IR.
+
+  Frontend only, deliberately: Laya has no hosted API today -- confirmed, not assumed (no web-framework dependency in its `pyproject.toml`, and its only running instance is a quota-limited `ZeroGPU` demo Space, not something to build a production backend against). `LayaBackendAdapter` needs a new, separately-hosted Python wrapper service that doesn't exist yet; see `laya.ts`'s module comment for the exact contract that service should expose so the eventual backend adapter can be as thin as `TypeSafeBackendAdapter` is today.
+
+  Along the way: `IRDecisionAnswer`'s `noul` variant gained an optional `confidence` field. Laya reports one (`max(p, 1-p)`); Jev's wire format doesn't -- it's optional rather than absent so a provider that has it isn't forced to throw it away, and `LayaFrontendAdapter` derives it when the upstream response doesn't supply one.
+
+- 22dc8ca: Add a typed-decision capability, sibling to chat and embeddings, plus a backend/frontend adapter pair for TypeSafe's Jev.
+
+  A typed-decision request ("System One" models: TypeSafe's Jev, ConvAI's Laya) sends a state and a set of typed questions (`choice`/`score`/`noul`) and gets back typed answers with calibrated probabilities in a single forward pass -- no generated text, nothing to parse. This is not a chat variant: it has its own IR (`IRDecisionRequest`/`IRDecisionResponse` in `decisions.ts`, mirroring `embeddings.ts`), its own `Bridge.decide()`/`useDecision()` entry point, and its own capability flags (`IRCapabilities.decisions`/`decisionModels`).
+
+  **Breaking-adjacent, but backward compatible for every existing implementer:** `BackendAdapter.fromIR`/`toIR`/`execute`/`executeStream` are now optional. A decision-only backend (like the new `TypeSafeBackendAdapter`) implements only `metadata` and `decide()` -- it is not forced to fake a chat capability it doesn't have. Every existing chat backend still implements all four; nothing changes for it. `Bridge`/`Router`/the SDK wrappers (`packages/wrapper`) and the CLI's `ollama run`/proxy server now check for chat support up front and throw a clear `UNSUPPORTED_FEATURE` error if a decision-only backend is used somewhere that requires chat, instead of a raw "not a function" crash.
+
+  New: `TypeSafeBackendAdapter` (`packages/backend/src/providers/typesafe.ts`) calling Jev's real `/systemone` API, and `TypeSafeFrontendAdapter` (`packages/frontend/src/adapters/typesafe.ts`) translating `@typesafe-ai/sdk`-shaped `systemOne()` calls into the Decision IR -- deliberately not an implementation of the (chat-typed) `FrontendAdapter` interface, since a decision request isn't a chat request in a costume.
+
+### Patch Changes
+
+- 6f5e0a9: Add `LayaBackendAdapter`, running ConvAI's Laya typed-decision model in-process via `@receptron/laya` -- a real TypeScript/ONNX Runtime port (github.com/receptron/laya), not a hosted API. No network call, no API key, no Python service.
+
+  Split into two packages: `@johnhenry/aimatey-native-onnx` is a general `onnxruntime-node` integration layer (shared execution-provider/session/cache config, a lazy-load helper, consistent error mapping) not tied to Laya, so a future ONNX-backed adapter shares it rather than reinventing it -- mirroring how `native-model-runner` already generalizes subprocess-based local backends. `@johnhenry/aimatey-native-laya` is the first consumer, implementing only `metadata`/`decide()`/`estimateDecisionCost()` (decision-only, like `TypeSafeBackendAdapter`).
+
+  Both are Node-only, deliberately: `onnxruntime-node` is native bindings and cannot run in a browser. A browser-capable variant needs `onnxruntime-web` instead (WASM/WebGPU, a genuinely different API), which would be a separate package -- see `native-onnx`'s module comment.
+
+  Corrects `LayaFrontendAdapter`'s module comment, which previously assumed Laya needed a new, separately-hosted Python wrapper service before a backend adapter was possible. That assumption is now known wrong; `@receptron/laya` made it unnecessary.
+
+- Updated dependencies [7cc27f9]
+- Updated dependencies [22dc8ca]
+  - @johnhenry/aimatey-types@0.6.0
+  - @johnhenry/aimatey-utils@0.5.0
+  - @johnhenry/aimatey-errors@0.2.3
+
 ## 0.2.1
 
 ### Patch Changes

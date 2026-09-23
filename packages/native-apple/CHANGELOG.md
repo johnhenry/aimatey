@@ -1,5 +1,25 @@
 # @johnhenry/aimatey-native-apple
 
+## 0.1.5
+
+### Patch Changes
+
+- 751add2: Fix `AppleBackend`'s `samplingMode: 'default'` silently mapping to `ai.SamplingMode.Default`, which doesn't exist on `apple-foundation-models`'s real `SamplingMode` enum (`Greedy` | `Random` only, verified against the installed package's `dist/types.d.ts`). `AppleConfig.samplingMode` is now `'random' | 'greedy'`.
+
+  Also corrects this package's documented minimum OS requirement from "macOS 15+ (Sequoia)" to macOS 26+ -- the `FoundationModels` framework requires macOS 26; the Sequoia claim was simply wrong. Verified live: installed `apple-foundation-models`, built its Swift wrapper, and ran real `SystemLanguageModel`/`LanguageModelSession` calls (including the fixed sampling-mode path) through `AppleBackend.execute()`/`executeStream()` on macOS 27.
+
+- 72aab25: Update `AppleBackend`'s optional native binding from the unscoped `apple-foundation-models` to `@johnhenry/apple-foundation-models`, following that package's own adoption into the `@johnhenry` npm scope. The import specifier, install instructions, and error/log messages all now point at the scoped name.
+
+  Live-verified: symlinked the built package under its new scoped name and ran a real `AppleBackend.initialize()`/`execute()` call through it successfully.
+
+  Note: `@johnhenry/apple-foundation-models` has not been published to npm yet (blocked on a scope-capable `NPM_TOKEN` on that repo) -- this change is correct and forward-looking, but `npm install @johnhenry/apple-foundation-models` will 404 until that release goes out.
+
+- Updated dependencies [7cc27f9]
+- Updated dependencies [22dc8ca]
+  - @johnhenry/aimatey-types@0.6.0
+  - @johnhenry/aimatey-utils@0.5.0
+  - @johnhenry/aimatey-errors@0.2.3
+
 ## 0.1.4
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-http-core",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Framework-agnostic HTTP core utilities for Aimatey",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -37,12 +37,12 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@johnhenry/aimatey-types": "^0.5.0",
-    "@johnhenry/aimatey-errors": "^0.2.2",
-    "@johnhenry/aimatey-core": "^0.4.0"
+    "@johnhenry/aimatey-types": "^0.6.0",
+    "@johnhenry/aimatey-errors": "^0.2.3",
+    "@johnhenry/aimatey-core": "^0.5.0"
   },
   "devDependencies": {
-    "@johnhenry/aimatey-testing": "^0.1.4",
+    "@johnhenry/aimatey-testing": "^0.1.5",
     "@types/node": "^24.7.2",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"

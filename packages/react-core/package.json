@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-react-core",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Core React hooks for Aimatey - useChat, useCompletion, useObject",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -36,9 +36,9 @@
     "lint:fix": "eslint src --ext .ts,.tsx --fix"
   },
   "dependencies": {
-    "@johnhenry/aimatey-types": "^0.5.0",
-    "@johnhenry/aimatey-core": "^0.4.0",
-    "@johnhenry/aimatey-wrapper": "^0.1.4"
+    "@johnhenry/aimatey-types": "^0.6.0",
+    "@johnhenry/aimatey-core": "^0.5.0",
+    "@johnhenry/aimatey-wrapper": "^0.1.5"
   },
   "peerDependencies": {
     "react": ">=18.0.0"

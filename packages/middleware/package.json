@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-middleware",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Middleware components for Aimatey - Universal AI Adapter System",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -147,10 +147,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@johnhenry/aimatey-types": "^0.5.0",
-    "@johnhenry/aimatey-errors": "^0.2.2",
-    "@johnhenry/aimatey-utils": "^0.4.0",
-    "@johnhenry/aimatey-core": "^0.4.0"
+    "@johnhenry/aimatey-types": "^0.6.0",
+    "@johnhenry/aimatey-errors": "^0.2.3",
+    "@johnhenry/aimatey-utils": "^0.5.0",
+    "@johnhenry/aimatey-core": "^0.5.0"
   },
   "peerDependencies": {
     "@opentelemetry/api": "^1.7.0",
@@ -182,7 +182,7 @@
     "@opentelemetry/exporter-trace-otlp-http": "^0.200.0",
     "@opentelemetry/resources": "^1.30.0",
     "@opentelemetry/semantic-conventions": "^1.30.0",
-    "@johnhenry/aimatey-testing": "^0.1.4",
+    "@johnhenry/aimatey-testing": "^0.1.5",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },

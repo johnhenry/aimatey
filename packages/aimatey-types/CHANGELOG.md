@@ -1,5 +1,25 @@
 # @johnhenry/aimatey-types
 
+## 0.6.0
+
+### Minor Changes
+
+- 22dc8ca: Add a typed-decision capability, sibling to chat and embeddings, plus a backend/frontend adapter pair for TypeSafe's Jev.
+
+  A typed-decision request ("System One" models: TypeSafe's Jev, ConvAI's Laya) sends a state and a set of typed questions (`choice`/`score`/`noul`) and gets back typed answers with calibrated probabilities in a single forward pass -- no generated text, nothing to parse. This is not a chat variant: it has its own IR (`IRDecisionRequest`/`IRDecisionResponse` in `decisions.ts`, mirroring `embeddings.ts`), its own `Bridge.decide()`/`useDecision()` entry point, and its own capability flags (`IRCapabilities.decisions`/`decisionModels`).
+
+  **Breaking-adjacent, but backward compatible for every existing implementer:** `BackendAdapter.fromIR`/`toIR`/`execute`/`executeStream` are now optional. A decision-only backend (like the new `TypeSafeBackendAdapter`) implements only `metadata` and `decide()` -- it is not forced to fake a chat capability it doesn't have. Every existing chat backend still implements all four; nothing changes for it. `Bridge`/`Router`/the SDK wrappers (`packages/wrapper`) and the CLI's `ollama run`/proxy server now check for chat support up front and throw a clear `UNSUPPORTED_FEATURE` error if a decision-only backend is used somewhere that requires chat, instead of a raw "not a function" crash.
+
+  New: `TypeSafeBackendAdapter` (`packages/backend/src/providers/typesafe.ts`) calling Jev's real `/systemone` API, and `TypeSafeFrontendAdapter` (`packages/frontend/src/adapters/typesafe.ts`) translating `@typesafe-ai/sdk`-shaped `systemOne()` calls into the Decision IR -- deliberately not an implementation of the (chat-typed) `FrontendAdapter` interface, since a decision request isn't a chat request in a costume.
+
+### Patch Changes
+
+- 7cc27f9: Add `LayaFrontendAdapter`, translating `Router.predict()`/`Agent.system_one()`-shaped calls (ConvAI's Laya, a self-hosted typed-decision model) into the Decision IR.
+
+  Frontend only, deliberately: Laya has no hosted API today -- confirmed, not assumed (no web-framework dependency in its `pyproject.toml`, and its only running instance is a quota-limited `ZeroGPU` demo Space, not something to build a production backend against). `LayaBackendAdapter` needs a new, separately-hosted Python wrapper service that doesn't exist yet; see `laya.ts`'s module comment for the exact contract that service should expose so the eventual backend adapter can be as thin as `TypeSafeBackendAdapter` is today.
+
+  Along the way: `IRDecisionAnswer`'s `noul` variant gained an optional `confidence` field. Laya reports one (`max(p, 1-p)`); Jev's wire format doesn't -- it's optional rather than absent so a provider that has it isn't forced to throw it away, and `LayaFrontendAdapter` derives it when the upstream response doesn't supply one.
+
 ## 0.5.0
 
 ### Minor Changes

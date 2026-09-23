@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-testing",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Testing utilities for Aimatey - Universal AI Adapter System",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -37,8 +37,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@johnhenry/aimatey-types": "^0.5.0",
-    "@johnhenry/aimatey-utils": "^0.4.0"
+    "@johnhenry/aimatey-types": "^0.6.0",
+    "@johnhenry/aimatey-utils": "^0.5.0"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

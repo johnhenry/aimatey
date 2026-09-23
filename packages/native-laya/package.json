@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-native-laya",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Laya (ConvAI) typed-decision backend for Aimatey, via @receptron/laya",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -37,9 +37,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@johnhenry/aimatey-types": "^0.5.0",
-    "@johnhenry/aimatey-errors": "^0.2.2",
-    "@johnhenry/aimatey-native-onnx": "^0.0.0"
+    "@johnhenry/aimatey-types": "^0.6.0",
+    "@johnhenry/aimatey-errors": "^0.2.3",
+    "@johnhenry/aimatey-native-onnx": "^0.1.0"
   },
   "peerDependencies": {
     "@receptron/laya": "^0.1.2"
@@ -50,7 +50,7 @@
     }
   },
   "devDependencies": {
-    "@johnhenry/aimatey-testing": "^0.1.4",
+    "@johnhenry/aimatey-testing": "^0.1.5",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },

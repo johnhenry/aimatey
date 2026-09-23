@@ -1,8 +1,8 @@
-# @johnhenry/aimatey-native-onnx
+# @johnhenry/aimatey-docs
 
-## 0.1.0
+## 0.2.1
 
-### Minor Changes
+### Patch Changes
 
 - 6f5e0a9: Add `LayaBackendAdapter`, running ConvAI's Laya typed-decision model in-process via `@receptron/laya` -- a real TypeScript/ONNX Runtime port (github.com/receptron/laya), not a hosted API. No network call, no API key, no Python service.
 
@@ -11,7 +11,3 @@
   Both are Node-only, deliberately: `onnxruntime-node` is native bindings and cannot run in a browser. A browser-capable variant needs `onnxruntime-web` instead (WASM/WebGPU, a genuinely different API), which would be a separate package -- see `native-onnx`'s module comment.
 
   Corrects `LayaFrontendAdapter`'s module comment, which previously assumed Laya needed a new, separately-hosted Python wrapper service before a backend adapter was possible. That assumption is now known wrong; `@receptron/laya` made it unnecessary.
-
-### Patch Changes
-
-- @johnhenry/aimatey-errors@0.2.3
