@@ -28,24 +28,16 @@
  *
  * ---
  *
- * ## Preparing for a `LayaBackendAdapter` (not built yet)
+ * ## `LayaBackendAdapter`
  *
- * Unlike Jev, Laya has **no hosted API at all** to call -- confirmed, not
- * assumed: `pyproject.toml` has zero web-framework dependencies, and the
- * only running instance (huggingface.co/spaces/convaiinnovations/laya-demo)
- * is a `ZeroGPU` Gradio Space -- shared quota, cold-start GPU attach per
- * call, not something to build a production integration against. A real
- * backend needs a **new, separately-hosted wrapper service** (Python,
- * `pip install laya`, a thin FastAPI-or-similar layer around
- * `laya.Router(preload=True).predict(state, questions, model=...)`) that
- * doesn't exist yet and doesn't belong in this (Node/TS) monorepo.
- *
- * For `LayaBackendAdapter` to be as thin as `TypeSafeBackendAdapter` when
- * that service exists, it should expose one endpoint returning
- * `LayaResponse` (below) roughly as-is -- i.e. as close to Laya's own
- * native shape as an HTTP boundary allows, so the backend adapter's job
- * stays "map this response's three known shape differences from the IR",
- * the same job this frontend adapter already does in `toLayaAnswer`.
+ * Unlike Jev, Laya has no hosted API of its own -- but it doesn't need
+ * one: `@receptron/laya` (github.com/receptron/laya, MIT) is a real,
+ * verified TypeScript/ONNX Runtime port of Laya's inference, run
+ * in-process via `onnxruntime-node`. No Python, no separately-hosted
+ * wrapper service. See `@johnhenry/aimatey-native-laya`, which implements
+ * `decide()` against it directly -- `native-laya`'s module comment maps
+ * the same three answer-shape differences `toLayaAnswer` below already
+ * handles on the way out, in reverse, on the way in.
  *
  * @module
  */

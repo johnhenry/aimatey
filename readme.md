@@ -34,7 +34,7 @@ Provider-agnostic interface for AI APIs. Write once, run anywhere.
 | Drop in as an OpenAI/Anthropic SDK replacement | [`wrapper`](./packages/wrapper) (`@johnhenry/aimatey-wrapper`) |
 | Call MCP tools from the agentic tool loop | [`mcp`](./packages/mcp) (`@johnhenry/aimatey-mcp`) |
 | Use a validated production pattern (routing, batching, failover) | [`patterns`](./packages/patterns) (`@johnhenry/aimatey-patterns`) |
-| Run a local model (llama.cpp, Apple MLX) | `native-node-llamacpp` / `native-apple` / `native-model-runner` |
+| Run a local model (llama.cpp, Apple Foundation Models, Laya) | `native-node-llamacpp` / `native-apple` / `native-laya` / `native-model-runner` |
 | Convert between request/response formats from the CLI | [`cli`](./packages/cli) (`@johnhenry/aimatey-cli`, binary `ai-matey`) |
 
 The [`## Package Reference`](#package-reference) tables below group every
@@ -581,7 +581,9 @@ const result = await runMcpTools(bridge.runTools, {
 | Package | Runtime | Documentation |
 |---------|---------|---------------|
 | [`@johnhenry/aimatey-native-node-llamacpp`](./packages/native-node-llamacpp) | llama.cpp via Node | [README](./packages/native-node-llamacpp/readme.md) |
-| [`@johnhenry/aimatey-native-apple`](./packages/native-apple) | Apple MLX (macOS 15+) | [README](./packages/native-apple/readme.md) |
+| [`@johnhenry/aimatey-native-apple`](./packages/native-apple) | Apple Foundation Models (macOS 15+) | [README](./packages/native-apple/readme.md) |
+| [`@johnhenry/aimatey-native-laya`](./packages/native-laya) | Laya typed-decision model, via ONNX Runtime | [README](./packages/native-laya/readme.md) |
+| [`@johnhenry/aimatey-native-onnx`](./packages/native-onnx) | Shared `onnxruntime-node` integration layer | [README](./packages/native-onnx/readme.md) |
 | [`@johnhenry/aimatey-native-model-runner`](./packages/native-model-runner) | Generic model runner | [README](./packages/native-model-runner/readme.md) |
 
 ## CLI Tools

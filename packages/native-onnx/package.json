@@ -1,0 +1,78 @@
+{
+  "name": "@johnhenry/aimatey-native-onnx",
+  "version": "0.0.0",
+  "description": "Shared ONNX Runtime (Node) integration layer for Aimatey native backends",
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "readme.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "npm run build:esm && npm run build:cjs && npm run build:types",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:types": "tsc -p tsconfig.types.json",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@johnhenry/aimatey-errors": "^0.2.2"
+  },
+  "peerDependencies": {
+    "onnxruntime-node": "^1.22.0"
+  },
+  "peerDependenciesMeta": {
+    "onnxruntime-node": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@johnhenry/aimatey-testing": "^0.1.4",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "keywords": [
+    "ai",
+    "llm",
+    "onnx",
+    "onnxruntime",
+    "native",
+    "backend",
+    "ai-matey"
+  ],
+  "author": "Aimatey",
+  "license": "MIT",
+  "homepage": "https://github.com/johnhenry/aimatey#readme",
+  "bugs": {
+    "url": "https://github.com/johnhenry/aimatey/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnhenry/aimatey.git",
+    "directory": "packages/native-onnx"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}

@@ -34,7 +34,7 @@ a change should generally be made in:
 | [`react-core`](packages/react-core), `react-hooks`, `react-nextjs`, `react-stream` | React integration |
 | [`wrapper`](packages/wrapper) | SDK-compatible wrappers |
 | [`cli`](packages/cli) | `ai-matey` CLI |
-| [`native-node-llamacpp`](packages/native-node-llamacpp), `native-apple`, `native-model-runner` | Local model backends |
+| [`native-node-llamacpp`](packages/native-node-llamacpp), `native-apple`, `native-model-runner`, `native-onnx`, `native-laya` | Local model backends |
 | [`aimatey`](packages/aimatey) | Main umbrella package; publishes as `@johnhenry/aimatey` |
 | [`aimatey-testing`](packages/aimatey-testing) | Test utilities (internal/dev-facing) |
 

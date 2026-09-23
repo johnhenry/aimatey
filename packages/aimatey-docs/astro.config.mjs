@@ -43,7 +43,7 @@ const apiEntryPoints = [
   'aimatey', 'aimatey-core', 'aimatey-types', 'aimatey-errors', 'aimatey-utils', 'aimatey-testing',
   'backend', 'frontend', 'middleware', 'http', 'http.core', 'wrapper', 'cli',
   'react-core', 'react-hooks', 'react-stream', 'react-nextjs',
-  'native-apple', 'native-node-llamacpp', 'native-model-runner', 'backend-browser',
+  'native-apple', 'native-node-llamacpp', 'native-model-runner', 'native-onnx', 'native-laya', 'backend-browser',
   'mcp', 'patterns',
 ].map((pkg) => `../${pkg}`);
 
@@ -68,7 +68,7 @@ function fixTypeDocMediaFrontmatter() {
         for (const file of fs.readdirSync(mediaDir)) {
           const full = path.join(mediaDir, file);
           if (!file.endsWith('.md') && !file.endsWith('.mdx')) {
-            fs.rmSync(full, { force: true });
+            fs.rmSync(full, { force: true, recursive: true });
             continue;
           }
           const text = fs.readFileSync(full, 'utf8');
