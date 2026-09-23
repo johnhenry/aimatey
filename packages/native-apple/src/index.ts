@@ -1,7 +1,8 @@
 /**
  * Apple Backend Adapter
  *
- * Backend adapter using Apple's Foundation Models via apple-foundation-models.
+ * Backend adapter using Apple's Foundation Models via @johnhenry/apple-foundation-models
+ * (previously published unscoped as apple-foundation-models).
  * Only works on macOS 26+ with Apple Intelligence -- the `FoundationModels`
  * framework itself requires macOS 26 (it shipped with the WWDC 2025
  * developer-facing framework, not with Sequoia's Apple Intelligence
@@ -12,7 +13,7 @@
  *
  * @example Basic Usage
  * ```typescript
- * import { AppleBackend } from '@johnhenry/aimatey-native-node-llamacpp';
+ * import { AppleBackend } from '@johnhenry/aimatey-native-apple';
  *
  * const backend = new AppleBackend({
  *   maxTokens: 2048,
@@ -37,7 +38,7 @@ import type {
 import { AdapterError, ErrorCode, ProviderError } from '@johnhenry/aimatey-errors';
 import { platform } from 'node:os';
 
-// Dynamic import to handle apple-foundation-models
+// Dynamic import to handle @johnhenry/apple-foundation-models
 let appleAI: any;
 
 /**
@@ -46,13 +47,13 @@ let appleAI: any;
 function isPlatformSupported(): boolean {
   // Only works on macOS 26+ with Apple Intelligence. Not version-checked here
   // (`platform() === 'darwin'` is the only gate) -- an unsupported macOS
-  // version surfaces as a load/call failure from apple-foundation-models
+  // version surfaces as a load/call failure from @johnhenry/apple-foundation-models
   // itself rather than a preflight check.
   return platform() === 'darwin';
 }
 
 /**
- * Load apple-foundation-models with graceful failure.
+ * Load @johnhenry/apple-foundation-models with graceful failure.
  */
 async function loadAppleAI() {
   if (!appleAI) {
@@ -68,13 +69,13 @@ async function loadAppleAI() {
 
     try {
       // @ts-expect-error - Optional peer dependency, may not be installed
-      appleAI = await import('apple-foundation-models');
+      appleAI = await import('@johnhenry/apple-foundation-models');
     } catch (error) {
       throw new AdapterError({
         code: ErrorCode.PROVIDER_ERROR,
         message:
-          'Failed to load apple-foundation-models. ' +
-          'Install it with: npm install apple-foundation-models\n' +
+          'Failed to load @johnhenry/apple-foundation-models. ' +
+          'Install it with: npm install @johnhenry/apple-foundation-models\n' +
           `Error: ${error instanceof Error ? error.message : String(error)}`,
         cause: error instanceof Error ? error : undefined,
       });
@@ -143,7 +144,7 @@ export class AppleBackend implements BackendAdapter {
       capabilities: {
         streaming: true,
         multiModal: false,
-        tools: true, // apple-foundation-models supports tools
+        tools: true, // @johnhenry/apple-foundation-models supports tools
         maxContextTokens: this.config.maximumResponseTokens || 2048,
         systemMessageStrategy: 'separate-parameter', // Uses Instructions object
         supportsMultipleSystemMessages: false,
@@ -375,7 +376,7 @@ export class AppleBackend implements BackendAdapter {
         },
       } as IRStreamChunk;
 
-      // Stream response using apple-foundation-models streaming API
+      // Stream response using @johnhenry/apple-foundation-models streaming API
       const stream = session.streamResponse(prompt, options);
       let fullContent = '';
 

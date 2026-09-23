@@ -15,12 +15,13 @@ network, no cost. Part of the [aimatey](https://github.com/johnhenry/aimatey) mo
   26; earlier docs in this package said "macOS 15+ (Sequoia)", which was
   wrong (verified live against `apple-foundation-models` on macOS 27)
 - Node.js 18+
-- The optional native binding: `npm install apple-foundation-models`
+- The optional native binding: `npm install @johnhenry/apple-foundation-models`
+  (previously published unscoped as `apple-foundation-models`)
 
 ## Installation
 
 ```bash
-npm install @johnhenry/aimatey-native-apple apple-foundation-models
+npm install @johnhenry/aimatey-native-apple @johnhenry/apple-foundation-models
 ```
 
 ## Quick Start
