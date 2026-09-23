@@ -581,7 +581,7 @@ const result = await runMcpTools(bridge.runTools, {
 | Package | Runtime | Documentation |
 |---------|---------|---------------|
 | [`@johnhenry/aimatey-native-node-llamacpp`](./packages/native-node-llamacpp) | llama.cpp via Node | [README](./packages/native-node-llamacpp/readme.md) |
-| [`@johnhenry/aimatey-native-apple`](./packages/native-apple) | Apple Foundation Models (macOS 15+) | [README](./packages/native-apple/readme.md) |
+| [`@johnhenry/aimatey-native-apple`](./packages/native-apple) | Apple Foundation Models (macOS 26+) | [README](./packages/native-apple/readme.md) |
 | [`@johnhenry/aimatey-native-laya`](./packages/native-laya) | Laya typed-decision model, via ONNX Runtime | [README](./packages/native-laya/readme.md) |
 | [`@johnhenry/aimatey-native-onnx`](./packages/native-onnx) | Shared `onnxruntime-node` integration layer | [README](./packages/native-onnx/readme.md) |
 | [`@johnhenry/aimatey-native-model-runner`](./packages/native-model-runner) | Generic model runner | [README](./packages/native-model-runner/readme.md) |

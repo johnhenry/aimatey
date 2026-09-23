@@ -2,7 +2,11 @@
  * Apple Backend Adapter
  *
  * Backend adapter using Apple's Foundation Models via apple-foundation-models.
- * Only works on macOS 15+ (Sequoia) with Apple Intelligence.
+ * Only works on macOS 26+ with Apple Intelligence -- the `FoundationModels`
+ * framework itself requires macOS 26 (it shipped with the WWDC 2025
+ * developer-facing framework, not with Sequoia's Apple Intelligence
+ * features); verified live against `apple-foundation-models` on macOS 27,
+ * not assumed.
  *
  * Gracefully fails on unsupported platforms (Linux, Windows, older macOS).
  *
@@ -40,8 +44,10 @@ let appleAI: any;
  * Check if the current platform supports Apple Foundation Models.
  */
 function isPlatformSupported(): boolean {
-  // Only works on macOS 15+ (Sequoia) with Apple Intelligence
-  // Supports both Apple Silicon and Intel Macs (though Intel needs Apple Intelligence)
+  // Only works on macOS 26+ with Apple Intelligence. Not version-checked here
+  // (`platform() === 'darwin'` is the only gate) -- an unsupported macOS
+  // version surfaces as a load/call failure from apple-foundation-models
+  // itself rather than a preflight check.
   return platform() === 'darwin';
 }
 
@@ -55,7 +61,7 @@ async function loadAppleAI() {
       throw new AdapterError({
         code: ErrorCode.PROVIDER_ERROR,
         message:
-          'Apple Foundation Models are only supported on macOS 15+ (Sequoia) with Apple Intelligence. ' +
+          'Apple Foundation Models are only supported on macOS 26+ with Apple Intelligence. ' +
           `Current platform: ${platform()}`,
       });
     }
@@ -105,10 +111,14 @@ export interface AppleConfig {
   temperature?: number;
 
   /**
-   * Sampling mode: 'random' for creative, 'default' for deterministic.
-   * @default 'default'
+   * Sampling mode: 'random' for creative, 'greedy' for deterministic
+   * (always picks the highest-probability token). Matches
+   * `apple-foundation-models`'s real `SamplingMode` enum, which has no
+   * 'default' member -- verified against the installed package's
+   * `dist/types.d.ts`, not assumed.
+   * @default 'greedy'
    */
-  samplingMode?: 'random' | 'default';
+  samplingMode?: 'random' | 'greedy';
 }
 
 // ============================================================================
@@ -241,7 +251,7 @@ export class AppleBackend implements BackendAdapter {
 
       if (this.config.samplingMode) {
         options.sampling =
-          this.config.samplingMode === 'random' ? ai.SamplingMode.Random : ai.SamplingMode.Default;
+          this.config.samplingMode === 'random' ? ai.SamplingMode.Random : ai.SamplingMode.Greedy;
       }
 
       // Generate response
@@ -349,7 +359,7 @@ export class AppleBackend implements BackendAdapter {
 
       if (this.config.samplingMode) {
         options.sampling =
-          this.config.samplingMode === 'random' ? ai.SamplingMode.Random : ai.SamplingMode.Default;
+          this.config.samplingMode === 'random' ? ai.SamplingMode.Random : ai.SamplingMode.Greedy;
       }
 
       // Yield start chunk
@@ -422,7 +432,7 @@ export class AppleBackend implements BackendAdapter {
     options: {
       temperature?: number;
       maximumResponseTokens?: number;
-      sampling?: 'random' | 'default';
+      sampling?: 'random' | 'greedy';
     };
   } {
     const systemMessages = request.messages.filter((m) => m.role === 'system');
