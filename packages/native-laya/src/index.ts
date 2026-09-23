@@ -80,8 +80,10 @@ let laya: any;
 async function loadLaya(): Promise<any> {
   if (!laya) {
     try {
-      // @ts-expect-error - Optional peer dependency, may not be installed
-      laya = await import('@receptron/laya');
+      // Non-literal specifier: see native-onnx's loadOnnxRuntime() for why
+      // a `@ts-expect-error` directive here is unreliable across environments.
+      const specifier = '@receptron/laya';
+      laya = await import(specifier);
     } catch (error) {
       throw new AdapterError({
         code: ErrorCode.PROVIDER_ERROR,

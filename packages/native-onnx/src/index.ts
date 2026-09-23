@@ -61,7 +61,16 @@ let onnxRuntime: unknown;
 export async function loadOnnxRuntime(): Promise<unknown> {
   if (!onnxRuntime) {
     try {
-      onnxRuntime = await import('onnxruntime-node');
+      // Non-literal specifier: `onnxruntime-node` is an optional peer
+      // dependency that may not be installed, and TS's "does this resolve"
+      // check on a dynamic import() only applies to a literal string
+      // argument -- a variable sidesteps it (returns Promise<any>)
+      // regardless of TS version/resolution-mode differences across
+      // environments, which a `@ts-expect-error` directive does not:
+      // whether that specific error fires at all has been observed to
+      // differ between a local `tsc` run and a clean CI `npm ci` build.
+      const specifier = 'onnxruntime-node';
+      onnxRuntime = await import(specifier);
     } catch (error) {
       throw new AdapterError({
         code: ErrorCode.PROVIDER_ERROR,
