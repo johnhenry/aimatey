@@ -5,6 +5,18 @@
 const URGENCY_LEVELS = ['low', 'medium', 'high', 'critical'];
 const CATEGORY_ORDER = ['billing', 'technical', 'account', 'other'];
 
+// Mirrors style.css's :root custom properties. Reading them back via
+// getComputedStyle(document.documentElement) is fragile (depends on the
+// stylesheet having finished parsing before this script runs) and was the
+// actual cause of every queue dot rendering the same color -- a plain,
+// hardcoded map has no such timing dependency.
+const URGENCY_COLORS = {
+  low: '#22c55e',
+  medium: '#eab308',
+  high: '#f97316',
+  critical: '#ef4444',
+};
+
 const SAMPLE_TICKETS = [
   "I was charged twice for my subscription this month and I can't reach anyone. This is the third time this has happened and I want a refund immediately.",
   'How do I change the display name on my profile? I looked in settings but could not find the option.',
@@ -91,6 +103,15 @@ function urgencyClass(level) {
   return `urgency-${level}`;
 }
 
+// urgency.value / ticket.urgencyScore is a probability-weighted expected
+// value, not a guaranteed-in-range integer -- clamp before indexing
+// URGENCY_LEVELS so an edge-case score can't silently mislabel via the
+// array returning undefined.
+function urgencyLevelFor(score) {
+  const index = Math.max(0, Math.min(URGENCY_LEVELS.length - 1, Math.round(score)));
+  return URGENCY_LEVELS[index];
+}
+
 function bar(name, p, extraClass) {
   const row = document.createElement('div');
   row.className = `bar-track ${extraClass || ''}`;
@@ -127,7 +148,7 @@ function renderResult(ticket) {
   // Urgency -- value is a probability-weighted expected value over
   // [low, medium, high, critical], not necessarily an integer index.
   if (urgency) {
-    const nearestLevel = URGENCY_LEVELS[Math.round(urgency.value)] ?? String(urgency.value);
+    const nearestLevel = urgencyLevelFor(urgency.value);
     const row = document.createElement('div');
     row.className = 'answer-row';
     row.innerHTML = `<div class="answer-label">Urgency (score ${urgency.value.toFixed(2)}, confidence ${pct(urgency.confidence)})</div>
@@ -174,10 +195,10 @@ function renderQueue(tickets) {
     const li = document.createElement('li');
     li.className = 'queue-item';
 
-    const level = URGENCY_LEVELS[Math.round(ticket.urgencyScore)] ?? 'low';
+    const level = urgencyLevelFor(ticket.urgencyScore);
     const dot = document.createElement('span');
     dot.className = `queue-urgency-dot ${urgencyClass(level)}`;
-    dot.style.background = getComputedStyle(document.documentElement).getPropertyValue(`--${level}`);
+    dot.style.background = URGENCY_COLORS[level];
 
     const text = document.createElement('span');
     text.className = 'queue-item-text';

@@ -182,6 +182,7 @@ button:disabled {
 }
 
 .bar-inner {
+  display: block;
   height: 100%;
   border-radius: 4px;
   background: var(--accent);
@@ -246,6 +247,7 @@ button:disabled {
 }
 
 .queue-urgency-dot {
+  display: inline-block;
   width: 10px;
   height: 10px;
   border-radius: 50%;
