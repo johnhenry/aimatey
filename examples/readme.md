@@ -56,6 +56,7 @@ export GEMINI_API_KEY="AIza..."
 
 ### Typed Decisions (Node.js Only)
 - `laya/triage-demo.ts` - Support-ticket triage using Laya's on-device typed-decision model (`Bridge.decide()`, not chat)
+- `laya/gui-demo/` - Same triage capability behind a persistent server + browser dashboard (`server.ts`, plain HTML/CSS/JS in `public/`, no build step) -- see `laya/gui-demo/readme.md`
 
 ## Documentation
 

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Laya Ticket Triage Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Ticket Triage Dashboard</h1>
+    <p class="subtitle">
+      Typed-decision triage via <code>@johnhenry/aimatey-native-laya</code> --
+      on-device, no API key, calibrated probabilities.
+    </p>
+  </header>
+
+  <main>
+    <section class="panel" id="input-panel">
+      <h2>New Ticket</h2>
+      <textarea id="ticket-text" rows="5" placeholder="Paste or type a support ticket..."></textarea>
+      <div class="examples">
+        <span>Try an example:</span>
+        <button type="button" class="example-btn" data-example="0">Angry billing</button>
+        <button type="button" class="example-btn" data-example="1">Simple question</button>
+        <button type="button" class="example-btn" data-example="2">Urgent bug</button>
+        <button type="button" class="example-btn" data-example="3">Positive feedback</button>
+      </div>
+      <button type="button" id="triage-btn">Triage Ticket</button>
+      <p id="status"></p>
+    </section>
+
+    <section class="panel" id="result-panel" hidden>
+      <h2>Result</h2>
+      <div id="result"></div>
+    </section>
+
+    <section class="panel" id="queue-panel">
+      <div class="queue-header">
+        <h2>Queue <span id="queue-count" class="count"></span></h2>
+        <button type="button" id="clear-btn">Clear</button>
+      </div>
+      <ul id="queue-list"></ul>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
