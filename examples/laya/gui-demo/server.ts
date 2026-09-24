@@ -79,6 +79,12 @@ interface TriagedTicket {
   readonly answers: Record<string, IRDecisionAnswer>;
   readonly urgencyScore: number;
   readonly timestamp: number;
+  /** Wall-clock time for the bridge.decide() call itself, in milliseconds. */
+  readonly latencyMs: number;
+  /** Exactly what was sent to Laya: the state + typed questions. */
+  readonly request: { readonly state: unknown; readonly questions: typeof TRIAGE_QUESTIONS };
+  /** Laya's actual wire response, unmapped -- see IRDecisionResponse.raw. */
+  readonly rawResponse: unknown;
 }
 
 const tickets: TriagedTicket[] = [];
@@ -91,7 +97,11 @@ const backend = new LayaBackendAdapter();
 const bridge = new Bridge(createGenericFrontend(), backend);
 
 async function triageTicket(text: string): Promise<TriagedTicket> {
-  const response = await bridge.decide({ ticket: text }, TRIAGE_QUESTIONS);
+  const state = { ticket: text };
+  const startedAt = performance.now();
+  const response = await bridge.decide(state, TRIAGE_QUESTIONS);
+  const latencyMs = performance.now() - startedAt;
+
   const urgency = response.answers.urgency;
   const urgencyScore = urgency?.type === 'score' ? urgency.value : 0;
 
@@ -101,6 +111,9 @@ async function triageTicket(text: string): Promise<TriagedTicket> {
     answers: response.answers,
     urgencyScore,
     timestamp: Date.now(),
+    latencyMs,
+    request: { state, questions: TRIAGE_QUESTIONS },
+    rawResponse: response.raw,
   };
   tickets.unshift(ticket);
   return ticket;

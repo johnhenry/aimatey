@@ -29,9 +29,17 @@ const triageBtn = document.getElementById('triage-btn');
 const statusEl = document.getElementById('status');
 const resultPanel = document.getElementById('result-panel');
 const resultEl = document.getElementById('result');
+const latencyEl = document.getElementById('latency');
+const rawToggleBtn = document.getElementById('raw-toggle-btn');
+const rawView = document.getElementById('raw-view');
 const queueList = document.getElementById('queue-list');
 const queueCount = document.getElementById('queue-count');
 const clearBtn = document.getElementById('clear-btn');
+
+rawToggleBtn.addEventListener('click', () => {
+  rawView.hidden = !rawView.hidden;
+  rawToggleBtn.textContent = rawView.hidden ? 'View raw request/response' : 'Hide raw request/response';
+});
 
 document.querySelectorAll('.example-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -127,6 +135,17 @@ function renderResult(ticket) {
   resultPanel.hidden = false;
   resultEl.innerHTML = '';
 
+  latencyEl.textContent =
+    typeof ticket.latencyMs === 'number' ? `${ticket.latencyMs.toFixed(0)}ms` : '';
+
+  rawView.hidden = true;
+  rawToggleBtn.textContent = 'View raw request/response';
+  rawView.textContent = JSON.stringify(
+    { request: ticket.request, rawResponse: ticket.rawResponse },
+    null,
+    2
+  );
+
   const { category, urgency, needsHumanEscalation } = ticket.answers;
 
   // Category
@@ -206,7 +225,9 @@ function renderQueue(tickets) {
 
     const meta = document.createElement('span');
     meta.className = 'queue-item-meta';
-    meta.textContent = ticket.answers.category ? ticket.answers.category.value : '';
+    const category = ticket.answers.category ? ticket.answers.category.value : '';
+    const latency = typeof ticket.latencyMs === 'number' ? `${ticket.latencyMs.toFixed(0)}ms` : '';
+    meta.textContent = [category, latency].filter(Boolean).join(' · ');
 
     li.appendChild(dot);
     li.appendChild(text);
