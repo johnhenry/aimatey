@@ -104,7 +104,11 @@ Then open <http://localhost:8080>.
   panel) drives the queue's sort order and color-coded dot; with none
   selected, the queue still works, just without sorting or color, since
   there's nothing numeric to rank tickets by. "Reset to defaults" restores
-  the original category/urgency/escalation set.
+  the original category/urgency/escalation set. Both this panel and
+  "State" above autosave on every edit (debounced ~500ms) -- there is no
+  Save button; a change that would leave zero named questions/fields is
+  skipped rather than sent, so a mid-edit blank row never trips a
+  spurious validation error.
 - **Latency** -- every result shows the wall-clock time for the
   `bridge.decide()` call itself.
 - **Raw request/response** -- "View raw request/response" under any
@@ -139,7 +143,7 @@ server.ts           Request handler factory + entry point: routing, question
 server.test.ts       Tests against a mock backend (see "Tests" above)
 vitest.config.ts      Standalone vitest config so the tests above run from this dir
 public/index.html      Page structure
-public/style.css       Dashboard styling (dark theme, probability bars, compare layout)
+public/style.css       Dashboard styling (light theme approximating console.typesafe.ai/playground's look, probability bars, compare layout)
 public/app.js           Fetches the API, renders results/queue, handles export
 ```
 
