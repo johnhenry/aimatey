@@ -17,33 +17,88 @@
 
   <main>
     <section class="panel" id="input-panel">
-      <h2>New Ticket</h2>
-      <textarea id="ticket-text" rows="5" placeholder="Paste or type a support ticket..."></textarea>
-      <div class="examples">
-        <span>Try an example:</span>
-        <button type="button" class="example-btn" data-example="0">Angry billing</button>
-        <button type="button" class="example-btn" data-example="1">Simple question</button>
-        <button type="button" class="example-btn" data-example="2">Urgent bug</button>
-        <button type="button" class="example-btn" data-example="3">Positive feedback</button>
+      <div class="panel-header">
+        <h2>New Ticket</h2>
+        <div class="mode-toggle">
+          <button type="button" class="mode-btn active" data-mode="single">Single</button>
+          <button type="button" class="mode-btn" data-mode="batch">Batch</button>
+        </div>
       </div>
+
+      <div id="single-mode">
+        <textarea id="ticket-text" rows="5" placeholder="Paste or type a support ticket..."></textarea>
+        <div class="examples">
+          <span>Try an example:</span>
+          <button type="button" class="example-btn" data-example="0">Angry billing</button>
+          <button type="button" class="example-btn" data-example="1">Simple question</button>
+          <button type="button" class="example-btn" data-example="2">Urgent bug</button>
+          <button type="button" class="example-btn" data-example="3">Positive feedback</button>
+        </div>
+      </div>
+
+      <div id="batch-mode" hidden>
+        <textarea id="batch-text" rows="5" placeholder="One ticket per line..."></textarea>
+      </div>
+
+      <label class="compare-toggle" id="compare-toggle-label" hidden>
+        <input type="checkbox" id="compare-checkbox" />
+        Compare with TypeSafe (Jev)
+      </label>
+
       <button type="button" id="triage-btn">Triage Ticket</button>
       <p id="status"></p>
     </section>
 
-    <section class="panel" id="result-panel" hidden>
-      <div class="result-header">
-        <h2>Result</h2>
-        <span id="latency" class="latency-badge"></span>
+    <section class="panel" id="questions-panel">
+      <div class="panel-header">
+        <h2>Questions</h2>
+        <button type="button" id="questions-toggle-btn">Edit</button>
       </div>
-      <div id="result"></div>
-      <button type="button" id="raw-toggle-btn" class="raw-toggle">View raw request/response</button>
-      <pre id="raw-view" hidden></pre>
+      <div id="questions-form" hidden>
+        <label>
+          Category prompt
+          <input type="text" id="q-category-instructions" />
+        </label>
+        <div class="criteria-grid">
+          <label>Billing means<input type="text" id="q-criteria-billing" /></label>
+          <label>Technical means<input type="text" id="q-criteria-technical" /></label>
+          <label>Account means<input type="text" id="q-criteria-account" /></label>
+          <label>Other means<input type="text" id="q-criteria-other" /></label>
+        </div>
+        <label>
+          Urgency prompt
+          <input type="text" id="q-urgency-instructions" />
+        </label>
+        <label>
+          Escalation prompt
+          <input type="text" id="q-escalation-instructions" />
+        </label>
+        <p class="hint">
+          Category keys (billing/technical/account/other) and urgency levels
+          (low/medium/high/critical) are fixed -- only the prompts and
+          category descriptions are editable.
+        </p>
+        <div class="questions-actions">
+          <button type="button" id="questions-save-btn">Save</button>
+          <button type="button" id="questions-reset-btn">Reset to defaults</button>
+        </div>
+        <p id="questions-status"></p>
+      </div>
+    </section>
+
+    <section class="panel" id="result-panel" hidden>
+      <h2>Result</h2>
+      <div id="result-columns" class="result-columns"></div>
     </section>
 
     <section class="panel" id="queue-panel">
       <div class="queue-header">
         <h2>Queue <span id="queue-count" class="count"></span></h2>
-        <button type="button" id="clear-btn">Clear</button>
+        <div class="queue-actions">
+          <button type="button" id="export-json-btn">Export JSON</button>
+          <button type="button" id="export-csv-btn">Export CSV</button>
+          <button type="button" id="clear-btn">Clear</button>
+        </div>
       </div>
       <ul id="queue-list"></ul>
     </section>
