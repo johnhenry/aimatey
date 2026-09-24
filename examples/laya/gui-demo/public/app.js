@@ -69,7 +69,6 @@ const questionsForm = document.getElementById('questions-form');
 const questionsList = document.getElementById('questions-list');
 const addQuestionBtn = document.getElementById('add-question-btn');
 const prioritySelect = document.getElementById('priority-select');
-const questionsSaveBtn = document.getElementById('questions-save-btn');
 const questionsResetBtn = document.getElementById('questions-reset-btn');
 const questionsStatus = document.getElementById('questions-status');
 
@@ -218,6 +217,7 @@ function renderQuestionEditor() {
     nameInput.addEventListener('input', () => {
       q.name = nameInput.value;
       refreshPrioritySelect();
+      scheduleAutoSave();
     });
 
     const typeSelect = document.createElement('select');
@@ -243,6 +243,7 @@ function renderQuestionEditor() {
         ];
       }
       renderQuestionEditor();
+      scheduleAutoSave();
     });
 
     const removeBtn = document.createElement('button');
@@ -252,6 +253,7 @@ function renderQuestionEditor() {
     removeBtn.addEventListener('click', () => {
       editorQuestions.splice(qIndex, 1);
       renderQuestionEditor();
+      scheduleAutoSave();
     });
 
     header.appendChild(nameInput);
@@ -266,6 +268,7 @@ function renderQuestionEditor() {
     instructionsInput.value = q.instructions;
     instructionsInput.addEventListener('input', () => {
       q.instructions = instructionsInput.value;
+      scheduleAutoSave();
     });
     card.appendChild(instructionsInput);
 
@@ -295,6 +298,7 @@ function renderOptionsEditor(question) {
     keyInput.value = opt.key;
     keyInput.addEventListener('input', () => {
       opt.key = keyInput.value;
+      scheduleAutoSave();
     });
 
     const descInput = document.createElement('input');
@@ -303,6 +307,7 @@ function renderOptionsEditor(question) {
     descInput.value = opt.description;
     descInput.addEventListener('input', () => {
       opt.description = descInput.value;
+      scheduleAutoSave();
     });
 
     const removeOptBtn = document.createElement('button');
@@ -312,6 +317,7 @@ function renderOptionsEditor(question) {
     removeOptBtn.addEventListener('click', () => {
       question.options.splice(oIndex, 1);
       renderQuestionEditor();
+      scheduleAutoSave();
     });
 
     row.appendChild(keyInput);
@@ -327,6 +333,7 @@ function renderOptionsEditor(question) {
   addBtn.addEventListener('click', () => {
     question.options.push({ id: newId(), key: '', description: '' });
     renderQuestionEditor();
+    scheduleAutoSave();
   });
   wrap.appendChild(addBtn);
 
@@ -347,6 +354,7 @@ function renderLevelsEditor(question) {
     labelInput.value = lvl.label;
     labelInput.addEventListener('input', () => {
       lvl.label = labelInput.value;
+      scheduleAutoSave();
     });
 
     const removeLvlBtn = document.createElement('button');
@@ -356,6 +364,7 @@ function renderLevelsEditor(question) {
     removeLvlBtn.addEventListener('click', () => {
       question.levels.splice(lIndex, 1);
       renderQuestionEditor();
+      scheduleAutoSave();
     });
 
     row.appendChild(labelInput);
@@ -370,6 +379,7 @@ function renderLevelsEditor(question) {
   addBtn.addEventListener('click', () => {
     question.levels.push({ id: newId(), label: '' });
     renderQuestionEditor();
+    scheduleAutoSave();
   });
   wrap.appendChild(addBtn);
 
@@ -384,6 +394,11 @@ questionsToggleBtn.addEventListener('click', () => {
 addQuestionBtn.addEventListener('click', () => {
   editorQuestions.push({ id: newId(), name: '', type: 'noul', instructions: '', options: [], levels: [] });
   renderQuestionEditor();
+  scheduleAutoSave();
+});
+
+prioritySelect.addEventListener('change', () => {
+  scheduleAutoSave();
 });
 
 async function loadQuestions() {
@@ -394,12 +409,38 @@ async function loadQuestions() {
   prioritySelect.value = priorityQuestion || '';
 }
 
-questionsSaveBtn.addEventListener('click', async () => {
+// ----------------------------------------------------------------------------
+// Auto-save: debounced so a keystroke doesn't fire a request per character,
+// but any structural change (add/remove a question or option/level, switch
+// a type, change the priority question) still goes through the same path.
+// Deliberately does NOT re-render the editor from the server's response on
+// success -- doing so would overwrite an in-progress edit (e.g. a
+// just-added, not-yet-named question) the moment the debounce fires. The
+// editor's local state stays the source of truth for the form; the
+// server's response only confirms what's now active for the next triage
+// call. A response with zero valid (named) questions is skipped entirely
+// rather than sent -- that's a normal mid-edit state (e.g. right after
+// "+ Add question", before typing a name), not an error to surface.
+// ----------------------------------------------------------------------------
+
+let autoSaveTimer;
+
+function scheduleAutoSave() {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    void saveQuestions();
+  }, 500);
+}
+
+async function saveQuestions() {
+  const questions = editorStateToQuestions();
+  if (Object.keys(questions).length === 0) {
+    return;
+  }
+  const priorityQuestion = prioritySelect.value || null;
   questionsStatus.textContent = 'Saving...';
   questionsStatus.classList.remove('error');
   try {
-    const questions = editorStateToQuestions();
-    const priorityQuestion = prioritySelect.value || null;
     const res = await fetch('/api/questions', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -409,17 +450,15 @@ questionsSaveBtn.addEventListener('click', async () => {
     if (!res.ok) {
       throw new Error(data.error || `Request failed (${res.status})`);
     }
-    editorQuestions = questionsToEditorState(data.questions);
-    renderQuestionEditor();
-    prioritySelect.value = data.priorityQuestion || '';
-    questionsStatus.textContent = 'Saved. New tickets will use these questions.';
+    questionsStatus.textContent = 'Saved.';
   } catch (error) {
     questionsStatus.textContent = error.message;
     questionsStatus.classList.add('error');
   }
-});
+}
 
 questionsResetBtn.addEventListener('click', async () => {
+  clearTimeout(autoSaveTimer);
   const res = await fetch('/api/questions/reset', { method: 'POST' });
   const { questions, priorityQuestion } = await res.json();
   editorQuestions = questionsToEditorState(questions);
