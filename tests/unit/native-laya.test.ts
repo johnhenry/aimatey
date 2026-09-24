@@ -82,11 +82,22 @@ describe('LayaBackendAdapter', () => {
     });
   });
 
-  it('maps a noul answer, passing through its real confidence', () => {
+  it('maps a noul answer, passing through its real confidence when the wire reports one', () => {
     expect(toIRAnswer({ type: 'noul', noul: 0.83, confidence: 0.66 })).toEqual({
       type: 'noul',
       value: 0.83,
       confidence: 0.66,
+    });
+  });
+
+  it('derives a noul answer\'s confidence when the wire response omits it -- the real, common case', () => {
+    // A live @receptron/laya response's `noul` answer carries no
+    // `confidence` field at all (confirmed by actually running it, not
+    // assumed) -- this is the shape `toIRAnswer` sees in practice.
+    expect(toIRAnswer({ type: 'noul', noul: 0.1923 })).toEqual({
+      type: 'noul',
+      value: 0.1923,
+      confidence: 0.8077,
     });
   });
 });

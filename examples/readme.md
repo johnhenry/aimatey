@@ -54,6 +54,9 @@ export GEMINI_API_KEY="AIza..."
 ### Model Runners (Node.js Only)
 - `model-runner-llamacpp.ts` - Run local GGUF models via llama.cpp
 
+### Typed Decisions (Node.js Only)
+- `laya/triage-demo.ts` - Support-ticket triage using Laya's on-device typed-decision model (`Bridge.decide()`, not chat)
+
 ## Documentation
 
 See [EXAMPLES.md](../EXAMPLES.md) for:

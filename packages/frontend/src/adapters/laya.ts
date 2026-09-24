@@ -16,15 +16,30 @@
  * - Laya's answers carry their own `type` field; Jev's don't (Jev's
  *   backend adapter has to re-derive it from the *question*).
  * - Laya's `score` answer keys `probabilities` by **stringified index**
- *   (`{"0": 0.1, "1": 0.6, ...}`), not an array like Jev's.
- * - Laya's `noul` answer includes a real `confidence`
- *   (`max(p, 1-p)`) -- see `IRDecisionAnswer`'s `noul.confidence`, added
- *   specifically because this adapter needed it and the IR didn't have it.
- * - Every Laya answer carries an `action: { act_probability }` sub-object
- *   with no IR equivalent (looks tied to a broader RL-agent
- *   action-selection framework the package's `RLAgent` class alias
- *   hints at). Dropped on the way into the IR; there is nothing to
- *   reconstruct it from on the way back out.
+ *   (`{"0": 0.1, "1": 0.6, ...}`), not an array like Jev's. Its `score`
+ *   value itself is a probability-weighted expected value over those
+ *   indices, not necessarily an integer -- confirmed live against
+ *   `@receptron/laya` (`LayaBackendAdapter`'s real backend), not just
+ *   read from source.
+ * - **Correction, also from a live check**: this comment previously
+ *   claimed Laya's `noul` answer always includes a real `confidence`
+ *   (`max(p, 1-p)`), based on reading `NandhaKishorM/laya`'s Python
+ *   source, not running it. A live `@receptron/laya` response's `noul`
+ *   answer carries no `confidence` field at all -- same gap as Jev's.
+ *   `IRDecisionAnswer`'s `noul.confidence` stayed optional for exactly
+ *   this reason; both `toLayaAnswer` below and `native-laya`'s
+ *   `toIRAnswer` derive `max(p, 1-p)` when the wire response omits one,
+ *   rather than one of the two providers reliably reporting it.
+ * - Every Laya answer carries an RL-agent action-selection sub-object
+ *   with no IR equivalent (looks tied to the package's `RLAgent` class
+ *   alias). This adapter's original source reading named it
+ *   `action: { act_probability }`; a live `@receptron/laya` response
+ *   names it `rl_agent: { act_probability }` instead -- likely a
+ *   difference between the original Python reference this frontend
+ *   adapter's types model and the TS/ONNX port `native-laya` actually
+ *   talks to, not a correction of one over the other. Either way, it's
+ *   dropped on the way into the IR; there is nothing to reconstruct it
+ *   from on the way back out.
  *
  * ---
  *
@@ -228,10 +243,12 @@ function toLayaAnswer(answer: IRDecisionAnswer, question?: IRDecisionQuestion): 
       return {
         type: 'noul',
         noul: answer.value,
-        // Derive if the source backend didn't report one (Jev doesn't) --
-        // this is a real, defined quantity (distance from a coin flip),
-        // not a guess, so computing it here is honest reconstruction,
-        // not fabrication the way inventing `action`/`routing` would be.
+        // Derive if the source backend didn't report one -- neither Jev
+        // nor a live Laya response reliably does (see this file's module
+        // comment). This is a real, defined quantity (distance from a
+        // coin flip), not a guess, so computing it here is honest
+        // reconstruction, not fabrication the way inventing `rl_agent`/
+        // `routing` would be.
         confidence: answer.confidence ?? Math.max(answer.value, 1 - answer.value),
       };
   }

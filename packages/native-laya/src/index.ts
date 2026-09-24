@@ -43,7 +43,9 @@ import { AdapterError, ErrorCode, ProviderError } from '@johnhenry/aimatey-error
 import { toOnnxProviderError, type OnnxRuntimeConfig } from '@johnhenry/aimatey-native-onnx';
 
 // ============================================================================
-// Laya-native wire types (verified against @receptron/laya's src/laya.ts)
+// Laya-native wire types, verified against a real, live @receptron/laya
+// response, not just source reading -- see the `noul` variant below for
+// what that live check corrected.
 // ============================================================================
 
 type LayaWireAnswer =
@@ -55,6 +57,9 @@ type LayaWireAnswer =
     }
   | {
       readonly type: 'score';
+      /** Probability-weighted expected value over the level indices -- not
+       * necessarily an integer (e.g. `1.1157` for a distribution weighted
+       * toward index 1). Confirmed live, not assumed. */
       readonly score: number;
       readonly probabilities: Record<string, number>;
       readonly confidence: number;
@@ -62,7 +67,11 @@ type LayaWireAnswer =
   | {
       readonly type: 'noul';
       readonly noul: number;
-      readonly confidence: number;
+      /** Absent in practice -- a live `@receptron/laya` response's `noul`
+       * answer carries no `confidence` field at all, contrary to this
+       * adapter's original (source-reading-only) assumption. `toIRAnswer`
+       * derives one the same way `LayaFrontendAdapter` already does. */
+      readonly confidence?: number;
     };
 
 interface LayaWireResponse {
@@ -284,6 +293,12 @@ export function toIRAnswer(raw: LayaWireAnswer): IRDecisionAnswer {
       };
     }
     case 'noul':
-      return { type: 'noul', value: raw.noul, confidence: raw.confidence };
+      return {
+        type: 'noul',
+        value: raw.noul,
+        // Derive if the wire response didn't report one -- see LayaWireAnswer's
+        // `noul.confidence` comment; same derivation LayaFrontendAdapter uses.
+        confidence: raw.confidence ?? Math.max(raw.noul, 1 - raw.noul),
+      };
   }
 }
