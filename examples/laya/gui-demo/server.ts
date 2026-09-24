@@ -8,9 +8,11 @@
  * `Bridge.decide()` typed-decision capability, wired into a real (if
  * minimal) request/response app: single and batch triage, a fully dynamic
  * question set (add/remove/rename questions, not just edit prompt text --
- * see `resolveQuestions()`), and an optional side-by-side comparison
- * against TypeSafe's Jev (a second, unrelated typed-decision backend,
- * sharing the exact same Decision IR) when `TYPESAFE_API_KEY` is set.
+ * see `resolveQuestions()`) AND a fully dynamic state shape (add/remove/
+ * rename the input fields themselves -- see `resolveStateFields()`), and
+ * an optional side-by-side comparison against TypeSafe's Jev (a second,
+ * unrelated typed-decision backend, sharing the exact same Decision IR)
+ * when `TYPESAFE_API_KEY` is set.
  *
  * No frontend framework, no build step -- the dashboard is plain
  * HTML/CSS/JS served as static files from `public/`, matching this
@@ -206,13 +208,98 @@ function computePriorityValue(
 }
 
 // ============================================================================
+// State fields -- what the `state` (the ticket-like input) is made of.
+// Also dynamic, mirroring questions: multiple named fields, each with a
+// display label and a primitive type, rather than a single hardcoded
+// "ticket text" string.
+// ============================================================================
+
+export type StateFieldType = 'text' | 'number' | 'boolean';
+
+export interface StateFieldDef {
+  readonly label: string;
+  readonly type: StateFieldType;
+}
+
+export type StateFieldMap = Record<string, StateFieldDef>;
+
+export const DEFAULT_STATE_FIELDS: StateFieldMap = {
+  ticket: { label: 'Ticket Text', type: 'text' },
+};
+
+/** Validates and fully resolves a client-submitted state field map (a PUT is a full replacement). */
+function resolveStateFields(input: unknown): StateFieldMap {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new ValidationError('"stateFields" must be an object mapping field name -> field definition');
+  }
+  const entries = Object.entries(input as Record<string, unknown>);
+  if (entries.length === 0) {
+    throw new ValidationError('"stateFields" must include at least one field');
+  }
+
+  const resolved: StateFieldMap = {};
+  for (const [name, raw] of entries) {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new ValidationError(`${name} must be an object`);
+    }
+    const f = raw as { label?: unknown; type?: unknown };
+    if (!isNonEmptyString(f.label)) {
+      throw new ValidationError(`${name}.label must be a non-empty string`);
+    }
+    if (f.type !== 'text' && f.type !== 'number' && f.type !== 'boolean') {
+      throw new ValidationError(`${name}.type must be "text", "number", or "boolean"`);
+    }
+    resolved[name] = { label: f.label, type: f.type };
+  }
+  return resolved;
+}
+
+/**
+ * Coerces and validates a client-submitted `values` object into a real
+ * `state` object, per the active field config -- every configured field
+ * must have a valid value (unlike question editing, there's no
+ * "skip blanks" leniency here: a triage call with a genuinely missing
+ * piece of configured context is a real error, not a normal mid-edit
+ * state).
+ */
+function resolveStateValues(input: unknown, stateFields: StateFieldMap): Record<string, unknown> {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new ValidationError('"values" must be an object mapping field name -> value');
+  }
+  const values = input as Record<string, unknown>;
+  const state: Record<string, unknown> = {};
+
+  for (const [name, field] of Object.entries(stateFields)) {
+    const raw = values[name];
+    if (field.type === 'text') {
+      if (!isNonEmptyString(raw)) {
+        throw new ValidationError(`"${name}" must be a non-empty string`);
+      }
+      state[name] = raw.trim();
+    } else if (field.type === 'number') {
+      const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
+      if (!Number.isFinite(n)) {
+        throw new ValidationError(`"${name}" must be a number`);
+      }
+      state[name] = n;
+    } else {
+      if (typeof raw !== 'boolean') {
+        throw new ValidationError(`"${name}" must be a boolean`);
+      }
+      state[name] = raw;
+    }
+  }
+
+  return state;
+}
+
+// ============================================================================
 // Tickets
 // ============================================================================
 
 interface TriagedTicket {
   readonly id: string;
   readonly backend: 'laya' | 'typesafe';
-  readonly text: string;
   readonly answers: Record<string, IRDecisionAnswer>;
   /** 0..1, normalized from whichever question was the priority question at
    * triage time -- see computePriorityValue(). `null` when no priority
@@ -254,11 +341,10 @@ export interface AppDeps {
 async function triageWith(
   bridge: Bridge,
   backend: TriagedTicket['backend'],
-  text: string,
+  state: unknown,
   questions: QuestionMap,
   priorityQuestion: string | null
 ): Promise<TriagedTicket> {
-  const state = { ticket: text };
   const startedAt = performance.now();
   const response = await bridge.decide(state, questions);
   const latencyMs = performance.now() - startedAt;
@@ -266,7 +352,6 @@ async function triageWith(
   return {
     id: randomUUID(),
     backend,
-    text,
     answers: response.answers,
     priorityValue: computePriorityValue(response.answers, questions, priorityQuestion),
     timestamp: Date.now(),
@@ -336,9 +421,14 @@ export function createRequestHandler(deps: AppDeps): http.RequestListener {
   const store = createTicketStore();
   let activeQuestions: QuestionMap = DEFAULT_QUESTIONS;
   let activePriorityQuestion: string | null = DEFAULT_PRIORITY_QUESTION;
+  let activeStateFields: StateFieldMap = DEFAULT_STATE_FIELDS;
 
   function questionsPayload() {
     return { questions: activeQuestions, priorityQuestion: activePriorityQuestion };
+  }
+
+  function stateFieldsPayload() {
+    return { stateFields: activeStateFields };
   }
 
   async function handleApi(
@@ -381,77 +471,99 @@ export function createRequestHandler(deps: AppDeps): http.RequestListener {
       return true;
     }
 
+    if (pathname === '/api/state-fields' && req.method === 'GET') {
+      sendJSON(res, 200, stateFieldsPayload());
+      return true;
+    }
+
+    if (pathname === '/api/state-fields' && req.method === 'PUT') {
+      try {
+        const body = (await readJSONBody(req)) as { stateFields?: unknown };
+        activeStateFields = resolveStateFields(body.stateFields);
+        sendJSON(res, 200, stateFieldsPayload());
+      } catch (error) {
+        if (error instanceof ValidationError) {
+          sendJSON(res, 400, { error: error.message });
+        } else {
+          sendJSON(res, 400, { error: 'Invalid JSON body' });
+        }
+      }
+      return true;
+    }
+
+    if (pathname === '/api/state-fields/reset' && req.method === 'POST') {
+      activeStateFields = DEFAULT_STATE_FIELDS;
+      sendJSON(res, 200, stateFieldsPayload());
+      return true;
+    }
+
     if (pathname === '/api/triage' && req.method === 'POST') {
       try {
-        const body = (await readJSONBody(req)) as { text?: unknown };
-        if (!isNonEmptyString(body.text)) {
-          sendJSON(res, 400, { error: 'Request body must include non-empty "text"' });
-          return true;
-        }
-        const ticket = await triageWith(
-          deps.layaBridge,
-          'laya',
-          body.text.trim(),
-          activeQuestions,
-          activePriorityQuestion
-        );
+        const body = (await readJSONBody(req)) as { values?: unknown };
+        const state = resolveStateValues(body.values, activeStateFields);
+        const ticket = await triageWith(deps.layaBridge, 'laya', state, activeQuestions, activePriorityQuestion);
         store.add(ticket);
         sendJSON(res, 200, ticket);
       } catch (error) {
-        sendJSON(res, 500, { error: error instanceof Error ? error.message : String(error) });
+        if (error instanceof ValidationError) {
+          sendJSON(res, 400, { error: error.message });
+        } else {
+          sendJSON(res, 500, { error: error instanceof Error ? error.message : String(error) });
+        }
       }
       return true;
     }
 
     if (pathname === '/api/triage/batch' && req.method === 'POST') {
       try {
-        const body = (await readJSONBody(req)) as { texts?: unknown };
-        if (!Array.isArray(body.texts) || body.texts.length === 0) {
-          sendJSON(res, 400, { error: 'Request body must include non-empty "texts" array' });
+        const fieldNames = Object.keys(activeStateFields);
+        const soleField = fieldNames.length === 1 ? activeStateFields[fieldNames[0]] : undefined;
+        if (!soleField || soleField.type !== 'text') {
+          sendJSON(res, 400, {
+            error:
+              'Batch mode requires exactly one state field, of type "text" -- ' +
+              '"one value per line" is ambiguous across multiple fields.',
+          });
           return true;
         }
-        const texts = body.texts.filter(isNonEmptyString).map((t) => t.trim());
-        if (texts.length === 0) {
-          sendJSON(res, 400, { error: 'No valid (non-empty) ticket text found in "texts"' });
+        const fieldName = fieldNames[0];
+
+        const body = (await readJSONBody(req)) as { lines?: unknown };
+        if (!Array.isArray(body.lines) || body.lines.length === 0) {
+          sendJSON(res, 400, { error: 'Request body must include non-empty "lines" array' });
+          return true;
+        }
+        const lines = body.lines.filter(isNonEmptyString).map((t) => t.trim());
+        if (lines.length === 0) {
+          sendJSON(res, 400, { error: 'No valid (non-empty) lines found in "lines"' });
           return true;
         }
         // Sequential, not parallel: a single loaded ONNX session isn't
         // necessarily safe for overlapping concurrent calls, and this is
         // a demo, not a throughput benchmark.
         const results: TriagedTicket[] = [];
-        for (const text of texts) {
-          const ticket = await triageWith(
-            deps.layaBridge,
-            'laya',
-            text,
-            activeQuestions,
-            activePriorityQuestion
-          );
+        for (const line of lines) {
+          const state = resolveStateValues({ [fieldName]: line }, activeStateFields);
+          const ticket = await triageWith(deps.layaBridge, 'laya', state, activeQuestions, activePriorityQuestion);
           store.add(ticket);
           results.push(ticket);
         }
         sendJSON(res, 200, { results });
       } catch (error) {
-        sendJSON(res, 500, { error: error instanceof Error ? error.message : String(error) });
+        if (error instanceof ValidationError) {
+          sendJSON(res, 400, { error: error.message });
+        } else {
+          sendJSON(res, 500, { error: error instanceof Error ? error.message : String(error) });
+        }
       }
       return true;
     }
 
     if (pathname === '/api/triage/compare' && req.method === 'POST') {
       try {
-        const body = (await readJSONBody(req)) as { text?: unknown };
-        if (!isNonEmptyString(body.text)) {
-          sendJSON(res, 400, { error: 'Request body must include non-empty "text"' });
-          return true;
-        }
-        const text = body.text.trim();
-        const laya = await triageWith(
-          deps.layaBridge,
-          'laya',
-          text,
-          activeQuestions,
-          activePriorityQuestion
-        );
+        const body = (await readJSONBody(req)) as { values?: unknown };
+        const state = resolveStateValues(body.values, activeStateFields);
+        const laya = await triageWith(deps.layaBridge, 'laya', state, activeQuestions, activePriorityQuestion);
         store.add(laya);
 
         let typesafe: TriagedTicket | null = null;
@@ -461,7 +573,7 @@ export function createRequestHandler(deps: AppDeps): http.RequestListener {
             typesafe = await triageWith(
               deps.typesafeBridge,
               'typesafe',
-              text,
+              state,
               activeQuestions,
               activePriorityQuestion
             );
@@ -474,7 +586,11 @@ export function createRequestHandler(deps: AppDeps): http.RequestListener {
 
         sendJSON(res, 200, { laya, typesafe, typesafeError });
       } catch (error) {
-        sendJSON(res, 500, { error: error instanceof Error ? error.message : String(error) });
+        if (error instanceof ValidationError) {
+          sendJSON(res, 400, { error: error.message });
+        } else {
+          sendJSON(res, 500, { error: error instanceof Error ? error.message : String(error) });
+        }
       }
       return true;
     }

@@ -55,13 +55,14 @@ main {
 }
 
 #input-panel,
+#state-fields-panel,
 #questions-panel,
 #result-panel {
   grid-column: span 2;
 }
 
 @media (min-width: 800px) {
-  #input-panel,
+  #state-fields-panel,
   #questions-panel {
     grid-column: span 1;
   }
@@ -334,6 +335,42 @@ textarea {
   font-family: inherit;
   font-size: 0.9rem;
   resize: vertical;
+}
+
+#state-fields-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.state-field-input-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.state-field-input-label input[type='number'] {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.55rem;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.state-field-input-label.checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.state-field-input-label.checkbox-label input {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
 }
 
 .examples {

@@ -28,6 +28,7 @@ import {
   createRequestHandler,
   DEFAULT_QUESTIONS,
   DEFAULT_PRIORITY_QUESTION,
+  DEFAULT_STATE_FIELDS,
   type AppDeps,
 } from './server.js';
 
@@ -302,18 +303,91 @@ describe('GET/PUT/POST /api/questions', () => {
   });
 });
 
+describe('GET/PUT/POST /api/state-fields', () => {
+  it('GET returns the default single "ticket" text field initially', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    const res = await fetch(`${baseUrl}/api/state-fields`);
+    expect(await res.json()).toEqual({ stateFields: DEFAULT_STATE_FIELDS });
+  });
+
+  it('PUT replaces the active field set with multiple, differently-typed fields', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    const res = await fetch(`${baseUrl}/api/state-fields`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stateFields: {
+          ticket: { label: 'Ticket Text', type: 'text' },
+          accountAgeDays: { label: 'Account Age (days)', type: 'number' },
+          isPremium: { label: 'Premium Customer?', type: 'boolean' },
+        },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Object.keys(body.stateFields)).toEqual(['ticket', 'accountAgeDays', 'isPremium']);
+    expect(body.stateFields.accountAgeDays.type).toBe('number');
+
+    const getRes = await fetch(`${baseUrl}/api/state-fields`);
+    expect((await getRes.json()).stateFields.isPremium.type).toBe('boolean');
+  });
+
+  it('PUT rejects a field with an unknown type', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    const res = await fetch(`${baseUrl}/api/state-fields`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stateFields: { x: { label: 'X', type: 'date' } } }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/type must be/);
+  });
+
+  it('PUT rejects a field missing a label', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    const res = await fetch(`${baseUrl}/api/state-fields`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stateFields: { x: { type: 'text' } } }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/label must be/);
+  });
+
+  it('PUT rejects an empty field set', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    const res = await fetch(`${baseUrl}/api/state-fields`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stateFields: {} }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/at least one field/);
+  });
+
+  it('POST /api/state-fields/reset restores the default after an edit', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    await fetch(`${baseUrl}/api/state-fields`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stateFields: { x: { label: 'X', type: 'number' } } }),
+    });
+    const resetRes = await fetch(`${baseUrl}/api/state-fields/reset`, { method: 'POST' });
+    expect(await resetRes.json()).toEqual({ stateFields: DEFAULT_STATE_FIELDS });
+  });
+});
+
 describe('POST /api/triage', () => {
   it('triages a single ticket and adds it to the queue', async () => {
     const baseUrl = await startServer(layaOnlyDeps());
     const res = await fetch(`${baseUrl}/api/triage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'I was charged twice' }),
+      body: JSON.stringify({ values: { ticket: 'I was charged twice' } }),
     });
     expect(res.status).toBe(200);
     const ticket = await res.json();
     expect(ticket.backend).toBe('laya');
-    expect(ticket.text).toBe('I was charged twice');
     expect(ticket.answers.category.value).toBe('billing');
     expect(typeof ticket.latencyMs).toBe('number');
     expect(ticket.request.state).toEqual({ ticket: 'I was charged twice' });
@@ -331,9 +405,56 @@ describe('POST /api/triage', () => {
     const res = await fetch(`${baseUrl}/api/triage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: '   ' }),
+      body: JSON.stringify({ values: { ticket: '   ' } }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it('builds state from multiple, differently-typed fields, not just one text field', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    await fetch(`${baseUrl}/api/state-fields`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stateFields: {
+          ticket: { label: 'Ticket Text', type: 'text' },
+          accountAgeDays: { label: 'Account Age (days)', type: 'number' },
+          isPremium: { label: 'Premium Customer?', type: 'boolean' },
+        },
+      }),
+    });
+
+    const res = await fetch(`${baseUrl}/api/triage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: { ticket: 'a ticket', accountAgeDays: '42', isPremium: true } }),
+    });
+    expect(res.status).toBe(200);
+    const ticket = await res.json();
+    // accountAgeDays submitted as a numeric string -- coerced to a real number.
+    expect(ticket.request.state).toEqual({ ticket: 'a ticket', accountAgeDays: 42, isPremium: true });
+  });
+
+  it('rejects a triage request missing a configured field', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    await fetch(`${baseUrl}/api/state-fields`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stateFields: {
+          ticket: { label: 'Ticket Text', type: 'text' },
+          isPremium: { label: 'Premium Customer?', type: 'boolean' },
+        },
+      }),
+    });
+
+    const res = await fetch(`${baseUrl}/api/triage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: { ticket: 'a ticket' } }), // isPremium missing
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/"isPremium" must be a boolean/);
   });
 
   it('computes priorityValue against a fully custom question schema, not just the defaults', async () => {
@@ -361,7 +482,7 @@ describe('POST /api/triage', () => {
     const res = await fetch(`${baseUrl}/api/triage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'a ticket' }),
+      body: JSON.stringify({ values: { ticket: 'a ticket' } }),
     });
     const ticket = await res.json();
     expect(Object.keys(ticket.answers)).toEqual(['sentiment', 'severity']);
@@ -383,38 +504,78 @@ describe('POST /api/triage', () => {
     const res = await fetch(`${baseUrl}/api/triage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'a ticket' }),
+      body: JSON.stringify({ values: { ticket: 'a ticket' } }),
     });
     expect((await res.json()).priorityValue).toBeNull();
   });
 });
 
 describe('POST /api/triage/batch', () => {
-  it('triages every ticket in the batch and adds them all to the queue', async () => {
+  it('triages every line in the batch and adds them all to the queue', async () => {
     const baseUrl = await startServer(layaOnlyDeps());
     const res = await fetch(`${baseUrl}/api/triage/batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ texts: ['first ticket', 'second ticket', ''] }),
+      body: JSON.stringify({ lines: ['first ticket', 'second ticket', ''] }),
     });
     expect(res.status).toBe(200);
     const { results } = await res.json();
     // The blank entry is filtered out, not triaged.
     expect(results).toHaveLength(2);
-    expect(results.map((t: { text: string }) => t.text)).toEqual(['first ticket', 'second ticket']);
+    expect(results.map((t: { request: { state: { ticket: string } } }) => t.request.state.ticket)).toEqual([
+      'first ticket',
+      'second ticket',
+    ]);
 
     const queueRes = await fetch(`${baseUrl}/api/tickets`);
     expect(await queueRes.json()).toHaveLength(2);
   });
 
-  it('rejects a request with no usable ticket text', async () => {
+  it('rejects a request with no usable lines', async () => {
     const baseUrl = await startServer(layaOnlyDeps());
     const res = await fetch(`${baseUrl}/api/triage/batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ texts: ['', '   '] }),
+      body: JSON.stringify({ lines: ['', '   '] }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it('is unavailable when more than one state field is configured', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    await fetch(`${baseUrl}/api/state-fields`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stateFields: {
+          ticket: { label: 'Ticket Text', type: 'text' },
+          isPremium: { label: 'Premium Customer?', type: 'boolean' },
+        },
+      }),
+    });
+    const res = await fetch(`${baseUrl}/api/triage/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lines: ['a ticket'] }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/exactly one state field/);
+  });
+
+  it('is unavailable when the sole state field is not type "text"', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    await fetch(`${baseUrl}/api/state-fields`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stateFields: { age: { label: 'Age', type: 'number' } } }),
+    });
+    const res = await fetch(`${baseUrl}/api/triage/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lines: ['42'] }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/exactly one state field/);
   });
 });
 
@@ -424,7 +585,7 @@ describe('POST /api/triage/compare', () => {
     const res = await fetch(`${baseUrl}/api/triage/compare`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'a ticket' }),
+      body: JSON.stringify({ values: { ticket: 'a ticket' } }),
     });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -438,7 +599,7 @@ describe('POST /api/triage/compare', () => {
     const res = await fetch(`${baseUrl}/api/triage/compare`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'a ticket' }),
+      body: JSON.stringify({ values: { ticket: 'a ticket' } }),
     });
     const body = await res.json();
     expect(body.laya.backend).toBe('laya');
@@ -453,16 +614,19 @@ describe('GET/DELETE /api/tickets', () => {
     await fetch(`${baseUrl}/api/triage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'older' }),
+      body: JSON.stringify({ values: { ticket: 'older' } }),
     });
     await fetch(`${baseUrl}/api/triage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'newer' }),
+      body: JSON.stringify({ values: { ticket: 'newer' } }),
     });
 
     const listed = await (await fetch(`${baseUrl}/api/tickets`)).json();
-    expect(listed.map((t: { text: string }) => t.text)).toEqual(['newer', 'older']);
+    expect(listed.map((t: { request: { state: { ticket: string } } }) => t.request.state.ticket)).toEqual([
+      'newer',
+      'older',
+    ]);
 
     const deleteRes = await fetch(`${baseUrl}/api/tickets`, { method: 'DELETE' });
     expect(await deleteRes.json()).toEqual({ ok: true });

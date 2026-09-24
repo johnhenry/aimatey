@@ -54,8 +54,10 @@ function colorForFraction(frac) {
 const singleModeEl = document.getElementById('single-mode');
 const batchModeEl = document.getElementById('batch-mode');
 const modeButtons = document.querySelectorAll('.mode-btn');
-const ticketText = document.getElementById('ticket-text');
+const stateFieldsInputsEl = document.getElementById('state-fields-inputs');
+const examplesRow = document.getElementById('examples-row');
 const batchText = document.getElementById('batch-text');
+const batchUnavailable = document.getElementById('batch-unavailable');
 const compareToggleLabel = document.getElementById('compare-toggle-label');
 const compareCheckbox = document.getElementById('compare-checkbox');
 const triageBtn = document.getElementById('triage-btn');
@@ -63,6 +65,13 @@ const statusEl = document.getElementById('status');
 
 const resultPanel = document.getElementById('result-panel');
 const resultColumns = document.getElementById('result-columns');
+
+const stateFieldsToggleBtn = document.getElementById('state-fields-toggle-btn');
+const stateFieldsForm = document.getElementById('state-fields-form');
+const stateFieldsList = document.getElementById('state-fields-list');
+const addStateFieldBtn = document.getElementById('add-state-field-btn');
+const stateFieldsResetBtn = document.getElementById('state-fields-reset-btn');
+const stateFieldsStatus = document.getElementById('state-fields-status');
 
 const questionsToggleBtn = document.getElementById('questions-toggle-btn');
 const questionsForm = document.getElementById('questions-form');
@@ -80,6 +89,13 @@ const exportCsvBtn = document.getElementById('export-csv-btn');
 
 let currentMode = 'single';
 let latestTickets = [];
+// The currently active state fields (from the server, not the editor draft)
+// and the live <input>/<textarea> elements the ticket form renders for
+// them -- kept separate from the editor's own draft state, same reasoning
+// as the questions editor: the form the user is about to submit should
+// reflect what's actually active, not an in-progress edit.
+let activeStateFields = {};
+let stateFieldInputs = {};
 
 // ============================================================================
 // Mode toggle
@@ -87,6 +103,7 @@ let latestTickets = [];
 
 modeButtons.forEach((btn) => {
   btn.addEventListener('click', () => {
+    if (btn.disabled) return;
     currentMode = btn.dataset.mode;
     modeButtons.forEach((b) => b.classList.toggle('active', b === btn));
     singleModeEl.hidden = currentMode !== 'single';
@@ -96,10 +113,18 @@ modeButtons.forEach((btn) => {
   });
 });
 
+function firstTextFieldInput() {
+  const name = Object.keys(activeStateFields).find((n) => activeStateFields[n].type === 'text');
+  return name ? stateFieldInputs[name] : undefined;
+}
+
 document.querySelectorAll('.example-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
     const index = Number(btn.dataset.example);
-    ticketText.value = SAMPLE_TICKETS[index];
+    const input = firstTextFieldInput();
+    if (input) {
+      input.value = SAMPLE_TICKETS[index];
+    }
   });
 });
 
@@ -116,6 +141,259 @@ async function loadBackends() {
 }
 
 // ============================================================================
+// Shared id counter for both the state-field editor and the question
+// editor below -- editing needs stable row identity (add/remove) that's
+// independent of the (possibly-being-edited, possibly-duplicate-mid-edit)
+// field/question name.
+// ============================================================================
+
+let editorNextId = 1;
+function newId() {
+  return editorNextId++;
+}
+
+// ============================================================================
+// State field editor -- what the ticket input form is made of (mirrors
+// the question editor below). Also autosaves; see scheduleStateFieldsAutoSave.
+// ============================================================================
+
+let editorStateFields = [];
+
+function stateFieldsToEditorState(stateFields) {
+  return Object.entries(stateFields).map(([name, f]) => ({
+    id: newId(),
+    name,
+    label: f.label,
+    type: f.type,
+  }));
+}
+
+function editorStateToStateFields() {
+  const result = {};
+  for (const f of editorStateFields) {
+    const name = f.name.trim();
+    if (!name || !f.label.trim()) continue; // Blank rows are dropped client-side; the server still rejects an empty result.
+    result[name] = { label: f.label, type: f.type };
+  }
+  return result;
+}
+
+function renderStateFieldsEditor() {
+  stateFieldsList.innerHTML = '';
+
+  editorStateFields.forEach((f, index) => {
+    const card = document.createElement('div');
+    card.className = 'question-card';
+
+    const header = document.createElement('div');
+    header.className = 'question-card-header';
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'question-name-input';
+    nameInput.placeholder = 'name (e.g. accountAgeDays)';
+    nameInput.value = f.name;
+    nameInput.addEventListener('input', () => {
+      f.name = nameInput.value;
+      scheduleStateFieldsAutoSave();
+    });
+
+    const typeSelect = document.createElement('select');
+    ['text', 'number', 'boolean'].forEach((t) => {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      opt.selected = t === f.type;
+      typeSelect.appendChild(opt);
+    });
+    typeSelect.addEventListener('change', () => {
+      f.type = typeSelect.value;
+      scheduleStateFieldsAutoSave();
+    });
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'remove-btn';
+    removeBtn.textContent = 'Remove';
+    removeBtn.addEventListener('click', () => {
+      editorStateFields.splice(index, 1);
+      renderStateFieldsEditor();
+      scheduleStateFieldsAutoSave();
+    });
+
+    header.appendChild(nameInput);
+    header.appendChild(typeSelect);
+    header.appendChild(removeBtn);
+    card.appendChild(header);
+
+    const labelInput = document.createElement('input');
+    labelInput.type = 'text';
+    labelInput.className = 'question-instructions-input';
+    labelInput.placeholder = 'Display label (e.g. Account Age (days))';
+    labelInput.value = f.label;
+    labelInput.addEventListener('input', () => {
+      f.label = labelInput.value;
+      scheduleStateFieldsAutoSave();
+    });
+    card.appendChild(labelInput);
+
+    stateFieldsList.appendChild(card);
+  });
+}
+
+stateFieldsToggleBtn.addEventListener('click', () => {
+  stateFieldsForm.hidden = !stateFieldsForm.hidden;
+  stateFieldsToggleBtn.textContent = stateFieldsForm.hidden ? 'Edit' : 'Hide';
+});
+
+addStateFieldBtn.addEventListener('click', () => {
+  editorStateFields.push({ id: newId(), name: '', label: '', type: 'text' });
+  renderStateFieldsEditor();
+  scheduleStateFieldsAutoSave();
+});
+
+async function loadStateFields() {
+  const res = await fetch('/api/state-fields');
+  const { stateFields } = await res.json();
+  editorStateFields = stateFieldsToEditorState(stateFields);
+  renderStateFieldsEditor();
+  applyActiveStateFields(stateFields);
+}
+
+let stateFieldsAutoSaveTimer;
+
+function scheduleStateFieldsAutoSave() {
+  clearTimeout(stateFieldsAutoSaveTimer);
+  stateFieldsAutoSaveTimer = setTimeout(() => {
+    void saveStateFields();
+  }, 500);
+}
+
+async function saveStateFields() {
+  const stateFields = editorStateToStateFields();
+  if (Object.keys(stateFields).length === 0) {
+    return;
+  }
+  stateFieldsStatus.textContent = 'Saving...';
+  stateFieldsStatus.classList.remove('error');
+  try {
+    const res = await fetch('/api/state-fields', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stateFields }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || `Request failed (${res.status})`);
+    }
+    applyActiveStateFields(data.stateFields);
+    stateFieldsStatus.textContent = 'Saved.';
+  } catch (error) {
+    stateFieldsStatus.textContent = error.message;
+    stateFieldsStatus.classList.add('error');
+  }
+}
+
+stateFieldsResetBtn.addEventListener('click', async () => {
+  clearTimeout(stateFieldsAutoSaveTimer);
+  const res = await fetch('/api/state-fields/reset', { method: 'POST' });
+  const { stateFields } = await res.json();
+  editorStateFields = stateFieldsToEditorState(stateFields);
+  renderStateFieldsEditor();
+  applyActiveStateFields(stateFields);
+  stateFieldsStatus.textContent = 'Reset to defaults.';
+  stateFieldsStatus.classList.remove('error');
+});
+
+// ----------------------------------------------------------------------------
+// The actual ticket input form (#state-fields-inputs) is rebuilt whenever
+// the active field set changes -- this is separate from the editor form
+// above, and IS safe to rebuild on every save (unlike the editor, it's not
+// something the user is mid-way through typing into when a save completes;
+// it's the target of the next Triage click).
+// ----------------------------------------------------------------------------
+
+function applyActiveStateFields(stateFields) {
+  activeStateFields = stateFields;
+  renderTicketInputs();
+  updateBatchAvailability();
+}
+
+function renderTicketInputs() {
+  const previousValues = gatherStateValues();
+  stateFieldsInputsEl.innerHTML = '';
+  stateFieldInputs = {};
+
+  for (const [name, field] of Object.entries(activeStateFields)) {
+    const wrap = document.createElement('label');
+    wrap.className = 'state-field-input-label';
+    wrap.textContent = field.label;
+
+    let input;
+    if (field.type === 'text') {
+      input = document.createElement('textarea');
+      input.rows = 4;
+      input.placeholder = `${field.label}...`;
+    } else if (field.type === 'number') {
+      input = document.createElement('input');
+      input.type = 'number';
+    } else {
+      input = document.createElement('input');
+      input.type = 'checkbox';
+      wrap.classList.add('checkbox-label');
+    }
+
+    // Preserve values across a field-set reload when the field itself is unchanged.
+    if (Object.prototype.hasOwnProperty.call(previousValues, name)) {
+      if (field.type === 'boolean') {
+        input.checked = Boolean(previousValues[name]);
+      } else {
+        input.value = previousValues[name];
+      }
+    }
+
+    stateFieldInputs[name] = input;
+    wrap.appendChild(input);
+    stateFieldsInputsEl.appendChild(wrap);
+  }
+
+  examplesRow.hidden = !firstTextFieldInput();
+}
+
+function gatherStateValues() {
+  const values = {};
+  for (const [name, field] of Object.entries(activeStateFields)) {
+    const input = stateFieldInputs[name];
+    if (!input) continue;
+    if (field.type === 'boolean') {
+      values[name] = input.checked;
+    } else if (field.type === 'number') {
+      values[name] = input.value === '' ? '' : input.valueAsNumber;
+    } else {
+      values[name] = input.value;
+    }
+  }
+  return values;
+}
+
+function updateBatchAvailability() {
+  const names = Object.keys(activeStateFields);
+  const available = names.length === 1 && activeStateFields[names[0]].type === 'text';
+  const batchModeBtn = Array.from(modeButtons).find((b) => b.dataset.mode === 'batch');
+  batchModeBtn.disabled = !available;
+  batchModeBtn.title = available ? '' : 'Batch mode needs exactly one state field, of type Text';
+  batchText.hidden = !available;
+  batchUnavailable.hidden = available;
+  if (!available && currentMode === 'batch') {
+    // The field set changed out from under an active batch session -- fall
+    // back to single mode rather than leaving a dead, unsubmittable form up.
+    Array.from(modeButtons)
+      .find((b) => b.dataset.mode === 'single')
+      .click();
+  }
+}
+
+// ============================================================================
 // Question editor -- a dynamic form builder, not fixed fields. State is
 // an array (editorQuestions) rather than the wire object, since editing
 // needs stable identity for rows (add/remove) independent of the
@@ -123,10 +401,6 @@ async function loadBackends() {
 // ============================================================================
 
 let editorQuestions = [];
-let editorNextId = 1;
-function newId() {
-  return editorNextId++;
-}
 
 function questionsToEditorState(questions) {
   return Object.entries(questions).map(([name, q]) => {
@@ -477,9 +751,9 @@ triageBtn.addEventListener('click', () => {
 });
 
 async function triageSingle() {
-  const text = ticketText.value.trim();
-  if (!text) {
-    setStatus('Enter some ticket text first.', true);
+  const values = gatherStateValues();
+  if (Object.values(values).every((v) => v === '' || v === null || v === undefined)) {
+    setStatus('Fill in at least one field first.', true);
     return;
   }
 
@@ -491,7 +765,7 @@ async function triageSingle() {
     const res = await fetch(compare ? '/api/triage/compare' : '/api/triage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ values }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -533,7 +807,7 @@ async function triageBatch() {
     const res = await fetch('/api/triage/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ texts: lines }),
+      body: JSON.stringify({ lines }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -593,29 +867,36 @@ function csvField(value) {
 }
 
 exportCsvBtn.addEventListener('click', () => {
-  // Columns are derived from whatever questions actually appear across the
-  // exported tickets -- there's no fixed schema to hardcode column names
-  // against anymore.
+  // Columns are derived from whatever state fields and questions actually
+  // appear across the exported tickets -- there's no fixed schema to
+  // hardcode column names against anymore.
+  const stateNames = new Set();
   const questionNames = new Set();
-  latestTickets.forEach((t) => Object.keys(t.answers).forEach((name) => questionNames.add(name)));
-  const names = Array.from(questionNames);
+  latestTickets.forEach((t) => {
+    Object.keys(t.request.state || {}).forEach((name) => stateNames.add(name));
+    Object.keys(t.answers).forEach((name) => questionNames.add(name));
+  });
+  const stateColumns = Array.from(stateNames);
+  const questionColumns = Array.from(questionNames);
 
   const columns = [
     'id',
     'backend',
     'timestamp',
-    'text',
+    ...stateColumns,
     'priorityValue',
     'latencyMs',
-    ...names.flatMap((n) => [n, `${n}.confidence`]),
+    ...questionColumns.flatMap((n) => [n, `${n}.confidence`]),
   ];
   const rows = latestTickets.map((t) => {
-    const base = [t.id, t.backend, new Date(t.timestamp).toISOString(), t.text, t.priorityValue ?? '', t.latencyMs];
-    const perQuestion = names.flatMap((n) => {
+    const base = [t.id, t.backend, new Date(t.timestamp).toISOString()];
+    const state = stateColumns.map((n) => (t.request.state || {})[n] ?? '');
+    const tail = [t.priorityValue ?? '', t.latencyMs];
+    const perQuestion = questionColumns.flatMap((n) => {
       const a = t.answers[n];
       return [a ? a.value : '', a && a.confidence !== undefined ? a.confidence : ''];
     });
-    return [...base, ...perQuestion].map(csvField).join(',');
+    return [...base, ...state, ...tail, ...perQuestion].map(csvField).join(',');
   });
   download('triage-tickets.csv', [columns.join(','), ...rows].join('\n'), 'text/csv');
 });
@@ -773,6 +1054,14 @@ function summarize(ticket) {
   return `${name}: ${answer.value}`;
 }
 
+// State is a dynamic, possibly-multi-field record now -- there's no single
+// "text" field to display, so join every value into one summary line.
+function summarizeState(state) {
+  return Object.values(state || {})
+    .map((v) => String(v))
+    .join(' · ');
+}
+
 function renderQueue(tickets) {
   queueCount.textContent = tickets.length ? `(${tickets.length})` : '';
   queueList.innerHTML = '';
@@ -807,7 +1096,7 @@ function renderQueue(tickets) {
 
     const text = document.createElement('span');
     text.className = 'queue-item-text';
-    text.textContent = ticket.text;
+    text.textContent = summarizeState(ticket.request.state);
 
     const meta = document.createElement('span');
     meta.className = 'queue-item-meta';
@@ -831,5 +1120,6 @@ function renderQueue(tickets) {
 // ============================================================================
 
 void loadBackends();
+void loadStateFields();
 void loadQuestions();
 void loadQueue();

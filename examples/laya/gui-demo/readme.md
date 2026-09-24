@@ -18,6 +18,11 @@ from the CLI, wired into a persistent server instead of a one-shot script.
   `IRDecisionQuestion` type instead of a bespoke schema, since a
   client-editable question set and a Decision IR request's `questions`
   field are the same thing once nothing forces a fixed shape.
+- A fully dynamic *state* shape too, mirroring the same idea on the input
+  side: add, remove, or rename the fields Laya sees per ticket, each
+  independently Text/Number/Boolean (see `resolveStateFields()` /
+  `resolveStateValues()`). The ticket input form is generated from
+  whatever fields are active, not one hardcoded textarea.
 - A plain HTML/CSS/vanilla-JS frontend with no build step -- probability
   bars (colors computed as a gradient, not looked up by a fixed level
   name), per-request latency, a raw request/response viewer, and a queue
@@ -63,12 +68,23 @@ Then open <http://localhost:8080>.
 
 ## Features
 
-- **Single ticket** -- paste or type a ticket, or use one of the "Try an
-  example" buttons, and triage it.
-- **Batch** -- switch to Batch mode, one ticket per line, triage them all
-  in one request. Processed sequentially (a single loaded ONNX session
-  isn't necessarily safe for overlapping concurrent calls), so a large
-  batch takes proportionally longer -- there's no progress bar beyond the
+- **Fully dynamic state fields** -- the "State" panel is the same kind of
+  form builder as "Questions" below, but for the input side: add, remove,
+  or rename fields, each independently Text/Number/Boolean. The single
+  ticket form is generated from whatever fields are active (a textarea
+  per Text field, a number input per Number field, a checkbox per Boolean
+  field). "Reset to defaults" restores the original single `ticket` text
+  field.
+- **Single ticket** -- fill in the active state fields, or use one of the
+  "Try an example" buttons (populates the first Text field), and triage.
+- **Batch** -- switch to Batch mode, one line per ticket, triage them all
+  in one request. Only available when exactly one state field is
+  configured, of type Text -- "one value per line" is ambiguous once
+  there's more than one field, so batch mode is disabled (with an
+  explanation) rather than silently guessing which field each line maps
+  to. Processed sequentially (a single loaded ONNX session isn't
+  necessarily safe for overlapping concurrent calls), so a large batch
+  takes proportionally longer -- there's no progress bar beyond the
   status line, by design, to keep this a demo and not a job queue.
 - **Compare with TypeSafe (Jev)** -- when `TYPESAFE_API_KEY` is set,
   check the box before triaging a single ticket to see both backends'
@@ -96,9 +112,9 @@ Then open <http://localhost:8080>.
   unmapped wire response (`IRDecisionResponse.raw`).
 - **Export** -- "Export JSON" / "Export CSV" in the Queue panel download
   the current queue (JSON: full ticket objects; CSV: a flattened summary,
-  one row per ticket, with a `<name>`/`<name>.confidence` column pair for
-  every question that appears across the exported tickets, plus
-  `priorityValue` and `latencyMs`).
+  one row per ticket, with a column for every state field that appears
+  across the exported tickets, plus `priorityValue`/`latencyMs`, plus a
+  `<name>`/`<name>.confidence` column pair for every question).
 
 Not implemented: persisting the queue across server restarts (in-memory
 only, deliberately -- see the top-level dashboard commit history for why).

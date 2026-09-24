@@ -26,8 +26,8 @@
       </div>
 
       <div id="single-mode">
-        <textarea id="ticket-text" rows="5" placeholder="Paste or type a support ticket..."></textarea>
-        <div class="examples">
+        <div id="state-fields-inputs"></div>
+        <div class="examples" id="examples-row">
           <span>Try an example:</span>
           <button type="button" class="example-btn" data-example="0">Angry billing</button>
           <button type="button" class="example-btn" data-example="1">Simple question</button>
@@ -38,6 +38,11 @@
 
       <div id="batch-mode" hidden>
         <textarea id="batch-text" rows="5" placeholder="One ticket per line..."></textarea>
+        <p id="batch-unavailable" class="hint" hidden>
+          Batch mode needs exactly one state field, of type Text -- see the
+          "State" panel. With multiple fields, "one value per line" would be
+          ambiguous.
+        </p>
       </div>
 
       <label class="compare-toggle" id="compare-toggle-label" hidden>
@@ -47,6 +52,26 @@
 
       <button type="button" id="triage-btn">Triage Ticket</button>
       <p id="status"></p>
+    </section>
+
+    <section class="panel" id="state-fields-panel">
+      <div class="panel-header">
+        <h2>State</h2>
+        <button type="button" id="state-fields-toggle-btn">Edit</button>
+      </div>
+      <div id="state-fields-form" hidden>
+        <p class="hint">
+          The input fields Laya sees per ticket. Add, remove, or rename
+          fields, each independently Text, Number, or Boolean. Batch mode
+          only works with exactly one Text field.
+        </p>
+        <div id="state-fields-list"></div>
+        <button type="button" id="add-state-field-btn" class="secondary-btn">+ Add field</button>
+        <div class="questions-actions">
+          <button type="button" id="state-fields-reset-btn">Reset to defaults</button>
+        </div>
+        <p id="state-fields-status">Changes save automatically.</p>
+      </div>
     </section>
 
     <section class="panel" id="questions-panel">
