@@ -1,16 +1,30 @@
+/*
+ * Visual reference: the TypeSafe playground (console.typesafe.ai/playground)
+ * -- light background, thin gray borders instead of filled dark panels,
+ * near-black primary action, gray pill badges, monospace for keys/code,
+ * understated small-caps section labels. Structure/behavior below is
+ * unchanged (still our own form-builder, not their JSON editor) -- this
+ * file only changes how it looks.
+ */
+
 :root {
-  --bg: #0f172a;
-  --panel: #1a2540;
-  --border: #2c3a5c;
-  --text: #e2e8f0;
-  --muted: #94a3b8;
-  --accent: #38bdf8;
-  /* Priority-question colors (queue dot, score/noul bars) are computed as
-     a gradient in app.js (colorForFraction) rather than looked up here --
-     a dynamic question set has no fixed set of level names to key colors
-     by. --error is still a fixed color: it labels a UI state (a failed
-     request), not a triage result. */
-  --error: #ef4444;
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --surface: #f9fafb;
+  --badge-bg: #f3f4f6;
+  --border: #e5e7eb;
+  --text: #111827;
+  --muted: #6b7280;
+  /* Primary-action color: near-black, matching the reference's solid
+     "Run" button -- not a bright brand color used throughout the UI. */
+  --accent: #111827;
+  /* A real color, reserved for data visualization only (the default
+     probability-bar fill; score/noul bars use the gradient in app.js
+     instead) -- kept separate from --accent so restyling the UI chrome
+     never accidentally recolors a result. */
+  --bar-accent: #3b82f6;
+  --error: #dc2626;
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 }
 
 * {
@@ -26,29 +40,39 @@ body {
 }
 
 header {
-  padding: 1.5rem 2rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.9rem 2rem;
   border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 
 header h1 {
-  margin: 0 0 0.25rem;
-  font-size: 1.5rem;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
 }
 
 .subtitle {
   margin: 0;
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.8rem;
 }
 
 .subtitle code {
-  color: var(--accent);
+  font-family: var(--mono);
+  background: var(--badge-bg);
+  border: 1px solid var(--border);
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+  color: var(--text);
 }
 
 main {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1.5rem;
+  gap: 1.25rem;
   padding: 1.5rem 2rem;
   max-width: 1100px;
   margin: 0 auto;
@@ -71,20 +95,26 @@ main {
 .panel {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1.25rem;
+  border-radius: 6px;
+  padding: 1.1rem;
 }
 
 .panel h2 {
   margin: 0 0 0.75rem;
-  font-size: 1.05rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
 }
 
 .panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
 }
 
 .panel-header h2 {
@@ -93,22 +123,28 @@ main {
 
 .mode-toggle {
   display: flex;
-  gap: 0.3rem;
+  gap: 0.2rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.15rem;
 }
 
 .mode-btn {
-  background: var(--bg);
+  background: transparent;
   color: var(--muted);
-  border: 1px solid var(--border);
-  font-weight: 400;
-  font-size: 0.8rem;
+  border: none;
+  font-weight: 500;
+  font-size: 0.78rem;
   padding: 0.3rem 0.7rem;
+  border-radius: 4px;
 }
 
 .mode-btn.active {
-  background: var(--accent);
-  color: #0f172a;
+  background: var(--panel);
+  color: var(--text);
   font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .compare-toggle {
@@ -127,7 +163,7 @@ main {
 }
 
 .compare-toggle input {
-  accent-color: var(--accent);
+  accent-color: var(--bar-accent);
 }
 
 #questions-form {
@@ -139,7 +175,7 @@ main {
 
 #questions-form input[type='text'],
 #questions-form select {
-  background: var(--bg);
+  background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -166,6 +202,7 @@ main {
 .question-name-input {
   flex: 1;
   font-weight: 600;
+  font-family: var(--mono);
 }
 
 .question-card-header select {
@@ -197,7 +234,7 @@ main {
 }
 
 .remove-btn {
-  background: var(--bg);
+  background: var(--panel);
   color: var(--error);
   border: 1px solid var(--border);
   font-weight: 400;
@@ -209,10 +246,10 @@ main {
 }
 
 .secondary-btn {
-  background: var(--bg);
+  background: var(--panel);
   color: var(--muted);
   border: 1px solid var(--border);
-  font-weight: 400;
+  font-weight: 500;
   align-self: flex-start;
 }
 
@@ -221,7 +258,8 @@ main {
   font-size: 0.75rem;
 }
 
-#add-question-btn {
+#add-question-btn,
+#add-state-field-btn {
   width: 100%;
 }
 
@@ -234,11 +272,21 @@ main {
   margin-top: 0.4rem;
 }
 
+.priority-select-label select {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.55rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+
 .hint {
   margin: 0;
   font-size: 0.75rem;
   color: var(--muted);
-  font-style: italic;
+  font-style: normal;
 }
 
 .questions-actions {
@@ -246,21 +294,24 @@ main {
   gap: 0.5rem;
 }
 
-#questions-reset-btn {
-  background: var(--bg);
+#questions-reset-btn,
+#state-fields-reset-btn {
+  background: var(--panel);
   color: var(--muted);
   border: 1px solid var(--border);
-  font-weight: 400;
+  font-weight: 500;
 }
 
-#questions-status {
+#questions-status,
+#state-fields-status {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   color: var(--muted);
   min-height: 1.2em;
 }
 
-#questions-status.error {
+#questions-status.error,
+#state-fields-status.error {
   color: var(--error);
 }
 
@@ -292,31 +343,35 @@ main {
 
 .result-header h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-family: var(--mono);
 }
 
 .latency-badge {
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
 }
 
 .raw-toggle {
   margin-top: 0.75rem;
-  background: var(--bg);
+  background: var(--panel);
   color: var(--muted);
   border: 1px solid var(--border);
-  font-weight: 400;
-  font-size: 0.8rem;
+  font-weight: 500;
+  font-size: 0.78rem;
 }
 
 .raw-view {
   margin-top: 0.75rem;
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.75rem;
   font-size: 0.75rem;
+  font-family: var(--mono);
   color: var(--text);
   overflow-x: auto;
   white-space: pre-wrap;
@@ -327,7 +382,7 @@ main {
 
 textarea {
   width: 100%;
-  background: var(--bg);
+  background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -352,7 +407,7 @@ textarea {
 }
 
 .state-field-input-label input[type='number'] {
-  background: var(--bg);
+  background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -368,7 +423,7 @@ textarea {
 }
 
 .state-field-input-label.checkbox-label input {
-  accent-color: var(--accent);
+  accent-color: var(--bar-accent);
   width: 16px;
   height: 16px;
 }
@@ -384,14 +439,18 @@ textarea {
 }
 
 button {
-  background: var(--accent);
-  color: #0f172a;
-  border: none;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.5rem 0.9rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   font-size: 0.85rem;
+}
+
+button:hover:not(:disabled) {
+  background: var(--surface);
 }
 
 button:disabled {
@@ -400,19 +459,31 @@ button:disabled {
 }
 
 .example-btn {
-  background: var(--bg);
+  background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
   font-weight: 400;
+  font-size: 0.78rem;
 }
 
+/* The one true primary action on the page -- solid, near-black, matching
+   the reference's "Run" button. Every other button on the page is the
+   outlined/secondary look above. */
 #triage-btn {
   margin-top: 0.4rem;
+  background: var(--accent);
+  color: #ffffff;
+  border: 1px solid var(--accent);
+  font-weight: 600;
+}
+
+#triage-btn:hover:not(:disabled) {
+  background: #1f2937;
 }
 
 #status {
   margin: 0.5rem 0 0;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: var(--muted);
   min-height: 1.2em;
 }
@@ -426,19 +497,22 @@ button:disabled {
 }
 
 .answer-label {
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   color: var(--muted);
   margin-bottom: 0.3rem;
+  font-family: var(--mono);
 }
 
 .badge {
   display: inline-block;
   padding: 0.15rem 0.6rem;
   border-radius: 999px;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   font-weight: 600;
-  background: var(--accent);
-  color: #0f172a;
+  font-family: var(--mono);
+  background: var(--badge-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
 }
 
 .bar-track {
@@ -458,7 +532,8 @@ button:disabled {
 
 .bar-outer {
   flex: 1;
-  background: var(--bg);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 4px;
   height: 10px;
   overflow: hidden;
@@ -468,7 +543,7 @@ button:disabled {
   display: block;
   height: 100%;
   border-radius: 4px;
-  background: var(--accent);
+  background: var(--bar-accent);
 }
 
 .bar-pct {
@@ -476,6 +551,7 @@ button:disabled {
   text-align: right;
   color: var(--muted);
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .queue-header {
@@ -493,11 +569,11 @@ button:disabled {
 
 #export-json-btn,
 #export-csv-btn {
-  background: var(--bg);
+  background: var(--panel);
   color: var(--muted);
   border: 1px solid var(--border);
-  font-weight: 400;
-  font-size: 0.8rem;
+  font-weight: 500;
+  font-size: 0.78rem;
 }
 
 .count {
@@ -507,10 +583,10 @@ button:disabled {
 }
 
 #clear-btn {
-  background: var(--bg);
+  background: var(--panel);
   color: var(--muted);
   border: 1px solid var(--border);
-  font-weight: 400;
+  font-weight: 500;
 }
 
 #queue-panel {
@@ -523,7 +599,7 @@ button:disabled {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 
 .queue-item {
@@ -537,7 +613,7 @@ button:disabled {
 }
 
 .queue-item:hover {
-  border-color: var(--accent);
+  background: var(--surface);
 }
 
 .queue-priority-dot {
@@ -560,10 +636,11 @@ button:disabled {
   font-size: 0.75rem;
   color: var(--muted);
   flex-shrink: 0;
+  font-family: var(--mono);
 }
 
 .empty-state {
   color: var(--muted);
   font-size: 0.85rem;
-  font-style: italic;
+  font-style: normal;
 }
