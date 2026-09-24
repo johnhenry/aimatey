@@ -24,11 +24,37 @@ import type {
   IRDecisionRequest,
   IRDecisionResponse,
 } from '@johnhenry/aimatey-types';
-import { createRequestHandler, DEFAULT_QUESTIONS, type AppDeps } from './server.js';
+import {
+  createRequestHandler,
+  DEFAULT_QUESTIONS,
+  DEFAULT_PRIORITY_QUESTION,
+  type AppDeps,
+} from './server.js';
 
 // ============================================================================
 // Test helpers
 // ============================================================================
+
+/**
+ * Builds a plausible answer for whatever question was actually asked,
+ * rather than a fixed canned set -- so tests can exercise a fully custom
+ * question schema (not just the default category/urgency/escalation
+ * names) and still get back sensible, type-correct answers.
+ */
+function answerFor(question: IRDecisionRequest['questions'][string]) {
+  if (question.type === 'choice') {
+    const keys = Object.keys(question.criteria);
+    const probabilities = Object.fromEntries(keys.map((k, i) => [k, i === 0 ? 0.7 : 0.3 / (keys.length - 1)]));
+    return { type: 'choice' as const, value: keys[0], probabilities, confidence: 0.7 };
+  }
+  if (question.type === 'score') {
+    const levels = question.criteria.length;
+    const middle = Math.floor(levels / 2);
+    const probabilities = Array.from({ length: levels }, (_, i) => (i === middle ? 0.6 : 0.4 / (levels - 1)));
+    return { type: 'score' as const, value: middle, probabilities, confidence: 0.6 };
+  }
+  return { type: 'noul' as const, value: 0.7, confidence: 0.7 };
+}
 
 function makeMockBackend(name: string): BackendAdapter {
   const metadata: AdapterMetadata = {
@@ -49,21 +75,9 @@ function makeMockBackend(name: string): BackendAdapter {
     metadata,
     // eslint-disable-next-line @typescript-eslint/require-await -- mock interface
     decide: async (request: IRDecisionRequest): Promise<IRDecisionResponse> => ({
-      answers: {
-        category: {
-          type: 'choice',
-          value: 'billing',
-          probabilities: { billing: 0.8, technical: 0.1, account: 0.05, other: 0.05 },
-          confidence: 0.8,
-        },
-        urgency: {
-          type: 'score',
-          value: 2,
-          probabilities: [0.05, 0.15, 0.6, 0.2],
-          confidence: 0.6,
-        },
-        needsHumanEscalation: { type: 'noul', value: 0.7, confidence: 0.7 },
-      },
+      answers: Object.fromEntries(
+        Object.entries(request.questions).map(([name_, question]) => [name_, answerFor(question)])
+      ),
       model: `${name}-mock`,
       metadata: {
         ...request.metadata,
@@ -121,21 +135,27 @@ describe('GET /api/backends', () => {
 });
 
 describe('GET/PUT/POST /api/questions', () => {
-  it('GET returns the default question set initially', async () => {
+  it('GET returns the default question set and priority question initially', async () => {
     const baseUrl = await startServer(layaOnlyDeps());
     const res = await fetch(`${baseUrl}/api/questions`);
-    expect(await res.json()).toEqual(DEFAULT_QUESTIONS);
+    expect(await res.json()).toEqual({
+      questions: DEFAULT_QUESTIONS,
+      priorityQuestion: DEFAULT_PRIORITY_QUESTION,
+    });
   });
 
   it('PUT replaces the active question set and GET reflects it', async () => {
     const baseUrl = await startServer(layaOnlyDeps());
     const edited = {
-      category: {
-        instructions: 'Custom category prompt',
-        criteria: { billing: 'a', technical: 'b', account: 'c', other: 'd' },
+      questions: {
+        category: {
+          type: 'choice',
+          instructions: 'Custom category prompt',
+          criteria: { billing: 'a', technical: 'b', account: 'c', other: 'd' },
+        },
+        urgency: { type: 'score', instructions: 'Custom urgency prompt', criteria: ['low', 'high'] },
       },
-      urgency: { instructions: 'Custom urgency prompt' },
-      needsHumanEscalation: { instructions: 'Custom escalation prompt' },
+      priorityQuestion: 'urgency',
     };
     const putRes = await fetch(`${baseUrl}/api/questions`, {
       method: 'PUT',
@@ -144,26 +164,124 @@ describe('GET/PUT/POST /api/questions', () => {
     });
     expect(putRes.status).toBe(200);
     const putBody = await putRes.json();
-    expect(putBody.category.instructions).toBe('Custom category prompt');
-    expect(putBody.urgency.criteria).toEqual(DEFAULT_QUESTIONS.urgency.criteria);
+    expect(putBody.questions.category.instructions).toBe('Custom category prompt');
+    expect(putBody.priorityQuestion).toBe('urgency');
 
     const getRes = await fetch(`${baseUrl}/api/questions`);
-    expect((await getRes.json()).urgency.instructions).toBe('Custom urgency prompt');
+    expect((await getRes.json()).questions.urgency.instructions).toBe('Custom urgency prompt');
   });
 
-  it('PUT rejects a body missing a required category criterion', async () => {
+  it('supports adding, removing, and renaming questions -- not just editing prompt text', async () => {
     const baseUrl = await startServer(layaOnlyDeps());
     const res = await fetch(`${baseUrl}/api/questions`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        category: { instructions: 'x', criteria: { billing: 'a', technical: 'b', account: 'c' } }, // missing "other"
-        urgency: { instructions: 'x' },
-        needsHumanEscalation: { instructions: 'x' },
+        questions: {
+          sentiment: {
+            type: 'choice',
+            instructions: 'What is the overall tone?',
+            criteria: { positive: 'p', neutral: 'n', negative: 'g' },
+          },
+          severity: { type: 'score', instructions: 'How severe?', criteria: ['minor', 'major', 'critical'] },
+        },
+        priorityQuestion: 'severity',
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Object.keys(body.questions)).toEqual(['sentiment', 'severity']);
+    expect(body.priorityQuestion).toBe('severity');
+  });
+
+  it('PUT rejects a choice question with fewer than 2 options', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    const res = await fetch(`${baseUrl}/api/questions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        questions: { category: { type: 'choice', instructions: 'x', criteria: { billing: 'a' } } },
       }),
     });
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/criteria\.other/);
+    expect((await res.json()).error).toMatch(/at least 2 options/);
+  });
+
+  it('PUT rejects a score question with fewer than 2 levels', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    const res = await fetch(`${baseUrl}/api/questions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        questions: { urgency: { type: 'score', instructions: 'x', criteria: ['only-one'] } },
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/at least 2 level labels/);
+  });
+
+  it('PUT rejects an unknown question type', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    const res = await fetch(`${baseUrl}/api/questions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questions: { x: { type: 'essay', instructions: 'x' } } }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/type must be/);
+  });
+
+  it('PUT rejects an empty questions object', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    const res = await fetch(`${baseUrl}/api/questions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questions: {} }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/at least one question/);
+  });
+
+  it('PUT rejects a priorityQuestion that names a nonexistent question', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    const res = await fetch(`${baseUrl}/api/questions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        questions: { category: { type: 'choice', instructions: 'x', criteria: { a: 'a', b: 'b' } } },
+        priorityQuestion: 'nonexistent',
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/not one of the submitted questions/);
+  });
+
+  it('PUT rejects a priorityQuestion pointing at a choice question', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    const res = await fetch(`${baseUrl}/api/questions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        questions: { category: { type: 'choice', instructions: 'x', criteria: { a: 'a', b: 'b' } } },
+        priorityQuestion: 'category',
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/must be a "score" or "noul" question/);
+  });
+
+  it('allows priorityQuestion to be null (no priority question configured)', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    const res = await fetch(`${baseUrl}/api/questions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        questions: { category: { type: 'choice', instructions: 'x', criteria: { a: 'a', b: 'b' } } },
+        priorityQuestion: null,
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).priorityQuestion).toBeNull();
   });
 
   it('POST /api/questions/reset restores the defaults after an edit', async () => {
@@ -172,16 +290,15 @@ describe('GET/PUT/POST /api/questions', () => {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        category: {
-          instructions: 'changed',
-          criteria: { billing: 'a', technical: 'b', account: 'c', other: 'd' },
-        },
-        urgency: { instructions: 'changed' },
-        needsHumanEscalation: { instructions: 'changed' },
+        questions: { x: { type: 'noul', instructions: 'changed' } },
+        priorityQuestion: 'x',
       }),
     });
     const resetRes = await fetch(`${baseUrl}/api/questions/reset`, { method: 'POST' });
-    expect(await resetRes.json()).toEqual(DEFAULT_QUESTIONS);
+    expect(await resetRes.json()).toEqual({
+      questions: DEFAULT_QUESTIONS,
+      priorityQuestion: DEFAULT_PRIORITY_QUESTION,
+    });
   });
 });
 
@@ -201,6 +318,9 @@ describe('POST /api/triage', () => {
     expect(typeof ticket.latencyMs).toBe('number');
     expect(ticket.request.state).toEqual({ ticket: 'I was charged twice' });
     expect(ticket.rawResponse).toEqual({ mock: true, backend: 'laya' });
+    // Mock's urgency answer is value: 2 across 4 levels -- normalized to
+    // 2 / (4 - 1) = 0.6667 for the default priority question ("urgency").
+    expect(ticket.priorityValue).toBeCloseTo(0.6667, 4);
 
     const queueRes = await fetch(`${baseUrl}/api/tickets`);
     expect(await queueRes.json()).toHaveLength(1);
@@ -214,6 +334,58 @@ describe('POST /api/triage', () => {
       body: JSON.stringify({ text: '   ' }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it('computes priorityValue against a fully custom question schema, not just the defaults', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    await fetch(`${baseUrl}/api/questions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        questions: {
+          sentiment: {
+            type: 'choice',
+            instructions: 'tone?',
+            criteria: { positive: 'p', negative: 'n' },
+          },
+          severity: {
+            type: 'score',
+            instructions: 'how severe?',
+            criteria: ['minor', 'moderate', 'major', 'critical', 'catastrophic'],
+          },
+        },
+        priorityQuestion: 'severity',
+      }),
+    });
+
+    const res = await fetch(`${baseUrl}/api/triage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'a ticket' }),
+    });
+    const ticket = await res.json();
+    expect(Object.keys(ticket.answers)).toEqual(['sentiment', 'severity']);
+    // 5 levels -> middle index 2 -> 2 / (5 - 1) = 0.5.
+    expect(ticket.priorityValue).toBeCloseTo(0.5, 4);
+  });
+
+  it('reports priorityValue: null when no priority question is configured', async () => {
+    const baseUrl = await startServer(layaOnlyDeps());
+    await fetch(`${baseUrl}/api/questions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        questions: { feedback: { type: 'noul', instructions: 'is this positive?' } },
+        priorityQuestion: null,
+      }),
+    });
+
+    const res = await fetch(`${baseUrl}/api/triage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'a ticket' }),
+    });
+    expect((await res.json()).priorityValue).toBeNull();
   });
 });
 

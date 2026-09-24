@@ -5,10 +5,12 @@
   --text: #e2e8f0;
   --muted: #94a3b8;
   --accent: #38bdf8;
-  --low: #22c55e;
-  --medium: #eab308;
-  --high: #f97316;
-  --critical: #ef4444;
+  /* Priority-question colors (queue dot, score/noul bars) are computed as
+     a gradient in app.js (colorForFraction) rather than looked up here --
+     a dynamic question set has no fixed set of level names to key colors
+     by. --error is still a fixed color: it labels a UI state (a failed
+     request), not a triage result. */
+  --error: #ef4444;
 }
 
 * {
@@ -134,15 +136,8 @@ main {
   margin-top: 0.5rem;
 }
 
-#questions-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.8rem;
-  color: var(--muted);
-}
-
-#questions-form input[type='text'] {
+#questions-form input[type='text'],
+#questions-form select {
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
@@ -152,10 +147,90 @@ main {
   font-size: 0.85rem;
 }
 
-.criteria-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
+.question-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem;
+  margin-bottom: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.question-card-header {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.question-name-input {
+  flex: 1;
+  font-weight: 600;
+}
+
+.question-card-header select {
+  flex-shrink: 0;
+}
+
+.question-instructions-input {
+  width: 100%;
+}
+
+.options-wrap,
+.levels-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--border);
+}
+
+.option-row,
+.level-row {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.option-row input,
+.level-row input {
+  flex: 1;
+}
+
+.remove-btn {
+  background: var(--bg);
+  color: var(--error);
+  border: 1px solid var(--border);
+  font-weight: 400;
+}
+
+.remove-btn.small {
+  padding: 0.2rem 0.5rem;
+  flex-shrink: 0;
+}
+
+.secondary-btn {
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  font-weight: 400;
+  align-self: flex-start;
+}
+
+.secondary-btn.small {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+}
+
+#add-question-btn {
+  width: 100%;
+}
+
+.priority-select-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 0.4rem;
 }
 
 .hint {
@@ -185,7 +260,7 @@ main {
 }
 
 #questions-status.error {
-  color: var(--critical);
+  color: var(--error);
 }
 
 .result-columns {
@@ -306,7 +381,7 @@ button:disabled {
 }
 
 #status.error {
-  color: var(--critical);
+  color: var(--error);
 }
 
 .answer-row {
@@ -365,11 +440,6 @@ button:disabled {
   color: var(--muted);
   flex-shrink: 0;
 }
-
-.urgency-low .bar-inner { background: var(--low); }
-.urgency-medium .bar-inner { background: var(--medium); }
-.urgency-high .bar-inner { background: var(--high); }
-.urgency-critical .bar-inner { background: var(--critical); }
 
 .queue-header {
   display: flex;
@@ -433,7 +503,7 @@ button:disabled {
   border-color: var(--accent);
 }
 
-.queue-urgency-dot {
+.queue-priority-dot {
   display: inline-block;
   width: 10px;
   height: 10px;

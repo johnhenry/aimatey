@@ -6,10 +6,11 @@
  * Laya once and keeps it warm, serves a small browser dashboard, and
  * exposes a JSON API the dashboard calls. Demonstrates the same
  * `Bridge.decide()` typed-decision capability, wired into a real (if
- * minimal) request/response app: single and batch triage, editable
- * questions, and an optional side-by-side comparison against TypeSafe's
- * Jev (a second, unrelated typed-decision backend, sharing the exact same
- * Decision IR) when `TYPESAFE_API_KEY` is set.
+ * minimal) request/response app: single and batch triage, a fully dynamic
+ * question set (add/remove/rename questions, not just edit prompt text --
+ * see `resolveQuestions()`), and an optional side-by-side comparison
+ * against TypeSafe's Jev (a second, unrelated typed-decision backend,
+ * sharing the exact same Decision IR) when `TYPESAFE_API_KEY` is set.
  *
  * No frontend framework, no build step -- the dashboard is plain
  * HTML/CSS/JS served as static files from `public/`, matching this
@@ -50,31 +51,17 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = Number(process.env.PORT) || 8080;
 
 // ============================================================================
-// Triage questions
+// Triage questions -- a genuinely dynamic set (arbitrary names, arbitrary
+// count, each independently choice/score/noul), not a fixed 3-field shape.
+// This is now just `Record<string, IRDecisionQuestion>` -- the IR's own
+// request shape -- rather than a bespoke type, since a client-editable
+// question set and a Decision IR request's `questions` field are the same
+// thing once the fixed-shape constraint is gone.
 // ============================================================================
 
-const URGENCY_LEVELS = ['low', 'medium', 'high', 'critical'] as const;
-const CATEGORY_KEYS = ['billing', 'technical', 'account', 'other'] as const;
-type CategoryKey = (typeof CATEGORY_KEYS)[number];
+export type QuestionMap = Record<string, IRDecisionQuestion>;
 
-interface QuestionSet {
-  readonly category: {
-    readonly type: 'choice';
-    readonly instructions: string;
-    readonly criteria: Record<CategoryKey, string>;
-  };
-  readonly urgency: {
-    readonly type: 'score';
-    readonly instructions: string;
-    readonly criteria: typeof URGENCY_LEVELS;
-  };
-  readonly needsHumanEscalation: {
-    readonly type: 'noul';
-    readonly instructions: string;
-  };
-}
-
-export const DEFAULT_QUESTIONS: QuestionSet = {
+export const DEFAULT_QUESTIONS: QuestionMap = {
   category: {
     type: 'choice',
     instructions: 'What is this support ticket primarily about?',
@@ -88,7 +75,7 @@ export const DEFAULT_QUESTIONS: QuestionSet = {
   urgency: {
     type: 'score',
     instructions: 'How urgently does this ticket need a response?',
-    criteria: URGENCY_LEVELS,
+    criteria: ['low', 'medium', 'high', 'critical'],
   },
   needsHumanEscalation: {
     type: 'noul',
@@ -98,21 +85,13 @@ export const DEFAULT_QUESTIONS: QuestionSet = {
 };
 
 /**
- * Only `instructions` and category `criteria` descriptions are editable --
- * the category keys and the four urgency level names stay fixed. Both the
- * client's rendering (bar colors, ordering) and this server's own
- * `criteria` keying are written against those fixed names; making them
- * fully dynamic would need schema-driven rendering throughout, out of
- * scope for this pass (see the demo's readme.md).
+ * Which question (if any) drives the queue's sort order and color-coded
+ * dot. Only a `score` or `noul` question can drive it -- a `choice`
+ * answer has no single natural ordering. `null` means "no priority
+ * question configured" -- the queue still works, just without sorting or
+ * color, since there's nothing numeric to rank tickets by.
  */
-interface QuestionOverrides {
-  readonly category?: {
-    readonly instructions?: string;
-    readonly criteria?: Partial<Record<CategoryKey, string>>;
-  };
-  readonly urgency?: { readonly instructions?: string };
-  readonly needsHumanEscalation?: { readonly instructions?: string };
-}
+export const DEFAULT_PRIORITY_QUESTION = 'urgency';
 
 class ValidationError extends Error {}
 
@@ -120,51 +99,110 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-/** Validates and fully resolves a client-submitted question set (a PUT is a full replacement). */
-function resolveQuestions(input: unknown): QuestionSet {
-  if (typeof input !== 'object' || input === null) {
-    throw new ValidationError('Request body must be an object');
+/** Validates and fully resolves a client-submitted question map (a PUT is a full replacement). */
+function resolveQuestions(input: unknown): QuestionMap {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new ValidationError('"questions" must be an object mapping question name -> question');
   }
-  const body = input as QuestionOverrides;
+  const entries = Object.entries(input as Record<string, unknown>);
+  if (entries.length === 0) {
+    throw new ValidationError('"questions" must include at least one question');
+  }
 
-  if (!isNonEmptyString(body.category?.instructions)) {
-    throw new ValidationError('category.instructions must be a non-empty string');
-  }
-  const criteria: Partial<Record<CategoryKey, string>> = {};
-  for (const key of CATEGORY_KEYS) {
-    const value = body.category?.criteria?.[key];
-    if (!isNonEmptyString(value)) {
-      throw new ValidationError(`category.criteria.${key} must be a non-empty string`);
+  const resolved: Record<string, IRDecisionQuestion> = {};
+  for (const [name, raw] of entries) {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new ValidationError(`${name} must be an object`);
     }
-    criteria[key] = value;
-  }
-  if (!isNonEmptyString(body.urgency?.instructions)) {
-    throw new ValidationError('urgency.instructions must be a non-empty string');
-  }
-  if (!isNonEmptyString(body.needsHumanEscalation?.instructions)) {
-    throw new ValidationError('needsHumanEscalation.instructions must be a non-empty string');
+    const q = raw as { type?: unknown; instructions?: unknown; criteria?: unknown };
+    if (!isNonEmptyString(q.instructions)) {
+      throw new ValidationError(`${name}.instructions must be a non-empty string`);
+    }
+
+    if (q.type === 'choice') {
+      if (typeof q.criteria !== 'object' || q.criteria === null || Array.isArray(q.criteria)) {
+        throw new ValidationError(`${name}.criteria must be an object mapping option -> description`);
+      }
+      const criteria = q.criteria as Record<string, unknown>;
+      const keys = Object.keys(criteria);
+      if (keys.length < 2) {
+        throw new ValidationError(`${name}.criteria must have at least 2 options`);
+      }
+      const resolvedCriteria: Record<string, string> = {};
+      for (const key of keys) {
+        if (!isNonEmptyString(key) || !isNonEmptyString(criteria[key])) {
+          throw new ValidationError(`${name}.criteria has an empty option name or description`);
+        }
+        resolvedCriteria[key] = criteria[key] as string;
+      }
+      resolved[name] = { type: 'choice', instructions: q.instructions, criteria: resolvedCriteria };
+    } else if (q.type === 'score') {
+      if (!Array.isArray(q.criteria) || q.criteria.length < 2) {
+        throw new ValidationError(`${name}.criteria must be an array of at least 2 level labels`);
+      }
+      if (!q.criteria.every(isNonEmptyString)) {
+        throw new ValidationError(`${name}.criteria must not contain empty level labels`);
+      }
+      resolved[name] = { type: 'score', instructions: q.instructions, criteria: q.criteria as string[] };
+    } else if (q.type === 'noul') {
+      resolved[name] = { type: 'noul', instructions: q.instructions };
+    } else {
+      throw new ValidationError(`${name}.type must be "choice", "score", or "noul"`);
+    }
   }
 
-  return {
-    category: {
-      type: 'choice',
-      instructions: body.category!.instructions!,
-      criteria: criteria as Record<CategoryKey, string>,
-    },
-    urgency: { type: 'score', instructions: body.urgency!.instructions!, criteria: URGENCY_LEVELS },
-    needsHumanEscalation: {
-      type: 'noul',
-      instructions: body.needsHumanEscalation!.instructions!,
-    },
-  };
+  return resolved;
 }
 
-function questionsToIR(questions: QuestionSet): Record<string, IRDecisionQuestion> {
-  return {
-    category: questions.category,
-    urgency: questions.urgency,
-    needsHumanEscalation: questions.needsHumanEscalation,
-  };
+/** `null`/absent is always valid (no priority question). Otherwise it must name a real score/noul question. */
+function resolvePriorityQuestion(input: unknown, questions: QuestionMap): string | null {
+  if (input === null || input === undefined) {
+    return null;
+  }
+  if (typeof input !== 'string') {
+    throw new ValidationError('"priorityQuestion" must be a string or null');
+  }
+  const question = questions[input];
+  if (!question) {
+    throw new ValidationError(`priorityQuestion "${input}" is not one of the submitted questions`);
+  }
+  if (question.type !== 'score' && question.type !== 'noul') {
+    throw new ValidationError(
+      `priorityQuestion "${input}" must be a "score" or "noul" question (got "${question.type}")`
+    );
+  }
+  return input;
+}
+
+/**
+ * Normalizes an answer to a 0..1 "how urgent/high is this" number for
+ * queue sorting and color, regardless of whether the priority question is
+ * `score` (raw value is 0..levels-1) or `noul` (already 0..1). Returns
+ * `null` when there's no priority question, or the priority question
+ * wasn't actually asked/answered on this particular ticket (e.g. a
+ * question set edited after older tickets were already triaged).
+ */
+function computePriorityValue(
+  answers: Record<string, IRDecisionAnswer>,
+  questions: QuestionMap,
+  priorityQuestion: string | null
+): number | null {
+  if (!priorityQuestion) {
+    return null;
+  }
+  const answer = answers[priorityQuestion];
+  const question = questions[priorityQuestion];
+  if (!answer || !question) {
+    return null;
+  }
+  if (answer.type === 'score' && question.type === 'score') {
+    const levels = question.criteria.length;
+    return levels > 1 ? answer.value / (levels - 1) : 0;
+  }
+  if (answer.type === 'noul') {
+    return answer.value;
+  }
+  return null;
 }
 
 // ============================================================================
@@ -176,12 +214,15 @@ interface TriagedTicket {
   readonly backend: 'laya' | 'typesafe';
   readonly text: string;
   readonly answers: Record<string, IRDecisionAnswer>;
-  readonly urgencyScore: number;
+  /** 0..1, normalized from whichever question was the priority question at
+   * triage time -- see computePriorityValue(). `null` when no priority
+   * question was configured. */
+  readonly priorityValue: number | null;
   readonly timestamp: number;
   /** Wall-clock time for the bridge.decide() call itself, in milliseconds. */
   readonly latencyMs: number;
   /** Exactly what was sent to the backend: the state + typed questions. */
-  readonly request: { readonly state: unknown; readonly questions: Record<string, IRDecisionQuestion> };
+  readonly request: { readonly state: unknown; readonly questions: QuestionMap };
   /** The backend's raw wire response, unmapped -- see IRDecisionResponse.raw. */
   readonly rawResponse: unknown;
 }
@@ -214,26 +255,23 @@ async function triageWith(
   bridge: Bridge,
   backend: TriagedTicket['backend'],
   text: string,
-  questions: QuestionSet
+  questions: QuestionMap,
+  priorityQuestion: string | null
 ): Promise<TriagedTicket> {
   const state = { ticket: text };
-  const irQuestions = questionsToIR(questions);
   const startedAt = performance.now();
-  const response = await bridge.decide(state, irQuestions);
+  const response = await bridge.decide(state, questions);
   const latencyMs = performance.now() - startedAt;
-
-  const urgency = response.answers.urgency;
-  const urgencyScore = urgency?.type === 'score' ? urgency.value : 0;
 
   return {
     id: randomUUID(),
     backend,
     text,
     answers: response.answers,
-    urgencyScore,
+    priorityValue: computePriorityValue(response.answers, questions, priorityQuestion),
     timestamp: Date.now(),
     latencyMs,
-    request: { state, questions: irQuestions },
+    request: { state, questions },
     rawResponse: response.raw,
   };
 }
@@ -296,7 +334,12 @@ async function readJSONBody(req: http.IncomingMessage): Promise<unknown> {
 
 export function createRequestHandler(deps: AppDeps): http.RequestListener {
   const store = createTicketStore();
-  let activeQuestions: QuestionSet = DEFAULT_QUESTIONS;
+  let activeQuestions: QuestionMap = DEFAULT_QUESTIONS;
+  let activePriorityQuestion: string | null = DEFAULT_PRIORITY_QUESTION;
+
+  function questionsPayload() {
+    return { questions: activeQuestions, priorityQuestion: activePriorityQuestion };
+  }
 
   async function handleApi(
     req: http.IncomingMessage,
@@ -309,15 +352,18 @@ export function createRequestHandler(deps: AppDeps): http.RequestListener {
     }
 
     if (pathname === '/api/questions' && req.method === 'GET') {
-      sendJSON(res, 200, activeQuestions);
+      sendJSON(res, 200, questionsPayload());
       return true;
     }
 
     if (pathname === '/api/questions' && req.method === 'PUT') {
       try {
-        const body = await readJSONBody(req);
-        activeQuestions = resolveQuestions(body);
-        sendJSON(res, 200, activeQuestions);
+        const body = (await readJSONBody(req)) as { questions?: unknown; priorityQuestion?: unknown };
+        const questions = resolveQuestions(body.questions);
+        const priorityQuestion = resolvePriorityQuestion(body.priorityQuestion, questions);
+        activeQuestions = questions;
+        activePriorityQuestion = priorityQuestion;
+        sendJSON(res, 200, questionsPayload());
       } catch (error) {
         if (error instanceof ValidationError) {
           sendJSON(res, 400, { error: error.message });
@@ -330,7 +376,8 @@ export function createRequestHandler(deps: AppDeps): http.RequestListener {
 
     if (pathname === '/api/questions/reset' && req.method === 'POST') {
       activeQuestions = DEFAULT_QUESTIONS;
-      sendJSON(res, 200, activeQuestions);
+      activePriorityQuestion = DEFAULT_PRIORITY_QUESTION;
+      sendJSON(res, 200, questionsPayload());
       return true;
     }
 
@@ -341,7 +388,13 @@ export function createRequestHandler(deps: AppDeps): http.RequestListener {
           sendJSON(res, 400, { error: 'Request body must include non-empty "text"' });
           return true;
         }
-        const ticket = await triageWith(deps.layaBridge, 'laya', body.text.trim(), activeQuestions);
+        const ticket = await triageWith(
+          deps.layaBridge,
+          'laya',
+          body.text.trim(),
+          activeQuestions,
+          activePriorityQuestion
+        );
         store.add(ticket);
         sendJSON(res, 200, ticket);
       } catch (error) {
@@ -367,7 +420,13 @@ export function createRequestHandler(deps: AppDeps): http.RequestListener {
         // a demo, not a throughput benchmark.
         const results: TriagedTicket[] = [];
         for (const text of texts) {
-          const ticket = await triageWith(deps.layaBridge, 'laya', text, activeQuestions);
+          const ticket = await triageWith(
+            deps.layaBridge,
+            'laya',
+            text,
+            activeQuestions,
+            activePriorityQuestion
+          );
           store.add(ticket);
           results.push(ticket);
         }
@@ -386,14 +445,26 @@ export function createRequestHandler(deps: AppDeps): http.RequestListener {
           return true;
         }
         const text = body.text.trim();
-        const laya = await triageWith(deps.layaBridge, 'laya', text, activeQuestions);
+        const laya = await triageWith(
+          deps.layaBridge,
+          'laya',
+          text,
+          activeQuestions,
+          activePriorityQuestion
+        );
         store.add(laya);
 
         let typesafe: TriagedTicket | null = null;
         let typesafeError: string | undefined;
         if (deps.typesafeBridge) {
           try {
-            typesafe = await triageWith(deps.typesafeBridge, 'typesafe', text, activeQuestions);
+            typesafe = await triageWith(
+              deps.typesafeBridge,
+              'typesafe',
+              text,
+              activeQuestions,
+              activePriorityQuestion
+            );
           } catch (error) {
             typesafeError = error instanceof Error ? error.message : String(error);
           }

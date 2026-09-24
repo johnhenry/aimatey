@@ -55,29 +55,19 @@
         <button type="button" id="questions-toggle-btn">Edit</button>
       </div>
       <div id="questions-form" hidden>
-        <label>
-          Category prompt
-          <input type="text" id="q-category-instructions" />
-        </label>
-        <div class="criteria-grid">
-          <label>Billing means<input type="text" id="q-criteria-billing" /></label>
-          <label>Technical means<input type="text" id="q-criteria-technical" /></label>
-          <label>Account means<input type="text" id="q-criteria-account" /></label>
-          <label>Other means<input type="text" id="q-criteria-other" /></label>
-        </div>
-        <label>
-          Urgency prompt
-          <input type="text" id="q-urgency-instructions" />
-        </label>
-        <label>
-          Escalation prompt
-          <input type="text" id="q-escalation-instructions" />
-        </label>
         <p class="hint">
-          Category keys (billing/technical/account/other) and urgency levels
-          (low/medium/high/critical) are fixed -- only the prompts and
-          category descriptions are editable.
+          Fully editable: add, remove, or rename questions, and each is
+          independently a Choice (pick one option), Score (an ordered
+          spectrum of levels), or Noul (a yes/no probability) question.
         </p>
+        <div id="questions-list"></div>
+        <button type="button" id="add-question-btn" class="secondary-btn">+ Add question</button>
+
+        <label class="priority-select-label">
+          Priority question (drives queue sort order and color)
+          <select id="priority-select"></select>
+        </label>
+
         <div class="questions-actions">
           <button type="button" id="questions-save-btn">Save</button>
           <button type="button" id="questions-reset-btn">Reset to defaults</button>

@@ -12,9 +12,18 @@ from the CLI, wired into a persistent server instead of a one-shot script.
   side-by-side comparison against a second, unrelated typed-decision
   backend (TypeSafe's Jev) -- made possible by both sharing the exact same
   Decision IR, so the same client-side rendering code handles either.
+- A fully dynamic question set -- add, remove, or rename questions, each
+  independently Choice/Score/Noul -- rather than a fixed 3-field shape.
+  `resolveQuestions()` validates directly against the Decision IR's own
+  `IRDecisionQuestion` type instead of a bespoke schema, since a
+  client-editable question set and a Decision IR request's `questions`
+  field are the same thing once nothing forces a fixed shape.
 - A plain HTML/CSS/vanilla-JS frontend with no build step -- probability
-  bars, per-request latency, a raw request/response viewer, and a queue
-  of past tickets sorted by urgency, exportable as JSON or CSV.
+  bars (colors computed as a gradient, not looked up by a fixed level
+  name), per-request latency, a raw request/response viewer, and a queue
+  of past tickets sorted by a configurable "priority question", exportable
+  as JSON or CSV with columns derived from whatever questions were
+  actually asked.
 - A request handler built as a factory (`createRequestHandler(deps)`)
   taking its backends as a parameter, so `server.test.ts` can inject a
   mock backend and test the API's routing/validation logic without
@@ -65,24 +74,31 @@ Then open <http://localhost:8080>.
   check the box before triaging a single ticket to see both backends'
   answers side by side, including each one's own latency and raw
   response.
-- **Editable questions** -- the "Questions" panel lets you edit the
-  prompt text and (for category) the criteria descriptions used for every
-  subsequent triage call. The category keys
-  (billing/technical/account/other) and the four urgency level names
-  (low/medium/high/critical) are **not** editable -- both the client's
-  rendering (bar colors, ordering) and the server's own `criteria` keying
-  are written against those fixed names; making them fully dynamic would
-  need schema-driven rendering throughout, which is out of scope for this
-  demo. "Reset to defaults" restores the original prompts.
+- **Fully dynamic questions** -- the "Questions" panel is a small form
+  builder: add or remove questions, rename them, switch each one's type
+  (Choice/Score/Noul), and add/remove/rename its options (Choice) or
+  levels (Score). Nothing about the question set is fixed -- try replacing
+  the defaults with something unrelated to support tickets entirely (a
+  "sentiment"/"severity" pair, say) and triage against it; the server
+  validates the submitted shape (`resolveQuestions()`: each question needs
+  a valid `type`, `choice`/`score` need at least 2 options/levels) and the
+  client's bar rendering, colors, and CSV export columns all follow
+  whatever questions are actually active, not a hardcoded list. A
+  **priority question** (any `score` or `noul` question, selectable in the
+  panel) drives the queue's sort order and color-coded dot; with none
+  selected, the queue still works, just without sorting or color, since
+  there's nothing numeric to rank tickets by. "Reset to defaults" restores
+  the original category/urgency/escalation set.
 - **Latency** -- every result shows the wall-clock time for the
   `bridge.decide()` call itself.
 - **Raw request/response** -- "View raw request/response" under any
   result expands the exact `state`/`questions` sent and the backend's
   unmapped wire response (`IRDecisionResponse.raw`).
 - **Export** -- "Export JSON" / "Export CSV" in the Queue panel download
-  the current queue (JSON: full ticket objects; CSV: a flattened summary
-  -- category, urgency level/score, escalation likelihood, latency, per
-  ticket).
+  the current queue (JSON: full ticket objects; CSV: a flattened summary,
+  one row per ticket, with a `<name>`/`<name>.confidence` column pair for
+  every question that appears across the exported tickets, plus
+  `priorityValue` and `latencyMs`).
 
 Not implemented: persisting the queue across server restarts (in-memory
 only, deliberately -- see the top-level dashboard commit history for why).
