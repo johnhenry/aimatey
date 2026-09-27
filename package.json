@@ -76,6 +76,7 @@
   },
   "packageManager": "npm@10.0.0",
   "allowScripts": {
-    "onnxruntime-node@1.30.0": true
+    "onnxruntime-node@1.30.0": true,
+    "@johnhenry/apple-foundation-models@0.0.0": true
   }
 }
