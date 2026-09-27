@@ -16,7 +16,8 @@ npm install @johnhenry/aimatey-mcp
 No hard (or peer) dependency on any MCP SDK — `@johnhenry/aimatey-mcp` depends only on `@johnhenry/aimatey-types` and
 a small structural interface (`McpClientLike`: `listTools`, `callTool`) that any MCP client can
 satisfy: the official `@modelcontextprotocol/sdk`, [`mcp-query`](https://github.com/johnhenry/mcp-query)
-(`@johnhenry/mcpq`), or a test fake.
+(`@johnhenry/mcp-query`; previously published as `@johnhenry/mcpq`, now deprecated in favor of this
+name), or a test fake.
 
 ## Why this is small
 
@@ -98,7 +99,7 @@ revision(s) the *injected client* negotiates are supported transparently, with z
 package caring about the difference.
 
 Concretely, for the reference client [`mcp-query`](https://github.com/johnhenry/mcp-query)
-(`@johnhenry/mcpq`), `ConnectionConfig` supports:
+(`@johnhenry/mcp-query`), `ConnectionConfig` supports:
 
 | Revision | Era | Notes |
 |---|---|---|
