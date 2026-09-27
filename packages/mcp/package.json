@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-mcp",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "MCP (Model Context Protocol) tool-calling for Aimatey - translate MCP tools into the IR tool-execution loop via an injectable client",
   "type": "module",
   "main": "./dist/cjs/index.js",

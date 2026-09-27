@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-native-apple",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "apple native backend for Aimatey",
   "type": "module",
   "main": "./dist/cjs/index.js",

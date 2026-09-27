@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-native-laya",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Laya (ConvAI) typed-decision backend for Aimatey, via @receptron/laya",
   "type": "module",
   "main": "./dist/cjs/index.js",
