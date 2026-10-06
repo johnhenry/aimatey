@@ -325,3 +325,59 @@ describe('fitTemperature', () => {
     ).toThrow();
   });
 });
+
+describe('calibrationReport predicted probability (#171)', () => {
+  /** 10 runs, answer `a` with p = 0.8 each, 8 right: perfectly calibrated at 0.8. */
+  const calibrated = (confidence?: number) =>
+    Array.from({ length: 10 }, (_, i) => ({
+      answer: {
+        type: 'choice',
+        value: 'a',
+        probabilities: { a: 0.8, b: 0.1, c: 0.1 },
+        ...(confidence === undefined ? {} : { confidence }),
+      } as IRDecisionAnswer,
+      truth: i < 8 ? 'a' : 'b',
+    }));
+
+  it('choice: ECE ~ 0 from probabilities even when confidence is garbage', () => {
+    const r = calibrationReport(calibrated(0.01));
+    expect(r.ece).toBeCloseTo(0);
+    expect(r.buckets[8]!.count).toBe(10);
+    expect(r.buckets[8]!.meanConfidence).toBeCloseTo(0.8);
+  });
+
+  it('score: uses the mass on the rounded winning level', () => {
+    const runs = Array.from({ length: 10 }, (_, i) => ({
+      answer: {
+        type: 'score',
+        value: 1.2,
+        probabilities: [0.1, 0.8, 0.1],
+        confidence: 0.99,
+      } as IRDecisionAnswer,
+      truth: i < 8 ? 1 : 0,
+    }));
+    const r = calibrationReport(runs);
+    expect(r.ece).toBeCloseTo(0);
+    expect(r.buckets[8]!.count).toBe(10);
+  });
+
+  it('noul: uses max(value, 1 - value), ignoring confidence', () => {
+    const runs = Array.from({ length: 10 }, (_, i) => ({
+      answer: { type: 'noul', value: 0.2, confidence: 0.99 } as IRDecisionAnswer,
+      truth: i >= 8, // false 8 times of 10 -> right 80% of the time at p = 0.8
+    }));
+    const r = calibrationReport(runs);
+    expect(r.ece).toBeCloseTo(0);
+    expect(r.buckets[8]!.count).toBe(10);
+  });
+
+  it('falls back to confidence only when probabilities are absent', () => {
+    const r = calibrationReport([
+      { answer: { type: 'choice', value: 'a', confidence: 0.95 }, truth: 'a' },
+      { answer: { type: 'score', value: 1, confidence: 0.35 }, truth: 1 },
+    ]);
+    expect(r.n).toBe(2);
+    expect(r.buckets[9]!.count).toBe(1);
+    expect(r.buckets[3]!.count).toBe(1);
+  });
+});
