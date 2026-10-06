@@ -9,7 +9,9 @@
 import * as readline from 'node:readline';
 import type { BackendAdapter } from '@johnhenry/aimatey-types';
 import type { IRMessage } from '@johnhenry/aimatey-types';
-import { supportsChat, supportsChatStream } from '@johnhenry/aimatey-utils';
+import { supportsChat, supportsChatStream, supportsDecisions } from '@johnhenry/aimatey-utils';
+import { isOllamaDecisionModel } from '@johnhenry/aimatey-backend';
+import type { IRDecisionQuestion, IRDecisionResponse } from '@johnhenry/aimatey-types';
 import { AdapterError, ErrorCode } from '@johnhenry/aimatey-errors';
 import { translateModel, type ModelMapping } from '../../utils/model-translation.js';
 import { colorize, style } from '../../utils/output-formatter.js';
@@ -73,6 +75,131 @@ export interface RunCommandOptions {
    * Disable streaming.
    */
   noStream?: boolean;
+
+  /**
+   * Decision models only: the state the prompt is judged against. Defaults to
+   * the prompt itself.
+   */
+  state?: string;
+}
+
+/**
+ * Whether `run` should treat `model` as a typed-decision model: the backend
+ * can `decide()` and the model's name is one of the known decision families
+ * (`nimble`, `tev1`, `kev`, ... -- Ollama's tag list has no "decision" flag).
+ */
+export function isDecisionModelRun(backend: BackendAdapter, model: string): boolean {
+  return supportsDecisions(backend) && isOllamaDecisionModel(model);
+}
+
+/**
+ * A decision model does not generate text, so `run` asks it a single `noul`
+ * question about each prompt: "Is the following true? <prompt>". The answer
+ * is the model's probability that the prompt is true.
+ */
+export function buildTruthQuestion(prompt: string): Record<string, IRDecisionQuestion> {
+  return {
+    answer: { type: 'noul', instructions: `Is the following true? ${prompt}` },
+  };
+}
+
+function formatTruth(response: IRDecisionResponse): string {
+  const answer = response.answers.answer;
+  if (answer?.type !== 'noul') {
+    return 'no answer';
+  }
+  const verdict = answer.value >= 0.5 ? 'true' : 'false';
+  return `${verdict} (P(true) = ${answer.value.toFixed(2)})`;
+}
+
+/**
+ * `run` for a decision model: one noul call per prompt. Interactive mode
+ * first asks for the state (context the prompts are judged against; blank
+ * means each prompt is its own state).
+ */
+async function runDecisionModel(options: {
+  backend: BackendAdapter;
+  model: string;
+  prompt?: string;
+  state?: string;
+  json?: boolean;
+}): Promise<void> {
+  const { backend, model, json } = options;
+  const decide = async (prompt: string, state: string | undefined): Promise<void> => {
+    const response = await backend.decide!({
+      state: state || prompt,
+      questions: buildTruthQuestion(prompt),
+      parameters: { model },
+      metadata: {
+        requestId: `cli-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+        timestamp: Date.now(),
+      },
+    });
+    console.log(json ? JSON.stringify(response, null, 2) : formatTruth(response));
+  };
+
+  try {
+    let prompt = options.prompt;
+    if (prompt === undefined && !process.stdin.isTTY) {
+      prompt = await readStdin();
+    }
+    if (prompt !== undefined) {
+      await decide(prompt, options.state);
+      return;
+    }
+
+    console.log();
+    console.log(style('>>> Decision model', 'bold', 'cyan'));
+    console.log(
+      `Model: ${colorize(model, 'green')}  Backend: ${colorize(backend.metadata.name, 'blue')}`
+    );
+    console.log(colorize('Each line is judged true or false. Use /exit to quit.', 'gray'));
+    console.log();
+
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      prompt: colorize('state> ', 'cyan'),
+    });
+    let state: string | undefined = options.state;
+    let stateAsked = options.state !== undefined;
+    if (!stateAsked) {
+      console.log(
+        colorize('First, the state to judge against (blank: each line stands alone).', 'gray')
+      );
+    }
+    rl.prompt();
+    for await (const line of rl) {
+      const trimmed = line.trim();
+      if (trimmed === '/exit' || trimmed === '/quit') {
+        rl.close();
+        break;
+      }
+      if (!stateAsked) {
+        state = trimmed || undefined;
+        stateAsked = true;
+        rl.setPrompt(colorize('>>> ', 'cyan'));
+        rl.prompt();
+        continue;
+      }
+      if (trimmed) {
+        try {
+          await decide(trimmed, state);
+        } catch (error) {
+          console.error(
+            colorize(`Error: ${error instanceof Error ? error.message : String(error)}`, 'red')
+          );
+        }
+        console.log();
+      }
+      rl.prompt();
+    }
+  } catch (error) {
+    console.error(
+      colorize(`Error: ${error instanceof Error ? error.message : String(error)}`, 'red')
+    );
+    process.exit(1);
+  }
 }
 
 /**
@@ -98,6 +225,18 @@ export async function runCommand(options: RunCommandOptions): Promise<void> {
 
   if (verbose && translatedModel !== model) {
     console.error(colorize(`Model translated: ${model} → ${translatedModel}`, 'gray'));
+  }
+
+  // Decision models answer typed questions, not chat: see runDecisionModel.
+  if (isDecisionModelRun(backend, translatedModel)) {
+    await runDecisionModel({
+      backend,
+      model: translatedModel,
+      prompt,
+      state: options.state,
+      json,
+    });
+    return;
   }
 
   // Start model runner if needed

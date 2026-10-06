@@ -41,7 +41,11 @@ COMMANDS:
                        (supports OpenAI-compatible APIs, Groq, Together AI, etc.)
 
   proxy                Start an HTTP proxy server that accepts provider requests
-                       and routes them through any backend (OpenAI-compatible!)
+                       and routes them through any backend (OpenAI-compatible!);
+                       also serves typed-decision routes (/v1/systemone, ...)
+
+  decide               Ask typed questions (choice / score / noul) about a state
+                       through any decision backend; table, JSON or batch output
 
 GLOBAL OPTIONS:
   -h, --help           Show this help message
@@ -63,12 +67,17 @@ EXAMPLES:
   # Start OpenAI-compatible proxy server
   ai-matey proxy --backend ./groq-backend.mjs --port 3000
 
+  # Ask a decision model typed questions
+  ai-matey decide --backend ollama --model tev1:0.8b --state "Refund me today" \\
+    --question 'urgent:noul:"Is this urgent?"'
+
   # Get help for a specific command
   ai-matey convert-response --help
   ai-matey convert-request --help
   ai-matey emulate-ollama --help
   ai-matey create-backend --help
   ai-matey proxy --help
+  ai-matey decide --help
 
 Run 'ai-matey <command> --help' for more information on a specific command.
 `);
@@ -143,6 +152,12 @@ async function main(): Promise<void> {
       // Remove the command name from args
       process.argv = [process.argv[0] || 'node', process.argv[1] || 'ai-matey', ...args.slice(1)];
       await proxyMain();
+      break;
+    }
+
+    case 'decide': {
+      const { main: decideMain } = await import('./decide.js');
+      await decideMain(args.slice(1));
       break;
     }
 

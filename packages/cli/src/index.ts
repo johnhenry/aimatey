@@ -14,3 +14,6 @@ export * from './utils/index.js';
 // Export converters
 export * from './converters/request-converters.js';
 export * from './converters/response-converters.js';
+
+// Export the decision wire codec (System One dialects <-> decision IR)
+export * from './decisions.js';
