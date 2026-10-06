@@ -390,6 +390,12 @@ interface BackendAdapter<TRequest = unknown, TResponse = unknown> {
 
   /** Estimate embedding cost in USD (optional) */
   estimateEmbedCost?(request: IREmbedRequest): Promise<number | null>;
+
+  /** Answer typed decision questions (optional; no chat support needed) */
+  decide?(request: IRDecisionRequest, signal?: AbortSignal): Promise<IRDecisionResponse>;
+
+  /** Estimate decision cost in USD (optional) */
+  estimateDecisionCost?(request: IRDecisionRequest): Promise<number | null>;
 }
 ```
 
@@ -489,6 +495,22 @@ interface IRCapabilities {
   embeddingModels?: readonly string[];
   maxEmbeddingBatchSize?: number;
   supportsEmbeddingDimensions?: boolean;
+
+  /** Typed-decision support (see the Decisions guide) */
+  decisions?: boolean;
+  decisionModels?: readonly string[];
+  decisionImages?: boolean;
+  decisionTypes?: readonly ('choice' | 'score' | 'noul')[];
+  decisionsEmulated?: boolean;
+  decisionsEmulatedTypes?: readonly ('choice' | 'score' | 'noul')[];
+  decisionLimits?: {
+    maxQuestions?: number;
+    maxChoiceOptions?: number;
+    maxScoreLevels?: number;
+    maxStateTokens?: number;
+    maxImages?: number;
+    maxConcurrency?: number;
+  };
 
   /** Maximum context window size, in tokens */
   maxContextTokens?: number;

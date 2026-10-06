@@ -12,7 +12,7 @@ Explore **35+ runnable examples** demonstrating every feature of aimatey, organi
 - **⭐ Beginner** → [01. Basics](#01-basics) | [02. Providers](#02-providers)
 - **⭐⭐ Intermediate** → [03. Middleware](#03-middleware) | [04. Routing](#04-routing) | [05. HTTP Servers](#05-http-servers) | [06. SDK Wrappers](#06-sdk-wrappers)
 - **⭐⭐⭐ Advanced** → [07. Advanced Patterns](#07-advanced-patterns) | [08. Observability](#08-observability)
-- **🎯 Specialized** → [09. React](#09-react) | [10. CLI Tools](#10-cli-tools)
+- **🎯 Specialized** → [09. React](#09-react) | [10. CLI Tools](#10-cli-tools) | [11. Typed Decisions](#11-typed-decisions)
 
 ### By Feature
 
@@ -206,6 +206,20 @@ Command-line utilities.
 **Start here if:** You need CLI tooling.
 
 ---
+
+### 11. Typed Decisions
+
+**Complexity:** ⭐⭐⭐ Advanced
+**Requires:** Node.js; Ollama 0.35 or newer for the live runs
+
+Decision models answer typed questions instead of generating text. See the [Decisions guide](/guides/decisions/).
+
+| Example | Description | Key Concepts |
+|---------|-------------|--------------|
+| [decisions/gateway](https://github.com/johnhenry/aimatey/tree/main/examples/decisions/gateway) | A demo gateway serving `/v1/systemone`, `/v1/decisions` and `/v1/evaluate` over one Bridge and Router | Router.decide, decision middleware, escalation |
+| [decisions/bench](https://github.com/johnhenry/aimatey/tree/main/examples/decisions/bench) | Benchmark harness: accuracy, Brier, ECE, latency and cost per backend | calibrationReport, nameInvariance, neutral keys |
+| [laya/triage-demo.ts](https://github.com/johnhenry/aimatey/tree/main/examples/laya/triage-demo.ts) | Support-ticket triage on Laya, on-device | Bridge.decide, native-laya |
+| [laya/gui-demo](https://github.com/johnhenry/aimatey/tree/main/examples/laya/gui-demo) | The same triage behind a server and a browser dashboard | decideBatch, dynamic questions |
 
 ## 🚀 Running Examples
 

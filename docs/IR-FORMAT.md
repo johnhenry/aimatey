@@ -15,6 +15,7 @@
 - [Structured Output](#structured-output)
 - [Parameters](#parameters)
 - [Capabilities](#capabilities)
+- [Decision IR](#decision-ir)
 - [Examples](#examples)
 
 ---
@@ -993,6 +994,169 @@ const openaiCapabilities: IRCapabilities = {
 
 ---
 
+## Decision IR
+
+Typed-decision ("System One") models are not chat models: given a `state` and a map of named, typed questions, they answer with typed values, usually with calibrated probabilities, in one forward pass. They have their own request/response pair, defined in `packages/aimatey-types/src/decisions.ts`. It reuses `IRMetadata` and `ImageContent` from the chat IR, but has no message list, no streaming and no finish reason. Backends opt in with the optional `BackendAdapter.decide()`; see the [Decisions guide](../packages/aimatey-docs/src/content/docs/guides/decisions.md).
+
+### IRDecisionQuestion
+
+A discriminated union on `type`:
+
+```typescript
+type IRDecisionQuestion =
+  | {
+      readonly type: 'choice';
+      readonly instructions: string;
+      /** Option name -> description of when it applies. */
+      readonly criteria: Record<string, string>;
+    }
+  | {
+      readonly type: 'score';
+      readonly instructions: string;
+      /** Ordered levels, low to high. */
+      readonly criteria: readonly string[];
+    }
+  | {
+      readonly type: 'noul';
+      readonly instructions: string;
+      /** Optional labels for each side of the yes/no question. */
+      readonly criteria?: {
+        readonly true: string;
+        readonly false: string;
+      };
+    };
+```
+
+- `choice`: pick one option from a labeled set (up to about 255).
+- `score`: place the state on an ordered spectrum of 2 to 10 labeled levels (Ollama allows 2 to 26).
+- `noul`: a yes/no question answered as a calibrated probability. `criteria` pins what `true` and `false` mean, the recommended mitigation for option-name bias.
+
+### IRDecisionRequest
+
+```typescript
+interface IRDecisionRequest {
+  /** Text, a structured object, or an array: anything serializable. */
+  readonly state: unknown;
+  /** Named questions; answers come back under the same names. */
+  readonly questions: Record<string, IRDecisionQuestion>;
+  /** Images to consider alongside `state` (base64 in practice). */
+  readonly images?: readonly ImageContent[];
+  readonly parameters?: IRDecisionParameters;
+  readonly metadata: IRMetadata;
+}
+
+interface IRDecisionParameters {
+  readonly model?: string;
+  readonly custom?: Record<string, unknown>;
+}
+```
+
+### IRDecisionAnswer
+
+Shaped by the question that produced it:
+
+```typescript
+type IRDecisionAnswer =
+  | {
+      readonly type: 'choice';
+      /** The selected option name (a key of the question's `criteria`). */
+      readonly value: string;
+      readonly probabilities?: Record<string, number>;
+      readonly confidence?: number;
+      readonly reasoning?: string;
+    }
+  | {
+      readonly type: 'score';
+      /** Index (may be fractional) into the question's ordered `criteria`. */
+      readonly value: number;
+      readonly probabilities?: readonly number[];
+      readonly confidence?: number;
+      readonly reasoning?: string;
+    }
+  | {
+      readonly type: 'noul';
+      /** Calibrated probability of "yes", in [0, 1]. */
+      readonly value: number;
+      /** max(value, 1 - value). Not every provider reports it. */
+      readonly confidence?: number;
+      readonly reasoning?: string;
+    };
+```
+
+`probabilities` and `confidence` are **optional** on `choice` and `score`: OpenRouter marks them optional and an answer from an LLM through structured output has neither. Absence means "the provider did not report it"; there is no sentinel such as `confidence: 0`, so consumers must handle `undefined`. For `noul` the probability itself is the answer; `confidence` is the distance from a coin flip. `reasoning` is free text from providers that explain themselves.
+
+### IRDecisionResponse and IRDecisionUsage
+
+```typescript
+interface IRDecisionResponse {
+  /** Provider's response id, when it sends one. */
+  readonly id?: string;
+  /** Provider that served the request, when the API is a gateway. */
+  readonly provider?: string;
+  /** Keyed by the request's question names. */
+  readonly answers: Record<string, IRDecisionAnswer>;
+  /** Model that actually answered. */
+  readonly model: string;
+  readonly usage?: IRDecisionUsage;
+  readonly metadata: IRMetadata;
+  readonly raw?: Record<string, unknown>;
+}
+
+interface IRDecisionUsage {
+  readonly inputTokens: number;
+  /** Often 0: decisions generate no text. */
+  readonly outputTokens?: number;
+  /** USD, when the provider reports it. */
+  readonly cost?: number;
+  readonly details?: Record<string, unknown>;
+}
+```
+
+### DecisionOptions and DecisionMiddleware
+
+Used by `Bridge.decide()` and `bridge.useDecision()`:
+
+```typescript
+interface DecisionOptions {
+  readonly model?: string;
+  readonly signal?: AbortSignal;
+  /** Merged into the request's custom metadata. */
+  readonly metadata?: Record<string, unknown>;
+  /** Becomes `metadata.principal` on the IR request. */
+  readonly principal?: string;
+  readonly custom?: Record<string, unknown>;
+}
+
+type DecisionMiddleware = (
+  request: IRDecisionRequest,
+  next: (request: IRDecisionRequest) => Promise<IRDecisionResponse>
+) => Promise<IRDecisionResponse>;
+```
+
+### Decision capabilities
+
+`IRCapabilities` carries the decision fields (all optional): `decisions` (the backend implements `decide()`), `decisionModels`, `decisionImages`, `decisionTypes` (which of `choice` / `score` / `noul` it answers natively), `decisionsEmulated` (answered by a chat model through structured output, so no calibrated probabilities), `decisionsEmulatedTypes`, and `decisionLimits` with `maxQuestions`, `maxChoiceOptions`, `maxScoreLevels`, `maxStateTokens`, `maxImages` and `maxConcurrency`. `Router.decide()` and request validation use them to skip backends that cannot serve a request.
+
+### Example
+
+```typescript
+const request: IRDecisionRequest = {
+  state: { subject: 'Duplicate charge', body: 'Please refund me today.' },
+  questions: {
+    department: {
+      type: 'choice',
+      instructions: 'Which team should handle this?',
+      criteria: { billing: 'invoices, refunds', technical: 'bugs, outages' },
+    },
+    urgency: { type: 'score', instructions: 'How urgent is it?', criteria: ['low', 'medium', 'high'] },
+    refundRequested: { type: 'noul', instructions: 'Does the user request a refund?' },
+  },
+  metadata: { requestId: 'req_abc123', timestamp: Date.now() },
+};
+```
+
+---
+
 ## Examples
 
 ### Simple Chat Request
@@ -1243,11 +1407,13 @@ All IR types are defined in `packages/aimatey-types/src/ir.ts`.
 For the complete, authoritative type definitions, refer to the source code:
 - [ir.ts](../packages/aimatey-types/src/ir.ts) - Core IR types
 - [streaming.ts](../packages/aimatey-types/src/streaming.ts) - Streaming configuration
+- [decisions.ts](../packages/aimatey-types/src/decisions.ts) - Decision IR
 
 ---
 
 ## See Also
 
 - [API Reference](./api.md) - Complete API documentation
+- [Decisions guide](../packages/aimatey-docs/src/content/docs/guides/decisions.md) - Typed-decision models, `Bridge.decide()` and the decision patterns
 - [Architecture Guide](../readme.md#architecture) - System architecture overview
 - [Type Definitions](../packages/aimatey-types/readme.md) - TypeScript types package

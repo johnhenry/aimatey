@@ -3,7 +3,7 @@ title: "Integration Patterns"
 description: "Production integration patterns for aimatey: complexity routing, parallel aggregation, failover, cost optimization, and batching."
 ---
 
-Production-validated integration patterns for aimatey, discovered and tested through comprehensive integration testing. Ready-made implementations of several of these patterns ship in the [`@johnhenry/aimatey-patterns`](https://www.npmjs.com/package/@johnhenry/aimatey-patterns) package (`createComplexityRouter`, `createParallelAggregator`, `createFailoverMiddleware`, `createCostOptimizer`, `createBatchProcessor`).
+Production-validated integration patterns for aimatey, discovered and tested through comprehensive integration testing. Ready-made implementations of several of these patterns ship in the [`@johnhenry/aimatey-patterns`](https://www.npmjs.com/package/@johnhenry/aimatey-patterns) package (`createComplexityRouter`, `createParallelAggregator`, `createFailoverMiddleware`, `createCostOptimizer`, `createBatchProcessor`, plus the typed-decision patterns below).
 
 :::note Validation
 - **Source**: 8 advanced test applications (50+ scenarios)
@@ -530,6 +530,49 @@ class HealthMonitor {
 - Need provider health insights
 - Want to track performance
 - Building observability
+
+---
+
+## Typed-Decision Confidence Controls
+
+**Use Case**: Run a typed-decision model (Jev, Clef, Ollama's `tev1` / `nimble`, Laya) for classification or gating, and treat its confidence as the control signal it is.
+
+Decision models are fast and cheap, but their confidence measures how concentrated the distribution is, not how often the answer is right. Four published failure modes shape the patterns, all in `@johnhenry/aimatey-patterns` and all default-off (they plug into `bridge.useDecision()`; the ensemble is a backend):
+
+| Failure mode | Evidence | Pattern |
+|---|---|---|
+| Option-name bias: the head follows an option's *name*, not its definition | Swapping `yes` / `no` definitions flipped Laya's answer 76.9 % of the time (Jev 32.5 %) vs 6.5 % with neutral `0` / `1` keys; rotating names dropped multi-option accuracy 56.4 % to 15.5 % ([arXiv 2609.26758](https://arxiv.org/html/2609.26758)) | `createNeutralOptionKeys()`, measured by `nameInvariance()` |
+| Prompt injection in `state` | A planted fake audit opinion flipped a verdict with unchanged high confidence; typed input and "untrusted" markers did not help, screening before the model did ([Check Point](https://blog.checkpoint.com/ai-security/jev-is-not-a-language-model-but-it-breaks-like-one-prompt-injection-against-a-typed-decision-model/)) | `createStateScreening({ screener })` |
+| Over-confidence | Laya ECE 0.466, down to 0.081 after one temperature per (question type, option count); Jev about 7 points over-confident on the Decision Index (ECE 0.074) | `createTemperatureScaling()`, fitted with `fitTemperature()`, checked with `calibrationReport()` |
+| One model is not enough for the hard cases | Confidence below a bar, or a probability near 0.5, is a signal to ask someone else | `createDecisionEscalation({ fallback, when })`, `decisionBands()`, `createDecisionEnsemble()` |
+
+### Implementation
+
+```typescript
+import {
+  createDecisionEscalation,
+  createEmulatedDecisionBackend,
+  createNeutralOptionKeys,
+  createTemperatureScaling,
+} from '@johnhenry/aimatey-patterns';
+
+bridge
+  .useDecision(createTemperatureScaling({ byType: { noul: 1.8 } }))
+  .useDecision(createNeutralOptionKeys({ shuffle: true, seed: 7 }))
+  .useDecision(
+    createDecisionEscalation({
+      fallback: createEmulatedDecisionBackend(chatBackend, { model: 'qwen2.5:3b' }),
+      when: { any: [{ confidenceBelow: 0.7 }, { probabilityBetween: [0.4, 0.6] }] },
+    })
+  );
+```
+
+Choose `decisionBands` thresholds, and temperatures, from your own labeled runs; there are no built-in numbers. The full walk-through, including tool-call gating, dataset capture and the benchmark harness, is in the [Decisions guide](/guides/decisions/).
+
+### When to Use
+- Routing, triage, scoring or gating where a wrong confident answer is costly
+- You can label a few hundred past cases to calibrate against
+- Input may contain text you do not control
 
 ---
 

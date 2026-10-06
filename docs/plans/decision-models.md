@@ -294,3 +294,33 @@ OpenRouter covers Jev / Kev / Mercury Decide.
 - Others: [Together Tev1](https://www.together.ai/models/tev1-4b-experimental), [Kev](https://github.com/jaredpalmer/kev), [Strands Decider](https://modelsystem.one/models/strands-decider/), [Perplexity Decisions API](https://docs.perplexity.ai/docs/decisions/quickstart), [GLiDE](https://fastino.ai/blog/introducing-glide-the-first-thinking-decision-model), [pydantic-ai #9633](https://github.com/pydantic/pydantic-ai/issues/9633)
 - Catalogs / surveys: [systemonemodels.org](https://systemonemodels.org/models/), [Laurence Moroney, "What is a decision model?"](https://laurencemoroney.com/2026/10/02/decision-models-explained.html), [Decision Index](https://github.com/apolinario/decision-index), [JevBench](https://jevbench.dev/)
 - Failure modes: [arXiv 2609.26758 — Type-Safe Is Not Error-Free](https://arxiv.org/html/2609.26758), [Check Point — prompt injection against Jev](https://blog.checkpoint.com/ai-security/jev-is-not-a-language-model-but-it-breaks-like-one-prompt-injection-against-a-typed-decision-model/)
+
+## Status (2026-10-06)
+
+Everything in the plan below had shipped on `main` by 2026-10-06 except the items under "Deferred". Tracking issues #140 to #148; all of Phases 0 to 4 were delivered as one PR per slice.
+
+| Phase | Slice | PR |
+|---|---|---|
+| 0 + 1 | Repairs (`native-laya`, TypeSafe, `validateDecisionResponse`, mocks) and IR v2 (images, noul `criteria`, optional probabilities, `reasoning`, usage cost, capabilities, registry seeds) | #149 |
+| 2a | SystemOne client, TypeSafe refactor, Ollama `/v1/systemone`, generic `SystemOneBackendAdapter` | #150 |
+| 2b | `decide()` on Cloudflare (Clef), OpenRouter, Perplexity, Inception | #154 |
+| 2c | Together Tev1 letter protocol; `createEmulatedDecisionBackend` | #152 |
+| 3a | `Router.decide`, `Bridge.decideBatch`, `validateDecisionRequest` | #151 |
+| 3b | Decision middleware: caching, cost tracking, retry, logging, OpenTelemetry, validation | #153 |
+| 3c | Escalation and bands, neutral option keys, ensemble, state screening, temperature scaling; `calibrationReport`, `fitTemperature`, `nameInvariance` | #155 |
+| 4a | Vercel and OpenRouter decision frontends; `createTypeSafeClient`, `createDecide` / `createDecisionModel` wrappers | #156 |
+| 4b | Demo gateway (`examples/decisions/gateway`), `ai-matey decide`, decision routes on the CLI proxy | #158 |
+| 4c | `useDecision` / `useDecisionBatch`, `runTools` `gate`, `createDecisionGate`, `createDecisionTool`, decision dataset capture | #157 |
+| 4d | Benchmark harness (`examples/decisions/bench`), Decisions guide, IR / patterns / benchmarks docs, readme | this PR |
+
+Decisions 1 to 3 in section 7 held: probabilities are optional, emulation is opt-in in `aimatey-patterns`, and the gateway is a demo.
+
+### Deferred
+
+- **OpenAI Decisions frontend and adapter.** Only a dialect slot (`'openai-decisions'`, unverified) exists; build the real thing when the schema is public.
+- **Strands and Nimble ONNX ports.** No ONNX exports exist; the local story is Ollama plus self-hosted System One servers. Re-evaluate GLiNER2.5-Decide if it ships ONNX.
+- **Live verification of the hosted providers.** Cloudflare, OpenRouter, Perplexity, Inception, Together and TypeSafe are covered by unit tests against stubbed HTTP, but have not been run against the real services (no API keys on the build machine). Only Ollama (0.35.1, `tev1:0.8b`) has been exercised live; the `OLLAMA_LIVE=1` bench run is the first end-to-end measurement. Perplexity's image encoding and Inception's endpoint remain unverified.
+- **`anymethod` sugar** (`ai.decide.isSpam(text)`, `classifyX`, `rateX`): not built.
+- **Typed Decisions and Decision Index runs.** The bench loader accepts both formats, but no public-dataset result is committed (nothing is downloaded at build time); see `examples/decisions/bench/fetch-datasets.md`.
+- **Hook DOM tests in CI.** `jsdom` and `@testing-library/react` are not root devDependencies, so the `useDecision` tests that need a DOM skip in CI. Recommendation: add both to the root `devDependencies` so they run.
+- **Importable decision test helpers.** `@johnhenry/aimatey-testing`'s root export imports Vitest and cannot be loaded by a CLI; the bench reaches `calibrationReport` / `nameInvariance` through the built module path. Recommendation: add a `./decisions` subpath export.

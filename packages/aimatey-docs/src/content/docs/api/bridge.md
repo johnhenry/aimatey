@@ -224,6 +224,58 @@ const openaiBridge = new Bridge(
 
 ---
 
+### `decide(state, questions, options?)`
+
+Answer typed questions about a state in one call. Needs a backend whose
+`capabilities.decisions` is true and that implements `decide()`; it need not
+support chat. The request is pre-flight validated against the backend's declared
+types and limits, then runs through the decision middleware chain.
+
+**Parameters:**
+
+- `state: unknown` - Text, a structured object or an array
+- `questions: Record<string, IRDecisionQuestion>` - Named `choice` / `score` / `noul` questions
+- `options?: DecisionOptions` - `model`, `signal`, `metadata`, `principal`, `custom`
+
+**Returns:** `Promise<IRDecisionResponse>` - `answers` keyed by question name, plus `model`, `usage`
+
+```typescript
+const { answers } = await bridge.decide(ticket, {
+  refund: { type: 'noul', instructions: 'Does the customer ask for a refund?' },
+});
+```
+
+See the [Decisions guide](/guides/decisions/).
+
+---
+
+### `decideFrom(request, options?)`
+
+Like `decide()`, for callers that speak a provider's wire format: the frontend's
+`decisionToIR()` builds the IR request and `decisionFromIR()` shapes the
+response. Throws `UNSUPPORTED_FEATURE` when the frontend has no decision hooks
+(`TypeSafeFrontendAdapter`, `LayaFrontendAdapter`, `VercelDecideFrontendAdapter`
+and `OpenRouterDecisionsFrontendAdapter` do).
+
+---
+
+### `decideBatch(states, questions, options?)`
+
+The same questions over many states, in input order, through exactly what
+`decide()` does. `options` extends `DecisionOptions` with `concurrency` (default:
+the backend's `decisionLimits.maxConcurrency`, else 4), `onProgress(done, total)`
+and `onError` (`'throw'`, the default, or `'collect'`, which returns a
+`PromiseSettledResult` per state).
+
+---
+
+### `useDecision(middleware)`
+
+Register a `DecisionMiddleware` (`(request, next) => Promise<IRDecisionResponse>`),
+outermost first. Separate from `use()`, which is the chat stack. Returns the bridge.
+
+---
+
 ### `on(event, handler)`
 
 Subscribe to bridge events.

@@ -14,7 +14,7 @@ Comprehensive reference for the core aimatey APIs:
 Complete reference for the `Bridge` class - connecting frontend and backend adapters.
 
 - Constructor and configuration
-- Request/response methods (chat, chatStream, execute)
+- Request/response methods (chat, chatStream, execute, decide, decideFrom, decideBatch)
 - Middleware management
 - Event handling
 - Error handling
