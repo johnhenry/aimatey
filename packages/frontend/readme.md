@@ -30,8 +30,14 @@ Frontend adapters convert provider-specific request formats to the Universal IR 
 - **Generic** - Passthrough adapter for IR format
 - **TypeSafe (Jev)** - `@typesafe-ai/sdk`-shaped typed-decision calls, translated to the Decision IR (not chat -- see `packages/backend`'s "Typed-Decision Models" section)
 - **Laya** - `Router.predict()`/`Agent.system_one()`-shaped typed-decision calls, translated to the Decision IR. Pairs with `LayaBackendAdapter` in [`@johnhenry/aimatey-native-laya`](../native-laya), which runs Laya's real ONNX model in-process via `@receptron/laya` -- no hosted API, no Python service
+- **Vercel AI SDK `decide()`** - `decide({ model, state, questions, providerOptions })`-shaped calls (`boolean`/`choice`/`score` questions) and `{ answers, usage, response, providerMetadata }` results, translated to the Decision IR (`VercelDecideFrontendAdapter`)
+- **OpenRouter Decisions** - `/api/alpha/decisions` bodies (`provider`/`trace`/`session_id`/`user` extras travel in `parameters.custom`) and the `id`/`provider`/`usage.cost` response envelope (`OpenRouterDecisionsFrontendAdapter`)
 
-The TypeSafe and Laya adapters implement `FrontendAdapter` through its
+The TypeSafe adapter doubles as the shape of Ollama's `/v1/systemone` endpoint
+(the same `{ state, questions }` / `{ answers, model }` bodies), so use it to
+front an Ollama decision model too.
+
+The decision adapters (TypeSafe, Laya, Vercel, OpenRouter) implement `FrontendAdapter` through its
 `decisionToIR`/`decisionFromIR` hooks rather than the chat ones (`toIR`/
 `fromIR`/`fromIRStream` are optional on `FrontendAdapter`). Drive them with
 `Bridge.decideFrom(request)`: it converts the request, runs the decision
@@ -41,6 +47,21 @@ shape. `Bridge.chat()` on one of them throws `UNSUPPORTED_FEATURE`.
 are omitted from the converted response when the backend did not report them.
 
 ## Usage
+
+```typescript
+import { Bridge } from '@johnhenry/aimatey-core';
+import { VercelDecideFrontendAdapter } from '@johnhenry/aimatey-frontend';
+
+// AI SDK decide()-shaped request in, decide()-shaped result out
+const bridge = new Bridge(new VercelDecideFrontendAdapter(), decisionBackend);
+const { answers } = await bridge.decideFrom({
+  model: 'tev1:0.8b',
+  state: 'I was billed twice, please refund me.',
+  questions: { refund: { type: 'boolean', instructions: 'Wants a refund?' } },
+});
+// answers.refund -> { type: 'boolean', probability: 0.99 }
+```
+
 
 ```typescript
 import { OpenAIFrontendAdapter, AnthropicFrontendAdapter } from '@johnhenry/aimatey-frontend';
