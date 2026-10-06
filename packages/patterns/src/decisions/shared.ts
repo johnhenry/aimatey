@@ -79,24 +79,6 @@ export function normalize(weights: readonly number[]): number[] {
   return total > 0 ? weights.map((w) => w / total) : weights.map(() => 1 / weights.length);
 }
 
-/**
- * Distribution concentration: `1 - H(p) / ln(n)` with H the Shannon
- * entropy. 1 is one-hot, 0 is uniform. This is the measure the Together
- * Tev1 adapter reports as `confidence`.
- *
- * TODO(consolidate): the same formula lives, unexported, in
- * `packages/backend/src/providers/together-ai.ts` (`tev1Parse`). Export one
- * copy from `@johnhenry/aimatey-utils` and use it in both places.
- */
-export function concentration(probabilities: readonly number[]): number {
-  const n = probabilities.length;
-  if (n < 2) {
-    return 1;
-  }
-  const entropy = -probabilities.reduce((h, p) => (p > 0 ? h + p * Math.log(p) : h), 0);
-  return Math.min(1, Math.max(0, 1 - entropy / Math.log(n)));
-}
-
 /** A counting semaphore: `gate(fn)` runs `fn` once fewer than `limit` calls are in flight. */
 export function createGate(limit: number): <T>(fn: () => Promise<T>) => Promise<T> {
   const max = Math.max(1, Math.floor(limit));

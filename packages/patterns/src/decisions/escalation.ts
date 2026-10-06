@@ -20,6 +20,7 @@ import type {
   IRDecisionResponse,
   IRDecisionUsage,
 } from '@johnhenry/aimatey-types';
+import { noulConfidence } from '@johnhenry/aimatey-utils';
 import { invalid, sumUsage } from './shared.js';
 
 // ============================================================================
@@ -82,19 +83,27 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
  * none of the request's questions, numbers outside `[0, 1]`, an inverted
  * range, more than {@link MAX_CONDITION_DEPTH} levels of nesting, or an
  * empty / over-{@link MAX_CONDITION_CHILDREN} list.
+ *
+ * With `onUnmatchable: 'skip'`, a leaf that merely does not apply to this
+ * request's question types (`confidenceBelow` with no `choice`/`score`
+ * question, `probabilityBetween` with no `noul` one, or a named question of
+ * the other kind) is accepted instead of rejected; it never matches. Unknown
+ * question names and malformed conditions still throw.
  */
 export function validateDecisionCondition(
   condition: DecisionCondition,
-  questions: Readonly<Record<string, IRDecisionQuestion>>
+  questions: Readonly<Record<string, IRDecisionQuestion>>,
+  options: { readonly onUnmatchable?: 'throw' | 'skip' } = {}
 ): void {
-  check(condition, questions, 1, 'when');
+  check(condition, questions, 1, 'when', options.onUnmatchable === 'skip');
 }
 
 function check(
   c: unknown,
   questions: Readonly<Record<string, IRDecisionQuestion>>,
   depth: number,
-  path: string
+  path: string,
+  skip: boolean
 ): void {
   if (!isObject(c)) {
     throw invalid(path, c, 'a condition must be an object');
@@ -140,7 +149,7 @@ function check(
     ) {
       throw invalid(listPath, children, `needs between 1 and ${MAX_CONDITION_CHILDREN} conditions`);
     }
-    children.forEach((child, i) => check(child, questions, depth + 1, `${listPath}[${i}]`));
+    children.forEach((child, i) => check(child, questions, depth + 1, `${listPath}[${i}]`, skip));
     return;
   }
 
@@ -174,13 +183,16 @@ function check(
     }
     const type = questions[named]!.type;
     if (!wantsType.includes(type)) {
+      if (skip) {
+        return;
+      }
       throw invalid(
         `${path}.question`,
         named,
         `${kind} applies to ${wantsType.join('/')} questions, but '${named}' is a ${type} question`
       );
     }
-  } else if (!Object.values(questions).some((q) => wantsType.includes(q.type))) {
+  } else if (!skip && !Object.values(questions).some((q) => wantsType.includes(q.type))) {
     throw invalid(
       path,
       c,
@@ -192,7 +204,10 @@ function check(
 /**
  * Evaluate a condition against a set of answers. Pure: no validation (use
  * {@link validateDecisionCondition}), so a named question that is absent or
- * of the wrong type simply does not match.
+ * of the wrong type simply does not match. A leaf with no applicable answer
+ * (what `onUnmatchable: 'skip'` lets through) is likewise not matched: inside
+ * `any` it contributes nothing, and inside `all` (or an `atLeast` that needs
+ * it) the rule can no longer match.
  */
 export function evaluateDecisionCondition(
   condition: DecisionCondition,
@@ -270,7 +285,7 @@ export interface DecisionBandThresholds {
  *
  * The measure is `confidence` for `choice` and `score`
  * (a missing one is `escalate`: an ungradable answer is not one to act on)
- * and `max(value, 1 - value)` for `noul` -- how far from a coin flip it sits,
+ * and `noulConfidence(value)` for `noul` -- how far from a coin flip it sits,
  * on the same scale as the IR's `noul.confidence`.
  *
  * **There are no default thresholds, on purpose.** Confidence is
@@ -289,7 +304,7 @@ export function decisionBands(
   }
   const measure =
     answer.type === 'noul'
-      ? (answer.confidence ?? Math.max(answer.value, 1 - answer.value))
+      ? (answer.confidence ?? noulConfidence(answer.value))
       : answer.confidence;
   if (measure === undefined) {
     return 'escalate';
@@ -328,6 +343,16 @@ export interface DecisionEscalationOptions {
   readonly fallback: BackendAdapter | ((request: IRDecisionRequest) => BackendAdapter);
   /** When to escalate. */
   readonly when: DecisionCondition;
+  /**
+   * What to do when a leaf of `when` cannot apply to a request's questions
+   * (e.g. `confidenceBelow` on a request with only `noul` questions):
+   * `'throw'` rejects it with a `ValidationError`, so a rule that can never
+   * match fails loudly; `'skip'` treats that leaf as not matched, so one
+   * policy can serve mixed requests. Unknown question names and malformed
+   * conditions throw either way.
+   * @default 'throw'
+   */
+  readonly onUnmatchable?: 'throw' | 'skip';
   /** Called after a match, before the fallback is run. */
   readonly onEscalate?: (info: {
     readonly triggeredBy: DecisionTrigger[];
@@ -351,7 +376,9 @@ export interface DecisionEscalationOptions {
  * fallback's.
  *
  * The condition is validated against the request's question types before the
- * primary runs, so a rule that can never match fails loudly, not silently.
+ * primary runs, so a rule that can never match fails loudly, not silently
+ * (`onUnmatchable: 'skip'` relaxes this to treating such a leaf as not
+ * matched).
  *
  * Default-off like every decision pattern: register it yourself with
  * `bridge.useDecision()`.
@@ -367,13 +394,13 @@ export interface DecisionEscalationOptions {
  * ```
  */
 export function createDecisionEscalation(options: DecisionEscalationOptions): DecisionMiddleware {
-  const { fallback, when, onEscalate } = options;
+  const { fallback, when, onEscalate, onUnmatchable = 'throw' } = options;
   if (!fallback) {
     throw invalid('fallback', fallback, 'a fallback backend is required');
   }
 
   return async (request, next) => {
-    validateDecisionCondition(when, request.questions);
+    validateDecisionCondition(when, request.questions, { onUnmatchable });
     const primary = await next(request);
 
     const { matched, triggeredBy } = evaluateDecisionCondition(when, primary.answers);

@@ -395,3 +395,105 @@ describe.skipIf(process.env.OLLAMA_LIVE !== '1')(
     }, 630_000); // a CPU-only box under load generates a few tokens per minute
   }
 );
+
+describe('createEmulatedDecisionBackend: coercing chat-model output (#160)', () => {
+  const decideWith = (answersObj: Record<string, unknown>, r = req()) =>
+    createEmulatedDecisionBackend(fakeChat(JSON.stringify({ answers: answersObj }))).decide!(r);
+
+  it('accepts the live payload: a noul answered with the string "true"', async () => {
+    const res = await decideWith({ team: 'billing', urgent: 'true', severity: 'high' });
+    expect(res.answers.urgent).toEqual({ type: 'noul', value: 1 });
+    expect(res.metadata.warnings?.some((w) => w.category === 'response-malformed')).toBe(true);
+  });
+
+  it('accepts "false", any case, padded, and 1/0', async () => {
+    for (const [given, want] of [
+      ['false', 0],
+      ['FALSE', 0],
+      [' True ', 1],
+      [1, 1],
+      [0, 0],
+      ['1', 1],
+      ['0', 0],
+    ] as const) {
+      const res = await decideWith({ team: 'auth', urgent: given, severity: 'low' });
+      expect(res.answers.urgent).toEqual({ type: 'noul', value: want });
+    }
+  });
+
+  it('still rejects an unrelated noul answer', async () => {
+    await expect(decideWith({ team: 'auth', urgent: 'maybe', severity: 'low' })).rejects.toThrow(
+      /'urgent'/
+    );
+    await expect(decideWith({ team: 'auth', urgent: 2, severity: 'low' })).rejects.toThrow(
+      /'urgent'/
+    );
+  });
+
+  it('accepts a numeric string or number as a score index', async () => {
+    const a = await decideWith({ team: 'auth', urgent: true, severity: '2' });
+    expect(a.answers.severity).toEqual({ type: 'score', value: 2 });
+    const b = await decideWith({ team: 'auth', urgent: true, severity: 0 });
+    expect(b.answers.severity).toEqual({ type: 'score', value: 0 });
+    expect(a.metadata.warnings?.some((w) => w.category === 'response-malformed')).toBe(true);
+  });
+
+  it('rejects an out-of-range or fractional score index', async () => {
+    await expect(decideWith({ team: 'auth', urgent: true, severity: '3' })).rejects.toThrow(
+      /'severity'/
+    );
+    await expect(decideWith({ team: 'auth', urgent: true, severity: 1.5 })).rejects.toThrow(
+      /'severity'/
+    );
+  });
+
+  it('prefers an exact score label over index interpretation', async () => {
+    const r = req({
+      questions: { s: { type: 'score', instructions: 's', criteria: ['1', '0', '2'] } },
+    });
+    const res = await decideWith({ s: '0' }, r);
+    expect(res.answers.s).toEqual({ type: 'score', value: 1 }); // label "0" is index 1
+    expect(res.metadata.warnings?.some((w) => w.category === 'response-malformed')).toBeFalsy();
+  });
+
+  it('matches a choice value trimmed and case-insensitively when not exact', async () => {
+    const res = await decideWith({ team: ' Billing ', urgent: true, severity: 'low' });
+    expect(res.answers.team).toEqual({ type: 'choice', value: 'billing' });
+    expect(res.metadata.warnings?.some((w) => w.category === 'response-malformed')).toBe(true);
+  });
+
+  it('prefers the exact choice key when keys differ only by case', async () => {
+    const r = req({
+      questions: { c: { type: 'choice', instructions: 'c', criteria: { A: 'upper', a: 'lower' } } },
+    });
+    const res = await decideWith({ c: 'a' }, r);
+    expect(res.answers.c).toEqual({ type: 'choice', value: 'a' });
+  });
+
+  it('rejects an ambiguous inexact choice match', async () => {
+    const r = req({
+      questions: { c: { type: 'choice', instructions: 'c', criteria: { A: 'upper', a: 'lower' } } },
+    });
+    await expect(decideWith({ c: ' a ' }, r)).rejects.toThrow(/'c'/);
+  });
+
+  it('adds no malformed warning when nothing needed coercing', async () => {
+    const res = await createEmulatedDecisionBackend(fakeChat(goodReply)).decide!(req());
+    expect(res.metadata.warnings?.some((w) => w.category === 'response-malformed')).toBeFalsy();
+  });
+
+  it('coerces inside {reasoning, answer} objects too', async () => {
+    const chat = fakeChat(
+      JSON.stringify({
+        answers: {
+          team: { reasoning: 'r', answer: 'AUTH' },
+          urgent: { reasoning: 'r', answer: 'true' },
+          severity: { reasoning: 'r', answer: '1' },
+        },
+      })
+    );
+    const res = await createEmulatedDecisionBackend(chat, { includeReasoning: true }).decide!(req());
+    expect(res.answers.urgent).toMatchObject({ type: 'noul', value: 1 });
+    expect(res.answers.severity).toMatchObject({ type: 'score', value: 1 });
+  });
+});

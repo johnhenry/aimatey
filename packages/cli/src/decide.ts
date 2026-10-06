@@ -711,18 +711,13 @@ export async function decideCommand(
 
     const backend = deps.backend ?? (await createDecideBackend(args, deps.env));
     const bridge = new Bridge(createGenericFrontend(), backend);
-    // `Bridge.decide` builds its request without images, so attach them in a
-    // middleware: validation and the rest of the chain see the final request.
-    if (images.length > 0) {
-      bridge.useDecision((request, next) => next({ ...request, images }));
-    }
     const signal = (): AbortSignal | undefined =>
       args.timeout ? AbortSignal.timeout(args.timeout * 1000) : undefined;
 
     if (args.batch === undefined) {
-      return await runOne(bridge, states[0], questions, args, signal(), deps);
+      return await runOne(bridge, states[0], questions, args, signal(), images, deps);
     }
-    return await runBatch(bridge, states, questions, args, deps);
+    return await runBatch(bridge, states, questions, args, images, deps);
   } catch (error) {
     if (error instanceof DecideUsageError) {
       deps.stderr(`Error: ${error.message}\nRun 'ai-matey decide --help' for usage.\n`);
@@ -739,9 +734,10 @@ async function runOne(
   questions: Record<string, IRDecisionQuestion>,
   args: DecideArgs,
   signal: AbortSignal | undefined,
+  images: readonly ImageContent[],
   deps: DecideDeps
 ): Promise<number> {
-  const response = await bridge.decide(state, questions, { model: args.model, signal });
+  const response = await bridge.decide(state, questions, { model: args.model, signal, images });
   deps.stdout(
     args.json
       ? `${JSON.stringify(response, null, 2)}\n`
@@ -755,10 +751,12 @@ async function runBatch(
   states: unknown[],
   questions: Record<string, IRDecisionQuestion>,
   args: DecideArgs,
+  images: readonly ImageContent[],
   deps: DecideDeps
 ): Promise<number> {
   const results = await bridge.decideBatch(states, questions, {
     model: args.model,
+    images,
     concurrency: args.concurrency,
     onError: 'collect',
     signal: args.timeout ? AbortSignal.timeout(args.timeout * 1000 * states.length) : undefined,

@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { createDecisionEnsemble } from '@johnhenry/aimatey-patterns';
 import { createMockDecisionBackend } from '@johnhenry/aimatey-testing';
+import { noulConfidence } from '@johnhenry/aimatey-utils';
 import type { BackendAdapter, IRDecisionAnswer, IRDecisionRequest } from '@johnhenry/aimatey-types';
 
 const request: IRDecisionRequest = {
@@ -93,12 +94,12 @@ describe('createDecisionEnsemble', () => {
     expect(level.probabilities![2]).toBeCloseTo(0.3);
   });
 
-  it('noul: mean value; confidence from max(p, 1-p) with disagreement', async () => {
+  it('noul: mean value; confidence from noulConfidence(value) with disagreement', async () => {
     const res = await createDecisionEnsemble([m1(), m2()]).decide!(request);
     const yes = res.answers.yes as Extract<IRDecisionAnswer, { type: 'noul' }>;
     expect(yes.value).toBeCloseTo(0.7);
-    // member confs 0.9 and 0.5 -> mean 0.7; mean abs dev 0.2 -> normalized 0.4
-    expect(yes.confidence).toBeCloseTo(0.7 * (1 - 0.4));
+    // member confs noulConfidence(0.9) and noulConfidence(0.5) = 0; mean abs dev 0.2 -> normalized 0.4
+    expect(yes.confidence).toBeCloseTo((noulConfidence(0.9) / 2) * (1 - 0.4));
   });
 
   it('median aggregation ignores an outlier', async () => {

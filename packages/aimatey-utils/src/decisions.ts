@@ -507,3 +507,46 @@ export function validateDecisionRequest(
 
   return warnings;
 }
+
+// ============================================================================
+// Confidence
+// ============================================================================
+
+/**
+ * The library's definition of `confidence` for a decision answer that has a
+ * probability distribution: how concentrated the distribution is,
+ * `1 - H(p) / ln(n)`, with `H` the Shannon entropy and `n` the number of
+ * options. 1 is a one-hot distribution, 0 is uniform.
+ *
+ * This is deliberately **not** the probability of the winning option, and it
+ * is not accuracy. It matches what Jev and Ollama report (e.g. a top
+ * probability of 0.987 over three options is a confidence of about 0.93, and
+ * `[0.42, 0.42, 0.16]` is about 0.07), and is what Together, temperature
+ * scaling, ensembles and the bundled escalation helpers compute. A provider
+ * that reports its own `confidence` is passed through unchanged; this is the
+ * definition used wherever the library has to compute one itself.
+ *
+ * Fewer than two options leaves nothing to be unsure about, so the result is
+ * 1. The result is clamped to `[0, 1]`.
+ *
+ * @param probabilities - Non-negative option probabilities summing to ~1.
+ */
+export function decisionConfidence(probabilities: readonly number[]): number {
+  const n = probabilities.length;
+  if (n < 2) {
+    return 1;
+  }
+  const entropy = -probabilities.reduce((h, p) => (p > 0 ? h + p * Math.log(p) : h), 0);
+  return Math.min(1, Math.max(0, 1 - entropy / Math.log(n)));
+}
+
+/**
+ * {@link decisionConfidence} for a `noul` answer: the concentration of the
+ * two-option distribution `[p, 1 - p]`. 1 at `p = 0` or `p = 1`, 0 at
+ * `p = 0.5`.
+ *
+ * @param p - The `noul` value (probability of `true`).
+ */
+export function noulConfidence(p: number): number {
+  return decisionConfidence([p, 1 - p]);
+}

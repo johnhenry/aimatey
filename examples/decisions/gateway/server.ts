@@ -68,7 +68,6 @@ import { createGenericFrontend } from '@johnhenry/aimatey-frontend';
 import { NodeHTTPListener } from '@johnhenry/aimatey-http';
 import type {
   BackendAdapter,
-  DecisionMiddleware,
   FrontendAdapter,
   IRDecisionRequest,
   IRDecisionResponse,
@@ -160,21 +159,6 @@ const gatewayFrontend: FrontendAdapter<IRDecisionRequest, IRDecisionResponse> = 
   decisionFromIR: (response) => response,
 };
 
-/** Does the request ask anything a confidence threshold can judge? (noul answers carry none.) */
-function hasConfidenceQuestions(request: IRDecisionRequest): boolean {
-  return Object.values(request.questions).some((q) => q.type === 'choice' || q.type === 'score');
-}
-
-/**
- * Escalation only applies to requests with choice/score questions:
- * `createDecisionEscalation` rejects a `confidenceBelow` rule that could never
- * match, which would turn every noul-only request into a 400.
- */
-function gatedEscalation(options: Parameters<typeof createDecisionEscalation>[0]): DecisionMiddleware {
-  const escalate = createDecisionEscalation(options);
-  return (request, next) => (hasConfidenceQuestions(request) ? escalate(request, next) : next(request));
-}
-
 export interface Gateway {
   readonly handler: http.RequestListener;
   readonly bridge: Bridge;
@@ -238,7 +222,9 @@ export function createGateway(deps: GatewayDeps): Gateway {
   bridge.useDecision(createDecisionValidationMiddleware({ maxStateBytes: MAX_BODY_BYTES }));
   if (deps.fallback) {
     bridge.useDecision(
-      gatedEscalation({
+      createDecisionEscalation({
+        // A noul-only request has nothing a confidence threshold can judge: skip, don't 400.
+        onUnmatchable: 'skip',
         when: { confidenceBelow: deps.escalateBelow ?? 0.6 },
         fallback: deps.fallback,
         onEscalate: ({ triggeredBy }) =>

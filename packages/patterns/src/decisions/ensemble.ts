@@ -21,6 +21,7 @@ import type {
   IRDecisionUsage,
   IRWarning,
 } from '@johnhenry/aimatey-types';
+import { decisionConfidence, noulConfidence } from '@johnhenry/aimatey-utils';
 import { createGate, normalize, sumUsage } from './shared.js';
 
 /** Combine the members' numbers for one slot (an option's probability, a score value, a noul value). */
@@ -100,8 +101,8 @@ const clamp01 = (x: number): number => Math.min(1, Math.max(0, x));
  *
  *     confidence = mean(member confidence) * (1 - disagreement)
  *
- * where a member's confidence is its own `confidence`, else the largest of
- * its probabilities (`noul`: `max(v, 1 - v)`), averaged over the members
+ * where a member's confidence is its own `confidence`, else the concentration of
+ * its probabilities (`decisionConfidence(p)`; `noul`: `noulConfidence(v)`), averaged over the members
  * that have one. When no member reports any, `confidence` is omitted, as
  * for any answer without a measure. Agreement can only lower confidence,
  * never raise it.
@@ -308,7 +309,7 @@ function aggregateQuestion(
       const conf = meanConfidence(
         members.map(({ answer }, i) => {
           const a = answer as Choice;
-          return a.confidence ?? (a.probabilities ? Math.max(...vectors[i]!) : undefined);
+          return a.confidence ?? (a.probabilities ? decisionConfidence(vectors[i]!) : undefined);
         })
       );
       return {
@@ -348,7 +349,7 @@ function aggregateQuestion(
       const conf = meanConfidence(
         members.map(({ answer }, i) => {
           const a = answer as Score;
-          return a.confidence ?? (a.probabilities ? Math.max(...vectors[i]!) : undefined);
+          return a.confidence ?? (a.probabilities ? decisionConfidence(vectors[i]!) : undefined);
         })
       );
       return {
@@ -369,7 +370,7 @@ function aggregateQuestion(
       const conf = mean(
         members.map(({ answer }) => {
           const a = answer as Noul;
-          return a.confidence ?? Math.max(a.value, 1 - a.value);
+          return a.confidence ?? noulConfidence(a.value);
         })
       );
       return {

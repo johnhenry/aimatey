@@ -396,7 +396,14 @@ describe('decideCommand', () => {
   });
 
   it('attaches --image files as base64 with a media type from the extension', async () => {
-    const backend = createMockDecisionBackend({ answers: cannedAnswers });
+    const mock = createMockDecisionBackend({ answers: cannedAnswers });
+    // Images are opt-in: validation rejects them unless the backend says so.
+    const backend = Object.assign(mock, {
+      metadata: {
+        ...mock.metadata,
+        capabilities: { ...mock.metadata.capabilities, decisionImages: true },
+      },
+    });
     const h = harness({ 'a.png': Buffer.from([1, 2, 3]), 'b.jpg': Buffer.from([4]) });
     await decideCommand(['--state', 's', ...Q, '--image', 'a.png', '--image', 'b.jpg'], {
       ...h.deps,
