@@ -323,7 +323,7 @@ export class LayaBackendAdapter implements BackendAdapter {
         warnings.push({
           category: 'parameter-unsupported',
           severity: 'warning',
-          message: `@receptron/laya's systemOne() has no per-call '${hint}' routing hint; '${String(value)}' was ignored.`,
+          message: `@receptron/laya's systemOne() has no per-call '${hint}' routing hint; ${JSON.stringify(value)} was ignored.`,
           field: `parameters.custom.${hint}`,
           originalValue: value,
           source,

@@ -75,9 +75,10 @@ export interface TypeSafeSDKResponse {
   readonly model: string;
 }
 
-export class TypeSafeFrontendAdapter
-  implements FrontendAdapter<TypeSafeSDKRequest, TypeSafeSDKResponse>
-{
+export class TypeSafeFrontendAdapter implements FrontendAdapter<
+  TypeSafeSDKRequest,
+  TypeSafeSDKResponse
+> {
   readonly metadata: AdapterMetadata = {
     name: 'typesafe-frontend',
     version: '1.0.0',

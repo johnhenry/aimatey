@@ -181,7 +181,9 @@ export interface MockBackendConfig {
    * Build the whole decision response yourself. Takes precedence over
    * `decisionAnswers`.
    */
-  decisionHandler?: (request: IRDecisionRequest) => IRDecisionResponse | Promise<IRDecisionResponse>;
+  decisionHandler?: (
+    request: IRDecisionRequest
+  ) => IRDecisionResponse | Promise<IRDecisionResponse>;
 }
 
 /**

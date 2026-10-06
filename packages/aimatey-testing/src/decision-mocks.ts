@@ -124,7 +124,9 @@ export function createMockDecisionBackend(
       for (const question of Object.keys(request.questions)) {
         const answer = config.answers?.[question];
         if (!answer) {
-          throw new Error(`createMockDecisionBackend: no mock answer configured for question '${question}'`);
+          throw new Error(
+            `createMockDecisionBackend: no mock answer configured for question '${question}'`
+          );
         }
         answers[question] = answer;
       }

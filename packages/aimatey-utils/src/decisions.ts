@@ -184,7 +184,12 @@ function validateAnswer(
   if (answer.type === 'noul') {
     const value = requireFinite(answer.value, `${field}.value`, backend);
     if (value < 0 || value > 1) {
-      throw invalid(`${field}.value`, value, `noul answer '${name}' must be in [0, 1], got ${value}`, backend);
+      throw invalid(
+        `${field}.value`,
+        value,
+        `noul answer '${name}' must be in [0, 1], got ${value}`,
+        backend
+      );
     }
     return;
   }
@@ -216,7 +221,12 @@ function validateAnswer(
             )
           );
         }
-        checkSum(name, entries.map(([, p]) => p), `${field}.probabilities`, warnings);
+        checkSum(
+          name,
+          entries.map(([, p]) => p),
+          `${field}.probabilities`,
+          warnings
+        );
       }
     }
     return;
@@ -252,7 +262,12 @@ function validateAnswer(
   }
 }
 
-function checkSum(name: string, values: readonly number[], field: string, warnings: IRWarning[]): void {
+function checkSum(
+  name: string,
+  values: readonly number[],
+  field: string,
+  warnings: IRWarning[]
+): void {
   const sum = values.reduce((total, p) => total + p, 0);
   if (Math.abs(sum - 1) > PROBABILITY_SUM_TOLERANCE) {
     warnings.push(
