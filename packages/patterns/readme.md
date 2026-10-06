@@ -164,7 +164,7 @@ bridge.useDecision(
 **Calibration.** Rescales probabilities with a temperature per question type and option count
 (`softmax(log p / T)`; `noul` via logit), then recomputes `confidence`. It never changes the winner.
 Fit `T` from labeled runs with `fitTemperature()` and check the result with `calibrationReport()`
-(Brier, ECE, ten reliability buckets), both in `@johnhenry/aimatey-testing`. `nameInvariance()`
+(Brier, ECE, ten reliability buckets), both in `@johnhenry/aimatey-testing`. `calibrationReport()` buckets on the winner's probability mass from `probabilities` (not on `confidence`, which is concentration, not P(correct)); `confidence` is only a fallback for answers without `probabilities`. `nameInvariance()`
 there measures how much a model needs neutral keys, with no labels.
 
 ```typescript
