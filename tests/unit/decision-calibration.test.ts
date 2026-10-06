@@ -5,6 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ValidationError } from '@johnhenry/aimatey-errors';
+import { noulConfidence } from '@johnhenry/aimatey-utils';
 import { createTemperatureScaling } from '@johnhenry/aimatey-patterns';
 import {
   calibrationReport,
@@ -90,12 +91,12 @@ describe('createTemperatureScaling', () => {
     expect(a.level.value).toBeCloseTo(probs[1]! + 2 * probs[2]!);
   });
 
-  it('noul: logit / T, confidence = max(p, 1-p)', async () => {
+  it('noul: logit / T, confidence = noulConfidence(p)', async () => {
     const a = await scaled({ default: 2 });
     const logit = Math.log(0.9 / 0.1) / 2;
     const p = 1 / (1 + Math.exp(-logit));
     expect(a.yes.value).toBeCloseTo(p);
-    expect(a.yes.confidence).toBeCloseTo(p);
+    expect(a.yes.confidence).toBeCloseTo(noulConfidence(p));
     const low = await scaled({ default: 2 });
     expect(low.yes.value).toBeLessThan(0.9);
     // a probability below .5 stays below .5
@@ -138,6 +139,11 @@ describe('createTemperatureScaling', () => {
   it('defaults to T = 1 everywhere with no config', async () => {
     const a = await scaled({});
     expect(a.team.probabilities!.a).toBeCloseTo(0.7);
+  });
+
+  it('winner-mass noul confidence is max(p, 1-p)', async () => {
+    const a = await scaled({ default: 1, confidence: 'winner-mass' });
+    expect(a.yes.confidence).toBeCloseTo(0.9);
   });
 
   it('winner-mass confidence is available', async () => {
@@ -306,7 +312,10 @@ describe('fitTemperature', () => {
       },
       (r) => backend.decide(r)
     );
-    const rescaled = runs.map((run) => ({ ...run, answer: res.answers.q! }));
+    // ECE treats confidence as the chance of being right, so grade the rescaled
+    // value itself (winner mass) rather than its concentration `confidence`.
+    const { value } = res.answers.q as { value: number };
+    const rescaled = runs.map((run) => ({ ...run, answer: { type: 'noul', value } as const }));
     expect(calibrationReport(rescaled).ece).toBeLessThan(calibrationReport(runs).ece);
   });
 

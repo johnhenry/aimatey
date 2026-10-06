@@ -1077,13 +1077,15 @@ type IRDecisionAnswer =
       readonly type: 'noul';
       /** Calibrated probability of "yes", in [0, 1]. */
       readonly value: number;
-      /** max(value, 1 - value). Not every provider reports it. */
+      /** Concentration of [value, 1 - value] (noulConfidence). Not every provider reports it. */
       readonly confidence?: number;
       readonly reasoning?: string;
     };
 ```
 
-`probabilities` and `confidence` are **optional** on `choice` and `score`: OpenRouter marks them optional and an answer from an LLM through structured output has neither. Absence means "the provider did not report it"; there is no sentinel such as `confidence: 0`, so consumers must handle `undefined`. For `noul` the probability itself is the answer; `confidence` is the distance from a coin flip. `reasoning` is free text from providers that explain themselves.
+`probabilities` and `confidence` are **optional** on `choice` and `score`: OpenRouter marks them optional and an answer from an LLM through structured output has neither. Absence means "the provider did not report it"; there is no sentinel such as `confidence: 0`, so consumers must handle `undefined`. For `noul` the probability itself is the answer; `confidence` is still a separate quantity there, the concentration of `[value, 1 - value]` (0 at a coin flip, 1 at certainty).
+
+**What `confidence` means.** It is how *concentrated* the answer's distribution is, `1 - H(p) / ln(n)` with `H` the Shannon entropy and `n` the number of options: 1 for a one-hot distribution, 0 for a uniform one. It is **not** the probability of the winning option (a top probability of 0.987 over three options is a confidence of about 0.93, and `[0.42, 0.42, 0.16]` is about 0.07) and it is not accuracy; calibrate against labeled runs before trusting a threshold. `decisionConfidence(probabilities)` and `noulConfidence(p)` in `@johnhenry/aimatey-utils` are the one implementation, used wherever the library computes `confidence` itself (Together, temperature scaling, ensembles, neutral option keys, escalation bands). A provider that reports its own `confidence` (Jev, Ollama, Laya) is passed through as reported and may use a different measure. `reasoning` is free text from providers that explain themselves.
 
 ### IRDecisionResponse and IRDecisionUsage
 

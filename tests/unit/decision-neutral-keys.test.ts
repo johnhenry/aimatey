@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { createNeutralOptionKeys } from '@johnhenry/aimatey-patterns';
 import { createMockDecisionBackend } from '@johnhenry/aimatey-testing';
+import { noulConfidence } from '@johnhenry/aimatey-utils';
 import type {
   IRDecisionAnswer,
   IRDecisionRequest,
@@ -170,7 +171,7 @@ describe('createNeutralOptionKeys', () => {
         opt_1: 'true: asks for money back',
         opt_2: 'false: does not',
       });
-      expect(res.answers.refund).toEqual({ type: 'noul', value: 0.8, confidence: 0.8 });
+      expect(res.answers.refund).toEqual({ type: 'noul', value: 0.8, confidence: noulConfidence(0.8) });
     });
 
     it('uses a one-hot value when the backend gives no probabilities', async () => {

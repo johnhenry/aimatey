@@ -10,6 +10,7 @@ import { ValidationError } from '@johnhenry/aimatey-errors';
 import {
   createDecisionEscalation,
   evaluateDecisionCondition,
+  validateDecisionCondition,
   decisionBands,
   type DecisionCondition,
 } from '@johnhenry/aimatey-patterns';
@@ -152,11 +153,16 @@ describe('decisionBands', () => {
   it('treats a missing confidence as escalate', () => {
     expect(decisionBands({ type: 'choice', value: 'a' }, t)).toBe('escalate');
   });
-  it('bands noul by max(p, 1-p), on either side', () => {
-    expect(decisionBands({ type: 'noul', value: 0.97 }, t)).toBe('act');
-    expect(decisionBands({ type: 'noul', value: 0.03 }, t)).toBe('act');
-    expect(decisionBands({ type: 'noul', value: 0.25 }, t)).toBe('review');
-    expect(decisionBands({ type: 'noul', value: 0.5 }, t)).toBe('escalate');
+  it('bands noul by noulConfidence(value), on either side', () => {
+    // noulConfidence: 0.97 -> 0.81, 0.25 -> 0.19, 0.5 -> 0
+    const b = { act: 0.8, review: 0.1 };
+    expect(decisionBands({ type: 'noul', value: 0.97 }, b)).toBe('act');
+    expect(decisionBands({ type: 'noul', value: 0.03 }, b)).toBe('act');
+    expect(decisionBands({ type: 'noul', value: 0.25 }, b)).toBe('review');
+    expect(decisionBands({ type: 'noul', value: 0.5 }, b)).toBe('escalate');
+  });
+  it('uses a reported noul confidence over the computed one', () => {
+    expect(decisionBands({ type: 'noul', value: 0.5, confidence: 0.95 }, t)).toBe('act');
   });
   it('rejects thresholds where review exceeds act', () => {
     expect(() => decisionBands({ type: 'noul', value: 0.5 }, { act: 0.5, review: 0.9 })).toThrow(
@@ -346,5 +352,113 @@ describe('createDecisionEscalation', () => {
       when: { confidenceBelow: 0.9 },
     });
     await expect(mw(request, (r) => lowConfidencePrimary().decide(r))).rejects.toThrow(/decide/);
+  });
+});
+
+describe('onUnmatchable (#163)', () => {
+  const noulOnly = { refund: questions.refund! };
+  const choiceOnly = { team: questions.team! };
+
+  const runWith = async (
+    when: DecisionCondition,
+    qs: IRDecisionRequest['questions'],
+    onUnmatchable?: 'throw' | 'skip'
+  ) => {
+    // A primary that only answers the questions it was asked.
+    const primary = createMockDecisionBackend({
+      name: 'primary',
+      model: 'primary-model',
+      handler: (req): IRDecisionResponse => ({
+        answers: Object.fromEntries(Object.entries(answers).filter(([q]) => q in req.questions)),
+        model: 'primary-model',
+        metadata: req.metadata,
+      }),
+    });
+    const fallback = fallbackBackend();
+    const mw = createDecisionEscalation({ fallback, when, ...(onUnmatchable && { onUnmatchable }) });
+    const res = await mw({ ...request, questions: qs }, (r) => primary.decide(r));
+    return { res, fallback };
+  };
+
+  it("defaults to 'throw'", async () => {
+    await expect(runWith({ confidenceBelow: 0.9 }, noulOnly)).rejects.toThrow(ValidationError);
+    await expect(runWith({ confidenceBelow: 0.9 }, noulOnly, 'throw')).rejects.toThrow(
+      ValidationError
+    );
+  });
+
+  it("'skip' passes a confidenceBelow rule on a noul-only request through", async () => {
+    const { res, fallback } = await runWith({ confidenceBelow: 0.9 }, noulOnly, 'skip');
+    expect(res.model).toBe('primary-model');
+    expect(fallback.calls).toHaveLength(0);
+  });
+
+  it("'skip' passes a probabilityBetween rule on a request with no noul question through", async () => {
+    const { fallback } = await runWith({ probabilityBetween: [0, 1] }, choiceOnly, 'skip');
+    expect(fallback.calls).toHaveLength(0);
+  });
+
+  it("'skip' still escalates when the rule applies", async () => {
+    const { res, fallback } = await runWith({ confidenceBelow: 0.9 }, questions, 'skip');
+    expect(fallback.calls).toHaveLength(1);
+    expect(res.model).toBe('fallback-model');
+  });
+
+  it("'skip' skips a leaf naming a question of the wrong type", async () => {
+    const { fallback } = await runWith({ question: 'refund', confidenceBelow: 0.9 }, questions, 'skip');
+    expect(fallback.calls).toHaveLength(0);
+  });
+
+  it("'skip' still rejects an unknown question name and malformed numbers", async () => {
+    await expect(runWith({ question: 'ghost', confidenceBelow: 0.5 }, questions, 'skip')).rejects.toThrow(
+      /ghost/
+    );
+    await expect(runWith({ confidenceBelow: 1.5 }, questions, 'skip')).rejects.toThrow(
+      ValidationError
+    );
+    await expect(runWith({ any: [] }, questions, 'skip')).rejects.toThrow(ValidationError);
+  });
+
+  it("'skip' in an any(): the skipped leaf is not matched, the other leaf still can be", async () => {
+    // noul-only request: confidenceBelow is skipped, probabilityBetween applies (refund = 0.5)
+    const when: DecisionCondition = { any: [{ confidenceBelow: 0.9 }, { probabilityBetween: [0.4, 0.6] }] };
+    const { res, fallback } = await runWith(when, noulOnly, 'skip');
+    expect(fallback.calls).toHaveLength(1);
+    expect(res.metadata.custom?.escalation).toMatchObject({
+      triggeredBy: [{ question: 'refund', reason: 'probability_between' }],
+    });
+  });
+
+  it("'skip' in an all(): a skipped leaf can never be satisfied, so the rule does not match", async () => {
+    const when: DecisionCondition = { all: [{ confidenceBelow: 0.9 }, { probabilityBetween: [0.4, 0.6] }] };
+    const { fallback } = await runWith(when, noulOnly, 'skip');
+    expect(fallback.calls).toHaveLength(0);
+  });
+
+  it("'skip' counts a skipped leaf as unmatched in atLeast()", async () => {
+    const when: DecisionCondition = {
+      atLeast: { count: 2, conditions: [{ confidenceBelow: 0.9 }, { probabilityBetween: [0.4, 0.6] }] },
+    };
+    const { fallback } = await runWith(when, noulOnly, 'skip');
+    expect(fallback.calls).toHaveLength(0);
+  });
+
+  it('evaluateDecisionCondition treats a leaf with no applicable answer as not matched', () => {
+    const onlyNoul = { refund: answers.refund! };
+    const r = evaluateDecisionCondition(
+      { any: [{ confidenceBelow: 0.99 }, { probabilityBetween: [0.9, 1] }] },
+      onlyNoul
+    );
+    expect(r.matched).toBe(false);
+    expect(r.triggeredBy).toEqual([]);
+  });
+
+  it('validateDecisionCondition takes the same option', () => {
+    expect(() => validateDecisionCondition({ confidenceBelow: 0.5 }, noulOnly)).toThrow(
+      ValidationError
+    );
+    expect(() =>
+      validateDecisionCondition({ confidenceBelow: 0.5 }, noulOnly, { onUnmatchable: 'skip' })
+    ).not.toThrow();
   });
 });
