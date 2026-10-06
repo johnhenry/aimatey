@@ -13,6 +13,8 @@ import type {
   AdapterMetadata,
 } from '@johnhenry/aimatey-types';
 import type {
+  IRDecisionRequest,
+  IRDecisionResponse,
   IRChatRequest,
   IRChatResponse,
   IRChatStream,
@@ -35,6 +37,7 @@ import {
   buildResponseFormatFallbackWarning,
   estimateTokens,
 } from '../shared.js';
+import { decideViaSystemOne, estimateSystemOneCost } from '../decisions/systemone-client.js';
 
 // ============================================================================
 // Perplexity AI API Types (OpenAI-compatible with search extensions)
@@ -144,6 +147,11 @@ export class PerplexityBackendAdapter implements BackendAdapter<
         supportsFrequencyPenalty: true,
         supportsPresencePenalty: true,
         maxStopSequences: 4,
+        // Typed decisions via `/v1/decisions` (pplx-decider).
+        decisions: true,
+        decisionModels: ['pplx-decider-v1-27b'],
+        decisionTypes: ['choice', 'score', 'noul'],
+        decisionImages: true,
       },
       config: {
         baseURL: this.baseURL,
@@ -485,6 +493,38 @@ export class PerplexityBackendAdapter implements BackendAdapter<
     };
 
     return { ...headers, ...this.config.headers };
+  }
+
+  /**
+   * Answer a typed-decision request with pplx-decider (default
+   * `pplx-decider-v1-27b`) via `POST <baseURL>/v1/decisions`. Answers are
+   * System One-shaped. Images are sent as `images[]` of base64 data URLs; a
+   * `url` source throws. UNVERIFIED: the plan documents "images" but not the
+   * field name or encoding -- `images` of data URLs mirrors Clef; check the
+   * live API before relying on it.
+   */
+  decide(request: IRDecisionRequest, signal?: AbortSignal): Promise<IRDecisionResponse> {
+    return decideViaSystemOne(request, {
+      url: `${this.baseURL.replace(/\/+$/, '')}/v1/decisions`,
+      dialect: 'systemone',
+      model: request.parameters?.model || this.config.defaultModel || 'pplx-decider-v1-27b',
+      sendImages: true,
+      imageFormat: 'data-url',
+      headers: this.getHeaders(),
+      signal,
+      backendName: this.metadata.name,
+      provider: 'perplexity',
+    });
+  }
+
+  /** Input-token pricing from the model registry ($0.04 per 1M; output free). */
+  estimateDecisionCost(request: IRDecisionRequest): Promise<number | null> {
+    return Promise.resolve(
+      estimateSystemOneCost(
+        request,
+        request.parameters?.model || this.config.defaultModel || 'pplx-decider-v1-27b'
+      )
+    );
   }
 
   /**

@@ -12,8 +12,15 @@ import type {
   BackendAdapter,
   ApiKeyBackendAdapterConfig,
   IRChatRequest,
+  IRDecisionRequest,
+  IRDecisionResponse,
 } from '@johnhenry/aimatey-types';
 import { estimateTokens } from '../shared.js';
+import {
+  buildImageDroppedWarning,
+  decideViaSystemOne,
+  estimateSystemOneCost,
+} from '../decisions/systemone-client.js';
 
 /**
  * Backend adapter for Inception Labs (Mercury) API.
@@ -92,11 +99,50 @@ export class InceptionBackendAdapter
         supportsFrequencyPenalty: false,
         supportsPresencePenalty: false,
         maxStopSequences: 4,
+        // Typed decisions: native endpoint unverified, see decide().
+        decisions: true,
+        decisionModels: ['mercury-decide'],
+        decisionTypes: ['choice', 'score', 'noul'],
+        decisionImages: false,
       },
       config: {
         baseURL: inceptionConfig.baseURL,
       },
     });
+  }
+
+  /**
+   * Answer a typed-decision request with Mercury Decide.
+   *
+   * UNVERIFIED: Inception has not published Mercury Decide's native
+   * endpoint. This assumes the System One shape at `<baseURL>/systemone`
+   * (the same path Jev and Ollama use). The model is known to work through
+   * OpenRouter today (`OpenRouterBackendAdapter`, model
+   * `inception/mercury-decide`); use that if this path 404s. Images are not
+   * supported and are dropped with a warning.
+   */
+  decide(request: IRDecisionRequest, signal?: AbortSignal): Promise<IRDecisionResponse> {
+    return decideViaSystemOne(request, {
+      url: `${this.baseURL.replace(/\/+$/, '')}/systemone`,
+      dialect: 'systemone',
+      model: request.parameters?.model || 'mercury-decide',
+      sendImages: false,
+      headers: {
+        Authorization: `Bearer ${this.config.apiKey}`,
+        ...this.config.headers,
+      },
+      signal,
+      backendName: this.metadata.name,
+      provider: 'inception',
+      warnings: buildImageDroppedWarning(request, this.metadata.name, 'Mercury Decide'),
+    });
+  }
+
+  /** Registry price for `mercury-decide` (free on OpenRouter at launch). */
+  estimateDecisionCost(request: IRDecisionRequest): Promise<number | null> {
+    return Promise.resolve(
+      estimateSystemOneCost(request, request.parameters?.model || 'mercury-decide')
+    );
   }
 
   /**

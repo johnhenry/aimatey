@@ -13,6 +13,8 @@ import type {
   AdapterMetadata,
 } from '@johnhenry/aimatey-types';
 import type {
+  IRDecisionRequest,
+  IRDecisionResponse,
   IRChatRequest,
   IRChatResponse,
   IRChatStream,
@@ -36,6 +38,7 @@ import {
   buildToolsUnsupportedWarning,
   estimateTokens,
 } from '../shared.js';
+import { buildImageDroppedWarning, decideViaSystemOne } from '../decisions/systemone-client.js';
 
 // ============================================================================
 // OpenRouter API Types (OpenAI-compatible with extensions)
@@ -116,6 +119,11 @@ export interface OpenRouterStreamChunk {
 export interface OpenRouterConfig extends ApiKeyBackendAdapterConfig {
   siteUrl?: string; // Your site URL (for HTTP-Referer header)
   siteName?: string; // Your site name (for X-Title header)
+  /**
+   * Which decisions endpoint `decide()` uses: `'alpha'` (default,
+   * `/api/alpha/decisions`) or `'systemone'` (`/api/v1/systemone`).
+   */
+  decisionsEndpoint?: 'alpha' | 'systemone';
 }
 
 // ============================================================================
@@ -168,6 +176,20 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
         supportsFrequencyPenalty: true,
         supportsPresencePenalty: true,
         maxStopSequences: 4,
+        // Typed decisions routed to Jev, Kev, Mercury Decide, ... Ids: the
+        // Jev ids are documented; the Kev and Mercury ids are best-effort
+        // guesses at OpenRouter's slugs -- confirm against /models.
+        decisions: true,
+        decisionModels: [
+          'typesafe/jev-1.13',
+          '~typesafe/jev-latest',
+          'jaredpalmer/kev-4b', // best-effort id
+          'inception/mercury-decide', // best-effort id
+        ],
+        decisionTypes: ['choice', 'score', 'noul'],
+        decisionImages: false,
+        // Limits are Jev's (the default route); other models may differ.
+        decisionLimits: { maxChoiceOptions: 255, maxScoreLevels: 10, maxStateTokens: 32_000 },
       },
       config: {
         baseURL: this.baseURL,
@@ -504,6 +526,47 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
         },
       } as IRStreamChunk;
     }
+  }
+
+  /**
+   * The decisions URL. `/api/alpha/decisions` is a sibling of the chat
+   * `/api/v1` base, not a child of it, so the trailing `/v1` is replaced
+   * (`https://openrouter.ai/api/v1` -> `https://openrouter.ai/api/alpha/decisions`).
+   * `decisionsEndpoint: 'systemone'` uses `<baseURL>/systemone` instead.
+   */
+  private decisionsURL(): string {
+    const base = this.baseURL.replace(/\/+$/, '');
+    if (this.config.decisionsEndpoint === 'systemone') {
+      return `${base}/systemone`;
+    }
+    return `${base.replace(/\/v1$/, '')}/alpha/decisions`;
+  }
+
+  /**
+   * Answer a typed-decision request through OpenRouter's decisions API.
+   * Uses the chat headers (auth plus site headers). `parameters.custom.provider`
+   * (routing preferences), `trace`, `session_id` and `user` are passed
+   * through; the response carries OpenRouter's `id`, `provider` and
+   * `usage.cost`. Answers may lack `probabilities` / `confidence`. Images
+   * are dropped upstream-side (not supported), so they are not sent and a
+   * warning is attached.
+   */
+  decide(request: IRDecisionRequest, signal?: AbortSignal): Promise<IRDecisionResponse> {
+    return decideViaSystemOne(request, {
+      url: this.decisionsURL(),
+      dialect: 'openrouter',
+      model: request.parameters?.model || this.config.defaultModel || 'typesafe/jev-1.13',
+      sendImages: false,
+      headers: this.getHeaders(),
+      signal,
+      backendName: this.metadata.name,
+      warnings: buildImageDroppedWarning(request, this.metadata.name, 'OpenRouter decisions'),
+    });
+  }
+
+  /** Price depends on the routed model; read `usage.cost` from the response. */
+  estimateDecisionCost(_request: IRDecisionRequest): Promise<number | null> {
+    return Promise.resolve(null);
   }
 
   /**

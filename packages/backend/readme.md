@@ -73,6 +73,17 @@ precisely so it isn't forced to fake a chat capability it doesn't have.
 - **TypeSafe (Jev)** - "System One" typed decisions, 70-500ms latency, input-token-only pricing
 - **Ollama** - `decide()` on the same `OllamaBackendAdapter` that chats: `POST /v1/systemone` (Ollama 0.35+) against `nimble`, `tev1`, and other decision models; base64 `images`, `parameters.custom.keepAlive`; `listModels()` marks decision models with `metadata.kind: 'decision'`
 - **SystemOne (generic)** - `SystemOneBackendAdapter`, decision-only, for any server that speaks System One: self-hosted Kev, Strands Decider, `laya[serve]` and Nimble servers, Vercel AI Gateway (`baseURL: 'https://ai-gateway.vercel.sh/typesafe/v1'`), OpenRouter, Cloudflare Clef, and OpenAI Decisions once its schema is public. Pick a wire `dialect` (`'systemone'` default, `'openrouter'`, `'vercel-evaluate'`, `'cloudflare'`, and the unverified `'openai-decisions'`)
+- **Cloudflare (Clef)** - `CloudflareBackendAdapter.decide()` against Workers AI `POST .../accounts/<id>/ai/run/@cf/cloudflare/{clef,clef-flash}` (derived from `accountId` / an `/ai/v1` `baseURL`; default `clef-flash`; `@cf/cloudflare/clef` aliases accepted, other models rejected). Response is unwrapped from Workers AI's `result` envelope
+- **OpenRouter** - `OpenRouterBackendAdapter.decide()` against `/api/alpha/decisions` (derived from `baseURL`; `decisionsEndpoint: 'systemone'` falls back to `/api/v1/systemone`). Routes to Jev, Kev and Mercury Decide; `parameters.custom.provider` / `trace` / `session_id` / `user` pass through; the response carries `id`, `provider` and `usage.cost`
+- **Perplexity** - `PerplexityBackendAdapter.decide()` against `<baseURL>/v1/decisions` with `pplx-decider-v1-27b` (default) and images (field name and encoding unverified)
+- **Inception (Mercury Decide)** - `InceptionBackendAdapter.decide()`; the native endpoint is unverified, so it assumes `<baseURL>/systemone`; works through OpenRouter today
+
+| Backend | Endpoint | Types | Images | Limits |
+|---------|----------|-------|--------|--------|
+| Cloudflare | `/ai/run/@cf/cloudflare/{clef,clef-flash}` | choice, score, noul | yes, 4 max (data URLs) | 64 questions, 255 options, 10 levels, 64k state tokens |
+| OpenRouter | `/api/alpha/decisions` | choice, score, noul | no | Jev's: 255 options, 10 levels, 32k state tokens |
+| Perplexity | `/v1/decisions` | choice, score, noul | yes (unverified encoding) | undeclared |
+| Inception | `/systemone` (unverified) | choice, score, noul | no | undeclared |
 
 ```typescript
 import { SystemOneBackendAdapter } from '@johnhenry/aimatey-backend';

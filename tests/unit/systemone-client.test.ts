@@ -144,9 +144,9 @@ describe('buildSystemOneRequest', () => {
     expect(questions.department.type).toBe('choice');
   });
 
-  it("'cloudflare' keeps the model out of the body (it is in the URL)", () => {
+  it("'cloudflare' sends the short model name in the body as well as the URL", () => {
     const body = buildSystemOneRequest(ir, { dialect: 'cloudflare', model: 'clef' });
-    expect(body).not.toHaveProperty('model');
+    expect(body.model).toBe('clef');
     expect(body.state).toBe(ir.state);
   });
 
