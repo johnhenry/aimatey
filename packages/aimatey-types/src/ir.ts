@@ -776,7 +776,13 @@ export type WarningCategory =
    * A consumer that renders a trust label should treat a turn carrying this
    * warning as unknown-and-suspect rather than unknown-and-ordinary.
    */
-  | 'provenance-lost';
+  | 'provenance-lost'
+  /**
+   * A provider response was usable but internally inconsistent -- e.g. a
+   * typed-decision answer whose probabilities do not sum to 1. Nothing was
+   * changed; the response is passed through as received and flagged.
+   */
+  | 'response-malformed';
 
 /**
  * Semantic drift warning.
