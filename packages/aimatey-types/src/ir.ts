@@ -1028,7 +1028,63 @@ export interface IRProvenance {
    * ```
    */
   readonly upstream?: IRProvenance;
+
+  /**
+   * The link this hop crossed to reach what it talked to: whether the request
+   * left the process, left the host, or went somewhere else entirely.
+   *
+   * `IRProvenance` can name every hop of `phone -> desktop -> llama-cpp`, but a name
+   * says nothing about *where* the hop is, and the question a privacy UI actually asks
+   * -- "did this reply leave your device?" -- cannot be answered by reading `backend`
+   * (#130). This field is the missing fact, and it is deliberately narrow:
+   *
+   * - **Set by the adapter that performed the hop, never inferred.** Only the adapter
+   *   knows whether it called a function, a loopback socket, or the public internet. No
+   *   walker, router or middleware may guess it from a name or a URL.
+   * - **Fail closed.** `undefined` means *unknown*, and every consumer must treat unknown
+   *   as `'external'`. A proxy that forgets to set it then produces no reassurance
+   *   rather than a confident wrong label. {@link resolveEgress} implements exactly this
+   *   so no two consumers walk the chain differently.
+   * - **Only what an adapter can know about itself.** The members are `'in-process'`
+   *   (a function call: a native/local-model adapter), `'same-host'` (loopback or a
+   *   unix socket: a daemon on this machine) and `'external'` (anything else, a LAN peer
+   *   and a cloud API alike). There is intentionally **no** `'same-owner'`: "this is a
+   *   machine the user owns" is a claim about a pairing relationship the adapter learned
+   *   from the *application*, not a fact about the link. The IR is not the place to
+   *   carry a trust assertion its adapters cannot originate -- an application that wants
+   *   to render "your own desktop" keeps its own allow-list of hops it trusts and
+   *   consults that, using `locality` only for what is adapter-knowable.
+   *
+   * Like `servedModel` this is a **per-hop** fact: on `phone -> desktop -> llama-cpp`
+   * the phone's hop is `'external'` (it crossed a network to the desktop) and the
+   * desktop's own hop, in `upstream`, is `'in-process'` or `'same-host'`. Reading only
+   * the near hop would say the reply stayed local; {@link resolveEgress} takes the
+   * widest link across the whole chain.
+   *
+   * Not set on `request.metadata.provenance` by the Bridge: the Bridge cannot know what
+   * an adapter does with the request, and a stamp it invented would be the confident
+   * wrong label this field exists to prevent.
+   *
+   * @example
+   * ```typescript
+   * // On the phone, for `phone -> desktop -> llama-cpp`:
+   * {
+   *   backend: 'tunnel',
+   *   locality: 'external',                 // the phone crossed a network
+   *   upstream: {
+   *     backend: 'llama-cpp',
+   *     locality: 'in-process'              // the desktop ran the model itself
+   *   }
+   * }
+   * ```
+   */
+  readonly locality?: ProvenanceLocality;
 }
+
+/**
+ * How far a hop's link reaches, narrowest first. See {@link IRProvenance.locality}.
+ */
+export type ProvenanceLocality = 'in-process' | 'same-host' | 'external';
 
 /**
  * Request/response metadata.
@@ -1112,6 +1168,16 @@ export interface IRMetadata {
    * mean whatever the application decided they mean, so no middleware can
    * safely read identity out of it. Security-relevant scoping needs a field
    * with one defined meaning.
+   *
+   * **Relative to a hop, not to the whole chain.** A principal names the caller as
+   * seen by the process that set it. It is never sent to a provider, and the
+   * library never forwards it across an {@link IRProvenance.upstream} link: the
+   * far side of a proxy has its own caller (the proxy) and its own principal, and a
+   * proxying adapter that wants the far side to know who is asking must carry that
+   * in its own protocol. Read it as "who this process is serving", never as
+   * "who the request ultimately belongs to" or as a trust statement about any hop;
+   * trust-relevant facts about a hop live on provenance
+   * ({@link IRProvenance.locality}).
    */
   readonly principal?: string;
 
