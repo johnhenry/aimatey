@@ -1,16 +1,18 @@
+// @vitest-environment jsdom
 /**
  * useDecision / useDecisionBatch (aimatey-react-hooks).
  *
  * The loading / abort / stale-drop state machine is covered DOM-free in
  * `react-use-decision-runner.test.ts`. This file covers the React binding:
- * the always-on part renders on the server; the interactive part (effects,
- * auto-run, unmount) needs jsdom + @testing-library/react and is skipped
- * when they are not installed.
+ * the server-render part, and the interactive part (effects, auto-run,
+ * unmount), which needs jsdom + @testing-library/react (root devDependencies;
+ * jsdom is enabled for this file only, via the docblock above).
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
+import { renderHook, act, waitFor } from '@testing-library/react';
 import { Bridge } from '@johnhenry/aimatey-core';
 import { OpenAIFrontendAdapter } from '@johnhenry/aimatey-frontend';
 import { createMockDecisionBackend } from '@johnhenry/aimatey-testing';
@@ -95,35 +97,10 @@ describe('useDecision (server render)', () => {
 });
 
 // ============================================================================
-// Interactive (needs jsdom + @testing-library/react)
+// Interactive (jsdom + @testing-library/react)
 // ============================================================================
 
-type TestingLibrary = typeof import('@testing-library/react');
-
-async function loadDom(): Promise<TestingLibrary | undefined> {
-  try {
-    const { JSDOM } = await import('jsdom');
-    const dom = new JSDOM('<!doctype html><html><body></body></html>');
-    const globals = globalThis as Record<string, unknown>;
-    globals.window = dom.window;
-    globals.document = dom.window.document;
-    // Node defines `navigator` as a getter-only global
-    Object.defineProperty(globalThis, 'navigator', {
-      value: dom.window.navigator,
-      configurable: true,
-    });
-    globals.IS_REACT_ACT_ENVIRONMENT = true;
-    return await import('@testing-library/react');
-  } catch {
-    return undefined;
-  }
-}
-
-const rtl = await loadDom();
-
-describe.skipIf(!rtl)('useDecision (rendered)', () => {
-  const { renderHook, act, waitFor } = rtl ?? ({} as TestingLibrary);
-
+describe('useDecision (rendered)', () => {
   it('goes idle -> loading -> answers', async () => {
     const { bridge } = makeBridge(20);
     const { result } = renderHook(() => useDecision(questions, { bridge }));
@@ -237,8 +214,8 @@ describe.skipIf(!rtl)('useDecision (rendered)', () => {
 
   it('does not refetch when only the questions identity changes', async () => {
     const { bridge, backend } = makeBridge();
-    const { result, rerender } = renderHook(
-      () => useDecision({ urgent: { type: 'noul', instructions: 'Is this urgent?' } }, { bridge })
+    const { result, rerender } = renderHook(() =>
+      useDecision({ urgent: { type: 'noul', instructions: 'Is this urgent?' } }, { bridge })
     );
     await act(async () => {
       await result.current.decide('fire');
@@ -285,9 +262,7 @@ describe.skipIf(!rtl)('useDecision (rendered)', () => {
   });
 });
 
-describe.skipIf(!rtl)('useDecisionBatch (rendered)', () => {
-  const { renderHook, act } = rtl ?? ({} as TestingLibrary);
-
+describe('useDecisionBatch (rendered)', () => {
   it('runs every state, reporting progress', async () => {
     const { bridge } = makeBridge(5);
     const { result } = renderHook(() => useDecisionBatch(questions, { bridge, concurrency: 1 }));

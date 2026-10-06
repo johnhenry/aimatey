@@ -52,28 +52,6 @@ export {
 export type { MockDecisionBackendConfig, MockDecisionBackend } from './decision-mocks.js';
 export { createMockDecisionBackend } from './decision-mocks.js';
 
-// Decision dataset capture
-export type {
-  DecisionOutcome,
-  DecisionLogLine,
-  OutcomeLogLine,
-  DecisionCaptureLine,
-  DecisionRecord,
-  DecisionCaptureSink,
-  MemoryDecisionSink,
-  DecisionCaptureConfig,
-  DecisionCapture,
-  CalibrationRun,
-} from './decisions/capture.js';
-export {
-  createDecisionCapture,
-  createMemoryDecisionSink,
-  createFileDecisionSink,
-  joinDecisionLines,
-  loadDecisionDataset,
-  toCalibrationRuns,
-} from './decisions/capture.js';
-
 // Test helpers and assertions
 export {
   assertValidChatResponse,
@@ -108,5 +86,6 @@ export {
   propertyMultiTurnAlternates,
 } from './property-testing.js';
 
-// Decision calibration and name-invariance helpers
+// Decision calibration, name-invariance and dataset-capture helpers
+// (also available Vitest-free from '@johnhenry/aimatey-testing/decisions')
 export * from './decisions/index.js';
