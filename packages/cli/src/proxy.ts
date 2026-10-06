@@ -16,7 +16,7 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import type { BackendAdapter } from '@johnhenry/aimatey-types';
 import type { IRChatRequest } from '@johnhenry/aimatey-types';
-import { supportsChat, supportsChatStream } from '@johnhenry/aimatey-utils';
+import { supportsChat, supportsChatStream, supportsDecisions } from '@johnhenry/aimatey-utils';
 import { AdapterError, ErrorCode } from '@johnhenry/aimatey-errors';
 import { loadBackend } from './utils/backend-loader.js';
 import { success, error as errorLog, info } from './utils/output-formatter.js';
@@ -27,6 +27,16 @@ import {
   toOllama as responseToOllama,
   toMistral as responseToMistral,
 } from './converters/response-converters.js';
+import {
+  decisionDialectForPath,
+  decisionErrorStatus,
+  decisionErrorToWire,
+  decisionEscalationHeaders,
+  decisionResponseToWire,
+  wireToDecisionRequest,
+  DecisionWireError,
+  type DecisionDialect,
+} from './decisions.js';
 
 // ============================================================================
 // Types
@@ -183,13 +193,60 @@ export function providerRequestToIR(data: any, format: string): IRChatRequest {
  * Create request handler for the proxy server.
  */
 export function createHandler(backend: BackendAdapter, format: string, verbose: boolean) {
-  if (!supportsChat(backend) || !supportsChatStream(backend)) {
+  const chatEnabled = supportsChat(backend) && supportsChatStream(backend);
+  const decisionsEnabled = supportsDecisions(backend);
+  if (!chatEnabled && !decisionsEnabled) {
     throw new AdapterError({
       code: ErrorCode.UNSUPPORTED_FEATURE,
-      message: `Backend '${backend.metadata.name}' does not support chat -- the proxy server requires a chat-capable backend (both execute and executeStream)`,
+      message: `Backend '${backend.metadata.name}' supports neither chat nor decisions -- the proxy server needs a chat-capable backend (both execute and executeStream) or a decision backend (decide)`,
       isRetryable: false,
       provenance: { backend: backend.metadata.name },
     });
+  }
+
+  /** Serve a decision route: wire request -> IR -> `backend.decide()` -> wire response. */
+  async function handleDecision(
+    req: IncomingMessage,
+    res: ServerResponse,
+    dialect: DecisionDialect
+  ): Promise<void> {
+    const sendError = (status: number, message: string) => {
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(decisionErrorToWire(dialect, status, message)));
+    };
+
+    if (!decisionsEnabled) {
+      sendError(404, `Backend '${backend.metadata.name}' does not support typed decisions`);
+      return;
+    }
+
+    try {
+      let body: unknown;
+      try {
+        body = await readBody(req);
+      } catch {
+        throw new DecisionWireError('Request body is not valid JSON');
+      }
+      if (verbose) {
+        console.log(
+          `[${new Date().toISOString()}] Decision request (${dialect}):`,
+          JSON.stringify(body)
+        );
+      }
+      const request = wireToDecisionRequest(body, dialect);
+      const response = await backend.decide(request);
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        ...decisionEscalationHeaders(response),
+      });
+      res.end(JSON.stringify(decisionResponseToWire(response, request, dialect)));
+    } catch (err) {
+      const status = decisionErrorStatus(err);
+      if (status >= 500) {
+        console.error('Decision request error:', err);
+      }
+      sendError(status, err instanceof Error ? err.message : String(err));
+    }
   }
 
   return async (req: IncomingMessage, res: ServerResponse) => {
@@ -209,6 +266,26 @@ export function createHandler(backend: BackendAdapter, format: string, verbose: 
     if (req.method !== 'POST') {
       res.writeHead(405, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Method not allowed' }));
+      return;
+    }
+
+    const pathname = (req.url ?? '/').split('?')[0] ?? '/';
+    const dialect = decisionDialectForPath(pathname);
+    if (dialect) {
+      await handleDecision(req, res, dialect);
+      return;
+    }
+
+    if (!chatEnabled) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: {
+            message: `Backend '${backend.metadata.name}' is decision-only: it serves POST /v1/systemone, /v1/decisions and /v1/evaluate, not chat (${pathname})`,
+            type: 'not_found',
+          },
+        })
+      );
       return;
     }
 
@@ -232,7 +309,7 @@ export function createHandler(backend: BackendAdapter, format: string, verbose: 
           Connection: 'keep-alive',
         });
 
-        // Execute streaming request (non-null: createHandler verified chat support)
+        // Execute streaming request (non-null: chatEnabled verified chat support)
         const stream = backend.executeStream(irRequest);
 
         for await (const chunk of stream) {
@@ -278,7 +355,7 @@ export function createHandler(backend: BackendAdapter, format: string, verbose: 
           }
         }
       } else {
-        // Handle non-streaming (non-null: createHandler verified chat support)
+        // Handle non-streaming (non-null: chatEnabled verified chat support)
         const irResponse = await backend.execute(irRequest);
 
         // Convert response back to provider format
@@ -353,6 +430,13 @@ Options:
                            Supported: openai, anthropic, gemini, ollama, mistral
   --verbose, -v            Verbose logging
   --help, -h               Show this help
+
+Decision routes (typed decisions, any format):
+  POST /v1/systemone, /typesafe/v1/systemone   TypeSafe / Ollama shape
+  POST /v1/decisions                           OpenRouter alpha shape
+  POST /v1/evaluate                            Vercel AI Gateway shape ('boolean' for noul)
+  These go to backend.decide() when the backend supports decisions; a
+  decision-only backend serves them and answers chat paths with a 404.
 
 Examples:
   # Start OpenAI-compatible proxy on port 3000
