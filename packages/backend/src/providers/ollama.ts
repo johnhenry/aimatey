@@ -13,6 +13,7 @@ import type {
   AdapterMetadata,
 } from '@johnhenry/aimatey-types';
 import type { IREmbedRequest, IREmbedResponse } from '@johnhenry/aimatey-types';
+import type { IRDecisionRequest, IRDecisionResponse } from '@johnhenry/aimatey-types';
 import type {
   IRChatRequest,
   IRChatResponse,
@@ -40,6 +41,7 @@ import {
   buildResponseFormatFallbackWarning,
   type ModelCapabilityFilter,
 } from '../shared.js';
+import { decideViaSystemOne } from '../decisions/systemone-client.js';
 
 // ============================================================================
 // Ollama API Types
@@ -75,6 +77,45 @@ export interface OllamaResponse {
 }
 
 // ============================================================================
+// Decision models
+// ============================================================================
+
+/**
+ * Model families Ollama serves through `/v1/systemone` (typed-decision
+ * models, not chat models). Ollama's `/api/tags` carries no "this is a
+ * decision model" flag -- `details.family` is the backbone architecture
+ * (`qwen35` for both nimble and tev1, indistinguishable from a chat qwen3.5)
+ * -- so detection is by name. Extend this list as new decision models land
+ * on ollama.com.
+ */
+export const OLLAMA_DECISION_MODEL_FAMILIES: readonly string[] = [
+  'nimble',
+  'tev1',
+  'kev',
+  'clef',
+  'strands-decider',
+  'laya',
+];
+
+const DECISION_MODEL_RE = new RegExp(
+  `(^|[^a-z0-9])(${OLLAMA_DECISION_MODEL_FAMILIES.join('|')})($|[^a-z])`
+);
+
+/**
+ * Whether an Ollama model is a typed-decision model, judged by its name
+ * (`nimble:latest`, `tev1:0.8b`, `library/kev:4b`) or, for a re-tagged
+ * model, by its GGUF `parent_model` (`Bespoke-Nimble-9B-...gguf`). The
+ * match must start at a word boundary so `monkey` does not read as `kev`.
+ */
+export function isOllamaDecisionModel(name: string, parentModel?: string): boolean {
+  const base = name.split(':')[0]!.split('/').pop()!.toLowerCase();
+  return (
+    DECISION_MODEL_RE.test(base) ||
+    (parentModel !== undefined && DECISION_MODEL_RE.test(parentModel.toLowerCase()))
+  );
+}
+
+// ============================================================================
 // Ollama Backend Adapter
 // ============================================================================
 
@@ -91,6 +132,13 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
       version: '1.0.0',
       provider: 'Ollama',
       capabilities: {
+        // Typed decisions via `/v1/systemone` (Ollama >= 0.35); limits are
+        // Ollama's documented ones: 64 questions, 255 options, 2-26 levels.
+        decisions: true,
+        decisionModels: ['nimble', 'tev1'],
+        decisionTypes: ['choice', 'score', 'noul'],
+        decisionImages: true,
+        decisionLimits: { maxQuestions: 64, maxChoiceOptions: 255, maxScoreLevels: 26 },
         streaming: true,
         multiModal: false,
         tools: false,
@@ -154,6 +202,37 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
       },
       raw: json as unknown as Record<string, unknown>,
     };
+  }
+
+  /**
+   * Answer a typed-decision request via Ollama's `/v1/systemone`.
+   *
+   * Needs a decision model (`nimble`, `tev1`, ... -- see
+   * {@link isOllamaDecisionModel}); defaults to `nimble`. Images go through
+   * as base64 only: a `url` image source throws a `ProviderError` rather
+   * than being silently dropped, because Ollama does not fetch URLs and a
+   * decision made without the image the caller sent would be a wrong answer
+   * to a different question. `parameters.custom.keepAlive` becomes
+   * `keep_alive`. Decision calls are slow on CPU (nimble is ~2 minutes), so
+   * pass a `signal` to bound them. Node's `fetch` itself gives up on a
+   * response that sends no headers for 5 minutes, which a cold load of a
+   * large model on CPU can exceed.
+   */
+  decide(request: IRDecisionRequest, signal?: AbortSignal): Promise<IRDecisionResponse> {
+    return decideViaSystemOne(request, {
+      url: `${this.baseURL}/v1/systemone`,
+      dialect: 'systemone',
+      model: request.parameters?.model || this.config.defaultModel || 'nimble',
+      sendImages: true,
+      headers: this.config.headers,
+      signal,
+      backendName: this.metadata.name,
+    });
+  }
+
+  /** Local inference is free. */
+  estimateDecisionCost(_request: IRDecisionRequest): Promise<number | null> {
+    return Promise.resolve(0);
   }
 
   async execute(request: IRChatRequest, signal?: AbortSignal): Promise<IRChatResponse> {
@@ -485,6 +564,23 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
   private transformOllamaModel(model: any): AIModel {
     // Parse parameter size from details (e.g., "3B", "7B", "13B")
     const paramSize = model.details?.parameter_size || 'unknown';
+
+    if (isOllamaDecisionModel(model.name, model.details?.parent_model)) {
+      return {
+        id: model.name,
+        name: model.name,
+        description: `Typed-decision model (${paramSize})`,
+        ownedBy: 'ollama',
+        capabilities: {
+          contextWindow: model.details?.context_length || 4096,
+          supportsStreaming: false,
+          supportsVision: true,
+          supportsTools: false,
+          supportsJSON: false,
+        },
+        metadata: { kind: 'decision' },
+      };
+    }
 
     return {
       id: model.name,

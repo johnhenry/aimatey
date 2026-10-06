@@ -71,6 +71,23 @@ answer with calibrated probabilities in a single forward pass -- see
 precisely so it isn't forced to fake a chat capability it doesn't have.
 
 - **TypeSafe (Jev)** - "System One" typed decisions, 70-500ms latency, input-token-only pricing
+- **Ollama** - `decide()` on the same `OllamaBackendAdapter` that chats: `POST /v1/systemone` (Ollama 0.35+) against `nimble`, `tev1`, and other decision models; base64 `images`, `parameters.custom.keepAlive`; `listModels()` marks decision models with `metadata.kind: 'decision'`
+- **SystemOne (generic)** - `SystemOneBackendAdapter`, decision-only, for any server that speaks System One: self-hosted Kev, Strands Decider, `laya[serve]` and Nimble servers, Vercel AI Gateway (`baseURL: 'https://ai-gateway.vercel.sh/typesafe/v1'`), OpenRouter, Cloudflare Clef, and OpenAI Decisions once its schema is public. Pick a wire `dialect` (`'systemone'` default, `'openrouter'`, `'vercel-evaluate'`, `'cloudflare'`, and the unverified `'openai-decisions'`)
+
+```typescript
+import { SystemOneBackendAdapter } from '@johnhenry/aimatey-backend';
+
+const backend = new SystemOneBackendAdapter({
+  baseURL: 'http://localhost:11434/v1', // any System One server
+  defaultModel: 'tev1:0.8b',
+  decisionImages: true,
+});
+```
+
+All of these share one request builder / response parser
+(`buildSystemOneRequest`, `parseSystemOneResponse`, `postSystemOne`,
+`decideViaSystemOne`, and the `SYSTEMONE_DIALECTS` table), exported for
+adapters that need the same wire format.
 
 Decision backends describe themselves through `capabilities`:
 `decisionModels`, `decisionTypes` (which of `choice`/`score`/`noul` they
