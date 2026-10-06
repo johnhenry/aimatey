@@ -130,5 +130,4 @@ how to convert it.
 | `args.ts`, `backends.ts` | flag parsing; backend specs |
 | `datasets.ts`, `datasets/builtin.ts` | loader; the 40 built-in items |
 | `run.ts`, `scoring.ts`, `report.ts` | runner; accuracy/Brier/ECE/percentiles/cost; markdown + JSON |
-| `testing-decisions.ts` | imports `calibrationReport` and `nameInvariance` from the built testing package (its root export imports Vitest and cannot be loaded by a CLI) |
 | `bench.test.ts`, `vitest.config.ts` | tests |

@@ -6,7 +6,7 @@
  * @module
  */
 
-import { calibrationReport, type CalibrationReport } from './testing-decisions.js';
+import { calibrationReport, type CalibrationReport } from '@johnhenry/aimatey-testing/decisions';
 import type { IRDecisionAnswer, IRDecisionQuestion, IRDecisionUsage } from '@johnhenry/aimatey-types';
 import { getModelPricingInfo } from '@johnhenry/aimatey-utils';
 import type { GoldValue, ScoredRow } from './types.js';
