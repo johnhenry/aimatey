@@ -230,7 +230,14 @@ describe('TypeSafeBackendAdapter', () => {
   });
 
   it('sends the request to the real /systemone endpoint with a bearer token', async () => {
-    mockFetch({ answers: {}, model: 'jev-1.13.0' });
+    mockFetch({
+      answers: {
+        department: { choice: 'billing', probabilities: { billing: 1, technical: 0 }, confidence: 1 },
+        frustration: { score: 0, probabilities: [1, 0, 0], confidence: 1 },
+        refundRequested: { noul: 0.5 },
+      },
+      model: 'jev-1.13.0',
+    });
     const backend = new TypeSafeBackendAdapter({ apiKey: 'sk-test' });
     await backend.decide(baseRequest);
 
@@ -255,6 +262,18 @@ describe('TypeSafeBackendAdapter', () => {
     });
     const backend = new TypeSafeBackendAdapter({ apiKey: 'sk-test' });
     await expect(backend.decide(baseRequest)).rejects.toThrow(/department/);
+  });
+
+  it('throws, naming the question, when the provider omits an answer', async () => {
+    mockFetch({
+      answers: {
+        department: { choice: 'billing', probabilities: { billing: 1, technical: 0 }, confidence: 1 },
+        refundRequested: { noul: 0.98 },
+      },
+      model: 'jev-1.13.0',
+    });
+    const backend = new TypeSafeBackendAdapter({ apiKey: 'sk-test' });
+    await expect(backend.decide(baseRequest)).rejects.toThrow(/frustration/);
   });
 
   it('advertises decisions capability and no chat capability', () => {

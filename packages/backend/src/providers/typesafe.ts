@@ -158,7 +158,14 @@ export class TypeSafeBackendAdapter implements BackendAdapter<TypeSafeRequest, T
     for (const [name, question] of Object.entries(originalRequest.questions)) {
       const raw = response.answers[name];
       if (!raw) {
-        continue; // Provider omitted an answer -- surfaced by validation upstream, not here.
+        // Nothing upstream validates the response, so a silently skipped
+        // question would reach the caller as `answers[name] === undefined`.
+        throw new ProviderError({
+          code: ErrorCode.PROVIDER_ERROR,
+          message: `TypeSafe response is missing an answer for question '${name}'`,
+          isRetryable: false,
+          provenance: { backend: this.metadata.name },
+        });
       }
       answers[name] = toIRAnswer(question, raw, name, this.metadata.name);
     }
