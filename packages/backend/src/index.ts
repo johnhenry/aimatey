@@ -46,6 +46,8 @@ export * from './providers/github-models.js';
 export * from './providers/dashscope.js';
 export * from './providers/omniroute.js';
 export * from './providers/typesafe.js';
+export * from './providers/systemone.js';
+export * from './decisions/index.js';
 
 // Note: The following adapters have been moved to aimatey-backend.browser:
 // - chrome-ai (Chrome's built-in AI)

@@ -72,6 +72,23 @@ precisely so it isn't forced to fake a chat capability it doesn't have.
 
 - **TypeSafe (Jev)** - "System One" typed decisions, 70-500ms latency, input-token-only pricing
 - **Together AI (Tev1)** - `TogetherAIBackendAdapter.decide()` for `together/Tev1-4B-experimental` and `together/Tev1-0.8B-experimental`. Not System One: each question is one chat-completions call and the model answers a single letter A-X, so a request makes one call per question (4 at a time by default; `parameters.custom.concurrency`). Native for `choice` only, with **2 to 24 options** (more throws), no images, $0.042 per 1M input tokens. `noul` and `score` are emulated on the same protocol with neutral option keys and each such answer carries a warning (`decisionsEmulatedTypes: ['noul', 'score']`). `probabilities` come from the first token's `top_logprobs` (softmax over the valid letters; letters outside the top 24 get 0) and `confidence` is `1 - H(p) / ln(n)`; if Together returns no logprobs the answer has neither, plus a warning.
+- **Ollama** - `decide()` on the same `OllamaBackendAdapter` that chats: `POST /v1/systemone` (Ollama 0.35+) against `nimble`, `tev1`, and other decision models; base64 `images`, `parameters.custom.keepAlive`; `listModels()` marks decision models with `metadata.kind: 'decision'`
+- **SystemOne (generic)** - `SystemOneBackendAdapter`, decision-only, for any server that speaks System One: self-hosted Kev, Strands Decider, `laya[serve]` and Nimble servers, Vercel AI Gateway (`baseURL: 'https://ai-gateway.vercel.sh/typesafe/v1'`), OpenRouter, Cloudflare Clef, and OpenAI Decisions once its schema is public. Pick a wire `dialect` (`'systemone'` default, `'openrouter'`, `'vercel-evaluate'`, `'cloudflare'`, and the unverified `'openai-decisions'`)
+
+```typescript
+import { SystemOneBackendAdapter } from '@johnhenry/aimatey-backend';
+
+const backend = new SystemOneBackendAdapter({
+  baseURL: 'http://localhost:11434/v1', // any System One server
+  defaultModel: 'tev1:0.8b',
+  decisionImages: true,
+});
+```
+
+All of these share one request builder / response parser
+(`buildSystemOneRequest`, `parseSystemOneResponse`, `postSystemOne`,
+`decideViaSystemOne`, and the `SYSTEMONE_DIALECTS` table), exported for
+adapters that need the same wire format.
 
 Decision backends describe themselves through `capabilities`:
 `decisionModels`, `decisionTypes` (which of `choice`/`score`/`noul` they

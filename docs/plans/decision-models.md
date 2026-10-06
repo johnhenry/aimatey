@@ -258,9 +258,11 @@ Re-evaluate GLiNER2.5-Decide later (GLiNER usually ships ONNX).
 
 Verification on this box: `native-laya` already runs here (the GUI demo), so
 the Router / escalation / middleware stack can be tested end to end with no
-API key. Local Ollama is **0.17.4** (checked 2026-10-06) — `/v1/systemone`
-needs ≥ 0.35 plus `ollama pull nimble` (~9B), so bump it via `nix-install`
-before the Ollama adapter is live-tested; until then use recorded fixtures.
+API key. Ollama is **0.35.1** as of 2026-10-06, with `nimble` and `tev1:0.8b`
+pulled; `/v1/systemone` is verified. On this CPU-only box `nimble` takes
+about 2 minutes per call and `tev1:0.8b` about 7 s (plus a one-off model
+load), so live tests default to `tev1:0.8b` and everything else replays
+recorded fixtures.
 Clef has a free Workers AI tier (10k neurons/day) for the Cloudflare adapter;
 OpenRouter covers Jev / Kev / Mercury Decide.
 

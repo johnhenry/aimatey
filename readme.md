@@ -468,6 +468,8 @@ import { OpenAIBackendAdapter } from '@johnhenry/aimatey-backend/openai';
 
 **Typed-decision (not chat) providers:**
 - TypeSafe (Jev) -- typed `choice`/`score`/`noul` questions over a state, answered with calibrated probabilities via `Bridge.decide()`, not `chat()`
+- Ollama -- `decide()` on the Ollama backend via `/v1/systemone` (`nimble`, `tev1`, ...), with image support; the same adapter still chats
+- SystemOne (generic) -- `SystemOneBackendAdapter` for any System One-compatible server (Kev, Strands Decider, `laya[serve]`, Nimble, Vercel AI Gateway, OpenRouter), with a selectable wire dialect
 - Laya (ConvAI) -- the same question types, run on-device via ONNX Runtime; lives in [`@johnhenry/aimatey-native-laya`](./packages/native-laya)
 
 Decision backends declare `decisionModels`, `decisionTypes`, `decisionImages` and `decisionLimits` in their capabilities. On a decision answer, `probabilities` and `confidence` are optional (a provider, or an LLM, may not report them) and `reasoning` is optional free text.
