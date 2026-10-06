@@ -58,6 +58,8 @@ import {
   createWarning,
   supportsChat,
   supportsChatStream,
+  supportsChatFrontend,
+  supportsDecisionFrontend,
   supportsDecisions,
 } from '@johnhenry/aimatey-utils';
 import type {
@@ -157,7 +159,7 @@ export class Bridge<
     let enrichedRequest: IRChatRequest;
     try {
       // Step 1: Convert frontend request to IR
-      irRequest = await this.frontend.toIR(request as any);
+      irRequest = await this.requireChatFrontend().toIR(request as any);
 
       // Step 2: Ensure metadata has requestId and timestamp
       enrichedRequest = this.enrichRequest(irRequest, options);
@@ -223,7 +225,7 @@ export class Bridge<
         const enrichedResponse = this.enrichResponse(irResponse, enrichedRequest);
 
         // Step 7: Convert IR response to frontend format
-        const frontendResponse = await this.frontend.fromIR(enrichedResponse);
+        const frontendResponse = await this.requireChatFrontend().fromIR(enrichedResponse);
 
         // Track success
         this._successfulRequests++;
@@ -331,7 +333,7 @@ export class Bridge<
     let enrichedRequest: IRChatRequest;
     try {
       // Step 1: Convert frontend request to IR
-      irRequest = await this.frontend.toIR(request as any);
+      irRequest = await this.requireChatFrontend().toIR(request as any);
 
       // Step 2: Ensure streaming is enabled
       const streamingRequest: IRChatRequest = {
@@ -399,7 +401,7 @@ export class Bridge<
       // provenance `chat()` reads off the enriched response, keeping the two paths
       // in agreement about who served the request (#68).
       let servedBy: string | undefined;
-      const frontendStream = this.frontend.fromIRStream(
+      const frontendStream = this.requireChatFrontend().fromIRStream(
         this.captureStreamBackend(this.enrichStream(irStream), (name) => {
           servedBy = name;
         })
@@ -1166,8 +1168,77 @@ export class Bridge<
       },
     };
 
+    return this.runDecision(backend, request, options.signal);
+  }
+
+  /**
+   * Answer a typed-decision request expressed in the *frontend's* format --
+   * the decision counterpart of `chat()`.
+   *
+   * Runs `frontend.decisionToIR()` -> decision middleware ->
+   * `backend.decide()` -> `frontend.decisionFromIR()`, so a TypeSafe- or
+   * Laya-shaped call goes in and the same shape comes back. `decide()`
+   * stays IR in / IR out; use this when the caller speaks a provider's
+   * wire format.
+   *
+   * `options.principal` / `options.metadata` are merged onto the request
+   * the frontend built. `options.model` and `options.custom` are not: the
+   * frontend already put the model (and any provider hints) in the request.
+   *
+   * @throws AdapterError UNSUPPORTED_FEATURE when the frontend lacks
+   *   decisionToIR()/decisionFromIR(), or the backend lacks decide()
+   */
+  async decideFrom(
+    request: InferFrontendRequest<TFrontend>,
+    options: Pick<DecisionOptions, 'signal' | 'metadata' | 'principal'> = {}
+  ): Promise<InferFrontendResponse<TFrontend>> {
+    const frontend = this.frontend;
+    if (!supportsDecisionFrontend(frontend)) {
+      throw new AdapterError({
+        code: ErrorCode.UNSUPPORTED_FEATURE,
+        message: `Frontend '${frontend.metadata.name}' does not support typed decisions`,
+        isRetryable: false,
+        provenance: { frontend: frontend.metadata.name },
+      });
+    }
+
+    const backend = this.backend;
+    if (!supportsDecisions(backend)) {
+      throw new AdapterError({
+        code: ErrorCode.UNSUPPORTED_FEATURE,
+        message: `Backend '${backend.metadata.name}' does not support typed decisions`,
+        isRetryable: false,
+        provenance: { backend: backend.metadata.name },
+      });
+    }
+
+    const converted = await frontend.decisionToIR(request);
+    const irRequest: IRDecisionRequest = {
+      ...converted,
+      metadata: {
+        ...converted.metadata,
+        requestId: converted.metadata.requestId || this.generateRequestId(),
+        provenance: { frontend: frontend.metadata.name, ...converted.metadata.provenance },
+        ...(options.principal !== undefined && { principal: options.principal }),
+        ...(options.metadata && { custom: { ...converted.metadata.custom, ...options.metadata } }),
+      },
+    };
+
+    const response = await this.runDecision(backend, irRequest, options.signal);
+    return (await frontend.decisionFromIR(response, irRequest)) as InferFrontendResponse<TFrontend>;
+  }
+
+  /**
+   * Run a built decision request through the decision middleware chain and
+   * the backend. Shared by `decide()` and `decideFrom()`.
+   */
+  private runDecision(
+    backend: BackendAdapter & Required<Pick<BackendAdapter, 'decide'>>,
+    request: IRDecisionRequest,
+    signal?: AbortSignal
+  ): Promise<IRDecisionResponse> {
     const execute = (finalRequest: IRDecisionRequest): Promise<IRDecisionResponse> =>
-      backend.decide(finalRequest, options.signal).then((response) => ({
+      backend.decide(finalRequest, signal).then((response) => ({
         ...response,
         metadata: {
           ...response.metadata,
@@ -1180,6 +1251,25 @@ export class Bridge<
     >((next, middleware) => (req) => middleware(req, next), execute);
 
     return chain(request);
+  }
+
+  /**
+   * The frontend, narrowed to one that implements chat conversion.
+   *
+   * @throws AdapterError UNSUPPORTED_FEATURE for a decision-only frontend
+   */
+  private requireChatFrontend(): TFrontend &
+    Required<Pick<FrontendAdapter, 'toIR' | 'fromIR' | 'fromIRStream'>> {
+    const frontend = this.frontend;
+    if (!supportsChatFrontend(frontend)) {
+      throw new AdapterError({
+        code: ErrorCode.UNSUPPORTED_FEATURE,
+        message: `Frontend '${frontend.metadata.name}' does not support chat`,
+        isRetryable: false,
+        provenance: { frontend: frontend.metadata.name },
+      });
+    }
+    return frontend;
   }
 
   // ==========================================================================

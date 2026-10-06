@@ -26,8 +26,22 @@
  * (`packages/frontend/src/adapters/laya.ts`) for the three confirmed
  * structural differences from Jev this adapter's `toIRAnswer` un-does:
  * answers self-report their own `type`, `score` probabilities are keyed
- * by stringified index rather than an array, and `noul` answers carry a
- * real `confidence`.
+ * by stringified index rather than an array, and `noul` answers carry
+ * *no* `confidence` on the wire (a live check corrected an earlier
+ * source-reading claim that they did) -- `toIRAnswer` derives one.
+ *
+ * Every wire answer also carries an `rl_agent: { act_probability }`
+ * sub-object with no IR equivalent. It is kept, per question, under
+ * `response.raw.rl_agent` rather than dropped. (Convai's own
+ * evaluation found `act_probability` uninformative -- AUROC 0.30 -- so
+ * treat it as diagnostic, not as a confidence signal.)
+ *
+ * `Laya.systemOne(state, questions)` takes nothing else: the checkpoint is
+ * chosen at load time (`subfolder`), and there is no per-call `task`/`lang`
+ * routing hint (those belong to the Python `Router`, not the ONNX port).
+ * `decide()` therefore cannot honour `parameters.model` or
+ * `parameters.custom.task`/`lang` per request and says so with
+ * `parameter-unsupported` warnings instead of ignoring them silently.
  *
  * @module
  */
@@ -38,6 +52,7 @@ import type {
   IRDecisionRequest,
   IRDecisionResponse,
   IRDecisionAnswer,
+  IRWarning,
 } from '@johnhenry/aimatey-types';
 import { AdapterError, ErrorCode, ProviderError } from '@johnhenry/aimatey-errors';
 import { toOnnxProviderError, type OnnxRuntimeConfig } from '@johnhenry/aimatey-native-onnx';
@@ -48,7 +63,7 @@ import { toOnnxProviderError, type OnnxRuntimeConfig } from '@johnhenry/aimatey-
 // what that live check corrected.
 // ============================================================================
 
-type LayaWireAnswer =
+type LayaWireAnswer = (
   | {
       readonly type: 'choice';
       readonly choice: string;
@@ -72,7 +87,11 @@ type LayaWireAnswer =
        * adapter's original (source-reading-only) assumption. `toIRAnswer`
        * derives one the same way `LayaFrontendAdapter` already does. */
       readonly confidence?: number;
-    };
+    }
+) & {
+  /** Action-selection sub-object on every live answer; no IR equivalent. */
+  readonly rl_agent?: { readonly act_probability: number };
+};
 
 interface LayaWireResponse {
   readonly model: string;
@@ -141,6 +160,17 @@ export class LayaBackendAdapter implements BackendAdapter {
       provider: 'ConvAI (Laya)',
       capabilities: {
         decisions: true,
+        decisionModels: ['english', 'multilingual', 'typed-decisions'],
+        decisionTypes: ['choice', 'score', 'noul'],
+        decisionImages: false,
+        // Laya's own guidance: weak past ~20 options. The state budget is
+        // the English checkpoint's 512 tokens (multilingual allows 1024).
+        decisionLimits: {
+          maxChoiceOptions: 20,
+          maxScoreLevels: 10,
+          maxStateTokens: 512,
+          maxImages: 0,
+        },
         // Chat-shaped fields don't apply -- see TypeSafeBackendAdapter's
         // identical reasoning for why these are `false`/'not-supported'
         // rather than omitted.
@@ -187,21 +217,47 @@ export class LayaBackendAdapter implements BackendAdapter {
   /**
    * Answer a typed-decision request by running Laya's ONNX model
    * in-process -- no network hop, no hosted API.
+   *
+   * An in-flight ONNX run cannot be cancelled, so `signal` is checked
+   * before the (possibly slow) load, before `systemOne()`, and once the
+   * result arrives; an abort rejects with the signal's own reason (an
+   * `AbortError`), like a `fetch` aborted mid-request.
    */
-  async decide(request: IRDecisionRequest): Promise<IRDecisionResponse> {
+  async decide(request: IRDecisionRequest, signal?: AbortSignal): Promise<IRDecisionResponse> {
     try {
+      signal?.throwIfAborted();
       await this.initialize();
+      signal?.throwIfAborted();
       const response = (await this.instance.systemOne(
         request.state,
         request.questions
       )) as LayaWireResponse;
+      signal?.throwIfAborted();
 
+      // Build from the request's questions, not the response's answers, so
+      // an unanswered question is an error rather than a silent gap.
       const answers: Record<string, IRDecisionAnswer> = {};
-      for (const [name, raw] of Object.entries(response.answers)) {
+      const rlAgent: Record<string, unknown> = {};
+      for (const name of Object.keys(request.questions)) {
+        const raw = response.answers[name];
+        if (!raw) {
+          throw new ProviderError({
+            code: ErrorCode.PROVIDER_ERROR,
+            message: `Laya response is missing an answer for question '${name}'`,
+            isRetryable: false,
+            provenance: { backend: this.metadata.name },
+          });
+        }
         answers[name] = toIRAnswer(raw);
+        if (raw.rl_agent) {
+          rlAgent[name] = raw.rl_agent;
+        }
       }
 
+      const warnings = this.unsupportedParameterWarnings(request);
+
       return {
+        provider: 'laya',
         answers,
         model: response.model,
         usage: { inputTokens: response.usage.input_tokens },
@@ -211,15 +267,71 @@ export class LayaBackendAdapter implements BackendAdapter {
             ...request.metadata.provenance,
             backend: this.metadata.name,
           },
+          ...(warnings.length > 0 && {
+            warnings: [...(request.metadata.warnings ?? []), ...warnings],
+          }),
         },
-        raw: response as unknown as Record<string, unknown>,
+        raw: {
+          ...(response as unknown as Record<string, unknown>),
+          ...(Object.keys(rlAgent).length > 0 && { rl_agent: rlAgent }),
+        },
       };
     } catch (error) {
-      if (error instanceof AdapterError || error instanceof ProviderError) {
+      if (signal?.aborted || error instanceof AdapterError || error instanceof ProviderError) {
         throw error;
       }
       throw toOnnxProviderError(error, this.metadata.name);
     }
+  }
+
+  /**
+   * `Laya.systemOne()` takes only `(state, questions)`: the checkpoint is
+   * fixed when the session loads, and there is no per-call `task`/`lang`.
+   * Rather than drop those request parameters silently, report them.
+   */
+  private unsupportedParameterWarnings(request: IRDecisionRequest): IRWarning[] {
+    const warnings: IRWarning[] = [];
+    const source = this.metadata.name;
+
+    const model = request.parameters?.model;
+    if (model !== undefined && model !== this.config.subfolder) {
+      warnings.push({
+        category: 'parameter-unsupported',
+        severity: 'warning',
+        message:
+          `Laya's checkpoint is fixed when the session loads (subfolder: ${this.config.subfolder ?? 'default'}); ` +
+          `parameters.model '${model}' was ignored. Construct a LayaBackendAdapter with subfolder '${model}' instead.`,
+        field: 'parameters.model',
+        originalValue: model,
+        source,
+      });
+    }
+
+    if (request.images?.length) {
+      warnings.push({
+        category: 'capability-unsupported',
+        severity: 'warning',
+        message: `Laya takes no images; ${request.images.length} image(s) were ignored.`,
+        field: 'images',
+        source,
+      });
+    }
+
+    for (const hint of ['task', 'lang'] as const) {
+      const value = request.parameters?.custom?.[hint];
+      if (value !== undefined) {
+        warnings.push({
+          category: 'parameter-unsupported',
+          severity: 'warning',
+          message: `@receptron/laya's systemOne() has no per-call '${hint}' routing hint; ${JSON.stringify(value)} was ignored.`,
+          field: `parameters.custom.${hint}`,
+          originalValue: value,
+          source,
+        });
+      }
+    }
+
+    return warnings;
   }
 
   /**

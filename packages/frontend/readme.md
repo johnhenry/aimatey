@@ -31,6 +31,15 @@ Frontend adapters convert provider-specific request formats to the Universal IR 
 - **TypeSafe (Jev)** - `@typesafe-ai/sdk`-shaped typed-decision calls, translated to the Decision IR (not chat -- see `packages/backend`'s "Typed-Decision Models" section)
 - **Laya** - `Router.predict()`/`Agent.system_one()`-shaped typed-decision calls, translated to the Decision IR. Pairs with `LayaBackendAdapter` in [`@johnhenry/aimatey-native-laya`](../native-laya), which runs Laya's real ONNX model in-process via `@receptron/laya` -- no hosted API, no Python service
 
+The TypeSafe and Laya adapters implement `FrontendAdapter` through its
+`decisionToIR`/`decisionFromIR` hooks rather than the chat ones (`toIR`/
+`fromIR`/`fromIRStream` are optional on `FrontendAdapter`). Drive them with
+`Bridge.decideFrom(request)`: it converts the request, runs the decision
+middleware and backend, and converts the answer back to the frontend's own
+shape. `Bridge.chat()` on one of them throws `UNSUPPORTED_FEATURE`.
+`probabilities`/`confidence` are optional on choice and score answers, and
+are omitted from the converted response when the backend did not report them.
+
 ## Usage
 
 ```typescript

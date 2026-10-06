@@ -1349,4 +1349,77 @@ export const MODEL_REGISTRY_SEED: readonly ModelRegistryEntry[] = [
     pricing: { inputPer1M: 0.95, outputPer1M: 4.0, cachedInputPer1M: 0.16 },
     capabilities: { streaming: true, vision: true, tools: true, json: true },
   },
+
+  // ==========================================================================
+  // Decision models (kind: 'decision')
+  // ==========================================================================
+  // "System One" typed-decision models: output is free, so only the input
+  // rate is priced. Unlike the sections above, these were NOT verified
+  // against first-party pricing pages: the figures come from the provider
+  // announcements surveyed in docs/plans/decision-models.md (2026-10), so
+  // re-check them before relying on them for billing. `contextWindow` is set only where a
+  // provider states it (Clef); `latency`/`qualityScore` are omitted for the
+  // reason in the header.
+  {
+    id: 'jev-1.13.0',
+    provider: 'typesafe',
+    family: 'jev',
+    kind: 'decision',
+    aliases: ['jev-latest', '~typesafe/jev-latest', 'typesafe/jev-1.13'],
+    contextWindow: 64_000,
+    pricing: { inputPer1M: 0.042, outputPer1M: 0 },
+  },
+  {
+    id: 'clef',
+    provider: 'cloudflare',
+    family: 'clef',
+    kind: 'decision',
+    contextWindow: 65_536,
+    pricing: { inputPer1M: 0.24, outputPer1M: 0 },
+  },
+  {
+    id: 'clef-flash',
+    provider: 'cloudflare',
+    family: 'clef',
+    kind: 'decision',
+    contextWindow: 65_536,
+    pricing: { inputPer1M: 0.09, outputPer1M: 0 },
+  },
+  {
+    id: 'pplx-decider-v1-27b',
+    provider: 'perplexity',
+    family: 'pplx-decider',
+    kind: 'decision',
+    pricing: { inputPer1M: 0.04, outputPer1M: 0 },
+  },
+  {
+    id: 'nimble',
+    provider: 'ollama',
+    family: 'nimble',
+    kind: 'decision',
+    // Local inference: no per-token cost.
+    pricing: { inputPer1M: 0, outputPer1M: 0 },
+  },
+  {
+    id: 'tev1',
+    provider: 'together',
+    family: 'tev1',
+    kind: 'decision',
+    pricing: { inputPer1M: 0.042, outputPer1M: 0 },
+  },
+  {
+    id: 'kev-4b',
+    provider: 'openrouter',
+    family: 'kev',
+    kind: 'decision',
+    pricing: { inputPer1M: 0.042, outputPer1M: 0 },
+  },
+  {
+    id: 'mercury-decide',
+    provider: 'inception',
+    family: 'mercury',
+    kind: 'decision',
+    // Free on OpenRouter at launch.
+    pricing: { inputPer1M: 0, outputPer1M: 0 },
+  },
 ];

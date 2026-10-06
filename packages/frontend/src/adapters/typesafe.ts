@@ -4,16 +4,13 @@
  * Translates `@typesafe-ai/sdk`-shaped `systemOne()` calls into the
  * Universal Decision IR.
  *
- * This is deliberately **not** an implementation of `FrontendAdapter` from
- * `@johnhenry/aimatey-types` — that interface's `toIR`/`fromIR`/
- * `fromIRStream` are hard-typed to `IRChatRequest`/`IRChatResponse`/
- * `IRChatStream`, and a decision request is not a chat request wearing a
- * costume. Rather than widen a chat-shaped interface to accommodate one
- * new capability (the same reasoning `BackendAdapter.decide?` used to stay
- * a *sibling* of `execute?`, not a variant of it), this is a small,
- * standalone class with the same translation-adapter shape and spirit.
- * If a second non-chat frontend shows up later, generalizing
- * `FrontendAdapter` becomes worth it; one doesn't justify it yet.
+ * This implements `FrontendAdapter` through its *decision* hooks
+ * (`decisionToIR`/`decisionFromIR`) and deliberately not the chat ones --
+ * `toIR`/`fromIR`/`fromIRStream` are optional on `FrontendAdapter` for
+ * exactly this reason (a decision request is not a chat request in a
+ * costume, the same reasoning `BackendAdapter.decide?` used to stay a
+ * *sibling* of `execute?`). `Bridge.decideFrom()` drives these hooks;
+ * `Bridge.chat()` with this frontend throws `UNSUPPORTED_FEATURE`.
  *
  * Genuinely light: `@typesafe-ai/sdk`'s own `systemOne({ state, questions
  * })` call shape *is* Jev's wire format (see
@@ -29,6 +26,7 @@
 
 import type {
   AdapterMetadata,
+  FrontendAdapter,
   IRDecisionRequest,
   IRDecisionResponse,
   IRDecisionQuestion,
@@ -48,30 +46,39 @@ export interface TypeSafeSDKRequest {
   readonly state: unknown;
   readonly questions: Record<string, IRDecisionQuestion>;
   readonly model?: string;
+  /** Images to consider alongside `state` (base64), for models that take them. */
+  readonly images?: IRDecisionRequest['images'];
 }
 
 /**
  * Shape of `@typesafe-ai/sdk`'s `systemOne()` response.
+ *
+ * `probabilities`/`confidence` are optional here because the IR's are --
+ * an answer that came from a backend that never reported them (an LLM
+ * emulation, say) is passed on without them rather than with a sentinel.
  */
 export interface TypeSafeSDKResponse {
   readonly answers: Record<
     string,
     | {
         readonly choice: string;
-        readonly probabilities: Record<string, number>;
-        readonly confidence: number;
+        readonly probabilities?: Record<string, number>;
+        readonly confidence?: number;
       }
     | {
         readonly score: number;
-        readonly probabilities: readonly number[];
-        readonly confidence: number;
+        readonly probabilities?: readonly number[];
+        readonly confidence?: number;
       }
     | { readonly noul: number }
   >;
   readonly model: string;
 }
 
-export class TypeSafeFrontendAdapter {
+export class TypeSafeFrontendAdapter implements FrontendAdapter<
+  TypeSafeSDKRequest,
+  TypeSafeSDKResponse
+> {
   readonly metadata: AdapterMetadata = {
     name: 'typesafe-frontend',
     version: '1.0.0',
@@ -92,10 +99,11 @@ export class TypeSafeFrontendAdapter {
    * Convert an `@typesafe-ai/sdk`-shaped `systemOne()` call into a
    * Universal Decision IR request.
    */
-  toIR(request: TypeSafeSDKRequest): Promise<IRDecisionRequest> {
+  decisionToIR(request: TypeSafeSDKRequest): Promise<IRDecisionRequest> {
     return Promise.resolve({
       state: request.state,
       questions: request.questions,
+      ...(request.images && { images: request.images }),
       parameters: request.model ? { model: request.model } : undefined,
       metadata: {
         requestId: 'typesafe-' + Date.now(),
@@ -109,7 +117,7 @@ export class TypeSafeFrontendAdapter {
    * Convert a Universal Decision IR response back into
    * `@typesafe-ai/sdk`'s `systemOne()` response shape.
    */
-  fromIR(response: IRDecisionResponse): Promise<TypeSafeSDKResponse> {
+  decisionFromIR(response: IRDecisionResponse): Promise<TypeSafeSDKResponse> {
     const answers: TypeSafeSDKResponse['answers'] = {};
     for (const [name, answer] of Object.entries(response.answers)) {
       answers[name] = toSDKAnswer(answer);
@@ -123,14 +131,14 @@ function toSDKAnswer(answer: IRDecisionAnswer): TypeSafeSDKResponse['answers'][s
     case 'choice':
       return {
         choice: answer.value,
-        probabilities: answer.probabilities,
-        confidence: answer.confidence,
+        ...(answer.probabilities !== undefined && { probabilities: answer.probabilities }),
+        ...(answer.confidence !== undefined && { confidence: answer.confidence }),
       };
     case 'score':
       return {
         score: answer.value,
-        probabilities: answer.probabilities,
-        confidence: answer.confidence,
+        ...(answer.probabilities !== undefined && { probabilities: answer.probabilities }),
+        ...(answer.confidence !== undefined && { confidence: answer.confidence }),
       };
     case 'noul':
       return { noul: answer.value };

@@ -17,7 +17,7 @@
  * @module
  */
 
-import type { IRMetadata } from './ir.js';
+import type { IRMetadata, ImageContent } from './ir.js';
 
 // ============================================================================
 // Questions
@@ -55,6 +55,16 @@ export type IRDecisionQuestion =
   | {
       readonly type: 'noul';
       readonly instructions: string;
+      /**
+       * Labels for each side of the yes/no question (OpenRouter, Vercel
+       * and Ollama accept them). Pinning what `true` and `false` *mean*
+       * here, rather than only in `instructions`, is the mitigation for
+       * option-name bias that the literature recommends.
+       */
+      readonly criteria?: {
+        readonly true: string;
+        readonly false: string;
+      };
     };
 
 // ============================================================================
@@ -102,6 +112,14 @@ export interface IRDecisionRequest {
   /** Named questions to ask of `state`. Answered positionally by name. */
   readonly questions: Record<string, IRDecisionQuestion>;
 
+  /**
+   * Images to consider alongside `state`. Base64 sources are what providers
+   * accept in practice; check `capabilities.decisionImages` and
+   * `decisionLimits.maxImages` first -- a backend that cannot take images
+   * warns (`capability-unsupported`) and drops them.
+   */
+  readonly images?: readonly ImageContent[];
+
   readonly parameters?: IRDecisionParameters;
 
   /** Request metadata (requestId, provenance, warnings). */
@@ -117,27 +135,39 @@ export interface IRDecisionRequest {
  *
  * `probabilities` is the full distribution over `criteria` (`choice`:
  * per-option; `score`: per-level); `confidence` is the probability mass on
- * the winning answer specifically. Both are omitted for `noul`, where the
- * probability itself *is* the answer -- but `confidence` alone is still a
- * real, separate quantity there (`max(p, 1-p)`, i.e. distance from 0.5,
- * not the same number as `value`): Jev's wire format doesn't report it,
- * Laya's does, so it's optional rather than absent -- a provider that has
- * it should not have to throw it away to fit this type.
+ * the winning answer specifically. **Both are optional** on `choice` and
+ * `score`: OpenRouter's schema marks them optional, and an answer produced
+ * by an LLM through structured output has neither. Absence means "the
+ * provider did not report it" -- there is no sentinel value such as
+ * `confidence: 0`, so consumers must handle `undefined`.
+ *
+ * Both are omitted for `noul`, where the probability itself *is* the answer
+ * -- but `confidence` alone is still a real, separate quantity there
+ * (`max(p, 1-p)`, i.e. distance from 0.5, not the same number as `value`):
+ * Jev's wire format doesn't report it, Laya's does, so it's optional rather
+ * than absent -- a provider that has it should not have to throw it away to
+ * fit this type.
+ *
+ * Every variant may carry `reasoning`, free text from providers that
+ * explain themselves (LLM emulation, "thinking" decision models). Never
+ * required.
  */
 export type IRDecisionAnswer =
   | {
       readonly type: 'choice';
       /** The selected option name (a key of the question's `criteria`). */
       readonly value: string;
-      readonly probabilities: Record<string, number>;
-      readonly confidence: number;
+      readonly probabilities?: Record<string, number>;
+      readonly confidence?: number;
+      readonly reasoning?: string;
     }
   | {
       readonly type: 'score';
       /** Index (may be fractional) into the question's ordered `criteria`. */
       readonly value: number;
-      readonly probabilities: readonly number[];
-      readonly confidence: number;
+      readonly probabilities?: readonly number[];
+      readonly confidence?: number;
+      readonly reasoning?: string;
     }
   | {
       readonly type: 'noul';
@@ -149,6 +179,7 @@ export type IRDecisionAnswer =
        * Optional: not every provider reports it (Jev doesn't; Laya does).
        */
       readonly confidence?: number;
+      readonly reasoning?: string;
     };
 
 /**
@@ -160,6 +191,10 @@ export type IRDecisionAnswer =
  */
 export interface IRDecisionUsage {
   readonly inputTokens: number;
+  /** Output tokens, when the provider reports them (often 0: decisions generate none). */
+  readonly outputTokens?: number;
+  /** Cost of the call in USD, when the provider reports it. */
+  readonly cost?: number;
   readonly details?: Record<string, unknown>;
 }
 
@@ -167,6 +202,12 @@ export interface IRDecisionUsage {
  * Universal typed-decision response.
  */
 export interface IRDecisionResponse {
+  /** Provider's response identifier (e.g. OpenRouter's decision id), when it sends one. */
+  readonly id?: string;
+
+  /** Provider that actually served the request, when the API is a gateway (OpenRouter, Vercel). */
+  readonly provider?: string;
+
   /** Answers, keyed by the same names as the request's `questions`. */
   readonly answers: Record<string, IRDecisionAnswer>;
 

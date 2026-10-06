@@ -48,6 +48,10 @@ export {
   createConfigurableMock,
 } from './fixture-helpers.js';
 
+// Decision mocks
+export type { MockDecisionBackendConfig, MockDecisionBackend } from './decision-mocks.js';
+export { createMockDecisionBackend } from './decision-mocks.js';
+
 // Test helpers and assertions
 export {
   assertValidChatResponse,

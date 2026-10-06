@@ -21,6 +21,7 @@ import type {
   IRDecisionResponse,
   IRDecisionQuestion,
   IRDecisionAnswer,
+  IRWarning,
 } from '@johnhenry/aimatey-types';
 import {
   NetworkError,
@@ -28,7 +29,6 @@ import {
   ErrorCode,
   createErrorFromHttpResponse,
 } from '@johnhenry/aimatey-errors';
-import { registerModels } from '@johnhenry/aimatey-utils';
 
 // ============================================================================
 // TypeSafe (Jev) API Types
@@ -51,17 +51,18 @@ export interface TypeSafeRequest {
 export type TypeSafeAnswer =
   | {
       readonly choice: string;
-      readonly probabilities: Record<string, number>;
-      readonly confidence: number;
+      readonly probabilities?: Record<string, number>;
+      readonly confidence?: number;
     }
   | {
       readonly score: number;
-      readonly probabilities: readonly number[];
-      readonly confidence: number;
+      readonly probabilities?: readonly number[];
+      readonly confidence?: number;
     }
   | { readonly noul: number };
 
 export interface TypeSafeResponse {
+  readonly id?: string;
   readonly answers: Record<string, TypeSafeAnswer>;
   readonly model: string;
   readonly usage?: {
@@ -98,6 +99,14 @@ export class TypeSafeBackendAdapter implements BackendAdapter<TypeSafeRequest, T
       capabilities: {
         decisions: true,
         decisionModels: ['jev-1.13.0', 'jev-latest'],
+        decisionTypes: ['choice', 'score', 'noul'],
+        decisionImages: false,
+        decisionLimits: {
+          maxChoiceOptions: 255,
+          maxScoreLevels: 10,
+          maxStateTokens: 32_000,
+          maxImages: 0,
+        },
         // Chat-shaped fields don't apply to a decision-only backend --
         // `streaming`/`multiModal`/`tools` are all correctly `false`, and
         // `systemMessageStrategy` is 'not-supported' rather than omitted,
@@ -112,20 +121,6 @@ export class TypeSafeBackendAdapter implements BackendAdapter<TypeSafeRequest, T
         baseURL: this.baseURL,
       },
     };
-
-    registerModels([
-      {
-        id: 'jev-1.13.0',
-        provider: 'typesafe',
-        family: 'jev',
-        kind: 'decision',
-        aliases: ['jev-latest'],
-        // Output tokens are free -- see IRDecisionUsage's own doc comment
-        // for why decision usage isn't shoehorned into chat's IRUsage.
-        pricing: { inputPer1M: 0.042, outputPer1M: 0 },
-        contextWindow: 64_000,
-      },
-    ]);
   }
 
   /**
@@ -158,17 +153,40 @@ export class TypeSafeBackendAdapter implements BackendAdapter<TypeSafeRequest, T
     for (const [name, question] of Object.entries(originalRequest.questions)) {
       const raw = response.answers[name];
       if (!raw) {
-        continue; // Provider omitted an answer -- surfaced by validation upstream, not here.
+        // Nothing upstream validates the response, so a silently skipped
+        // question would reach the caller as `answers[name] === undefined`.
+        throw new ProviderError({
+          code: ErrorCode.PROVIDER_ERROR,
+          message: `TypeSafe response is missing an answer for question '${name}'`,
+          isRetryable: false,
+          provenance: { backend: this.metadata.name },
+        });
       }
       answers[name] = toIRAnswer(question, raw, name, this.metadata.name);
     }
 
+    const warnings: IRWarning[] = [];
+    if (originalRequest.images?.length) {
+      warnings.push({
+        category: 'capability-unsupported',
+        severity: 'warning',
+        message: `Jev takes no images; ${originalRequest.images.length} image(s) were not sent.`,
+        field: 'images',
+        source: this.metadata.name,
+      });
+    }
+
     return {
+      id: response.id,
+      provider: 'typesafe',
       answers,
       model: response.model,
       usage: response.usage
         ? {
             inputTokens: response.usage.input_tokens ?? 0,
+            outputTokens: response.usage.output_tokens,
+            cost: response.usage.cost,
+            // Kept alongside `cost` for one release; read `usage.cost` instead.
             details: response.usage.cost !== undefined ? { cost: response.usage.cost } : undefined,
           }
         : undefined,
@@ -178,6 +196,9 @@ export class TypeSafeBackendAdapter implements BackendAdapter<TypeSafeRequest, T
           ...originalRequest.metadata.provenance,
           backend: this.metadata.name,
         },
+        ...(warnings.length > 0 && {
+          warnings: [...(originalRequest.metadata.warnings ?? []), ...warnings],
+        }),
       },
       raw: response as unknown as Record<string, unknown>,
     };
@@ -286,16 +307,16 @@ function toIRAnswer(
     return {
       type: 'choice',
       value: raw.choice,
-      probabilities: raw.probabilities,
-      confidence: raw.confidence,
+      ...(raw.probabilities !== undefined && { probabilities: raw.probabilities }),
+      ...(raw.confidence !== undefined && { confidence: raw.confidence }),
     };
   }
   if (question.type === 'score' && 'score' in raw) {
     return {
       type: 'score',
       value: raw.score,
-      probabilities: raw.probabilities,
-      confidence: raw.confidence,
+      ...(raw.probabilities !== undefined && { probabilities: raw.probabilities }),
+      ...(raw.confidence !== undefined && { confidence: raw.confidence }),
     };
   }
   if (question.type === 'noul' && 'noul' in raw) {

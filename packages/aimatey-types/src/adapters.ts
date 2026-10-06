@@ -77,36 +77,68 @@ export interface FrontendAdapter<TRequest = unknown, TResponse = unknown, TStrea
   readonly metadata: AdapterMetadata;
 
   /**
-   * Convert provider-specific request to universal IR.
+   * Convert provider-specific request to universal IR (optional).
+   *
+   * Optional because chat is one capability among several a frontend can
+   * speak -- a decision-only frontend (TypeSafe, Laya) implements
+   * {@link FrontendAdapter.decisionToIR} instead, the same way
+   * `BackendAdapter.execute?` is optional beside `decide?`. `Bridge.chat()`
+   * throws `UNSUPPORTED_FEATURE` for a frontend that lacks it.
    *
    * @param request Provider-specific request object
    * @returns Universal IR request
    * @throws {ValidationError} If request is invalid for this provider
    * @throws {AdapterConversionError} If conversion fails
    */
-  toIR(request: TRequest): Promise<IRChatRequest>;
+  toIR?(request: TRequest): Promise<IRChatRequest>;
 
   /**
-   * Convert universal IR response to provider-specific format.
+   * Convert universal IR response to provider-specific format (optional --
+   * see {@link FrontendAdapter.toIR} for why).
    *
    * @param response Universal IR response
    * @returns Provider-specific response object
    * @throws {AdapterConversionError} If conversion fails
    */
-  fromIR(response: IRChatResponse): Promise<TResponse>;
+  fromIR?(response: IRChatResponse): Promise<TResponse>;
 
   /**
-   * Convert universal IR stream to provider-specific stream format.
+   * Convert universal IR stream to provider-specific stream format
+   * (optional -- see {@link FrontendAdapter.toIR} for why).
    *
    * @param stream Universal IR stream
    * @param options Optional stream conversion options (mode, transform, etc.)
    * @returns Provider-specific stream of chunks
    * @throws {StreamError} If stream processing fails
    */
-  fromIRStream(
+  fromIRStream?(
     stream: IRChatStream,
     options?: StreamConversionOptions
   ): AsyncGenerator<TStreamChunk, void, undefined>;
+
+  /**
+   * Convert a provider-specific typed-decision request to universal IR
+   * (optional). Used by `Bridge.decideFrom()`.
+   *
+   * @param request Provider-specific request object
+   * @returns Universal IR decision request
+   * @throws {ValidationError} If request is invalid for this provider
+   */
+  decisionToIR?(request: TRequest): Promise<IRDecisionRequest> | IRDecisionRequest;
+
+  /**
+   * Convert a universal IR decision response back to the provider-specific
+   * format (optional). Used by `Bridge.decideFrom()`.
+   *
+   * @param response Universal IR decision response
+   * @param originalRequest The IR request it answers; some formats need the
+   *   questions to rebuild their response (e.g. Laya's score `legend`)
+   * @returns Provider-specific response object
+   */
+  decisionFromIR?(
+    response: IRDecisionResponse,
+    originalRequest?: IRDecisionRequest
+  ): Promise<TResponse> | TResponse;
 
   /**
    * Optional: Validate provider-specific request before conversion.

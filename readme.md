@@ -460,8 +460,11 @@ import { OpenAIBackendAdapter } from '@johnhenry/aimatey-backend/openai';
 - Alibaba Cloud Model Studio / DashScope (Qwen)
 - OmniRoute (self-hosted gateway, 290+ providers, no API key required by default)
 
-**Typed-decision (not chat) provider:**
+**Typed-decision (not chat) providers:**
 - TypeSafe (Jev) -- typed `choice`/`score`/`noul` questions over a state, answered with calibrated probabilities via `Bridge.decide()`, not `chat()`
+- Laya (ConvAI) -- the same question types, run on-device via ONNX Runtime; lives in [`@johnhenry/aimatey-native-laya`](./packages/native-laya)
+
+Decision backends declare `decisionModels`, `decisionTypes`, `decisionImages` and `decisionLimits` in their capabilities. On a decision answer, `probabilities` and `confidence` are optional (a provider, or an LLM, may not report them) and `reasoning` is optional free text.
 
 **Browser-Compatible Package:** [`@johnhenry/aimatey-backend-browser`](./packages/backend-browser)
 
@@ -489,8 +492,8 @@ import { OpenAIFrontendAdapter, AnthropicFrontendAdapter } from '@johnhenry/aima
 - Ollama format
 - Chrome AI format
 - Generic (IR passthrough)
-- TypeSafe (Jev) -- `@typesafe-ai/sdk`-shaped calls, translated to the Decision IR
-- Laya -- `Router.predict()`-shaped calls, translated to the Decision IR (frontend only; no hosted API to pair a backend with yet)
+- TypeSafe (Jev) -- `@typesafe-ai/sdk`-shaped calls, translated to the Decision IR; use `Bridge.decideFrom()` (these implement `FrontendAdapter`'s `decisionToIR`/`decisionFromIR`, not the chat hooks)
+- Laya -- `Router.predict()`-shaped calls, translated to the Decision IR; pairs with `LayaBackendAdapter` in [`@johnhenry/aimatey-native-laya`](./packages/native-laya)
 
 ### HTTP Integrations
 
