@@ -348,15 +348,23 @@ export const DEFAULT_PRICING: Record<string, ProviderPricing> = {
 };
 
 /**
- * Calculate cost for a request/response
+ * Find the pricing for a provider/model, or `undefined` when nothing matches.
+ *
+ * Lookup order: user `models`, user `providers`, explicit `provider:model`
+ * defaults, the shared model registry, then (only when `providerDefault` is
+ * set) the provider-level representative rate. Shared by
+ * {@link calculateCost} and `createDecisionCostTrackingMiddleware`; the
+ * latter leaves `providerDefault` off, because a chat provider's
+ * representative rate would misprice a decision model.
+ *
+ * @internal
  */
-export function calculateCost(
-  usage: IRUsage,
+export function resolvePricing(
   provider: string,
   model: string,
-  config: CostTrackingConfig
-): CostCalculation {
-  // Find pricing for this provider/model
+  config: CostTrackingConfig,
+  providerDefault: boolean = true
+): ProviderPricing | undefined {
   let pricing: ProviderPricing | undefined;
 
   // Check model-specific pricing first
@@ -401,14 +409,75 @@ export function calculateCost(
   }
 
   // Last resort: provider-level representative rate
-  if (!pricing) {
+  if (!pricing && providerDefault) {
     pricing = DEFAULT_PRICING[provider];
   }
 
-  // If still no pricing, use zero cost
-  if (!pricing) {
-    pricing = { inputCostPer1M: 0, outputCostPer1M: 0 };
+  return pricing;
+}
+
+/**
+ * Settle a cost record: store it, check the thresholds, log it and call
+ * `onCost`. Shared by the chat and decision cost middleware so the ledger,
+ * threshold and callback behaviour cannot drift apart.
+ *
+ * @internal
+ */
+export async function recordCost(
+  cost: CostCalculation,
+  config: CostTrackingConfig,
+  storage: CostStorage
+): Promise<void> {
+  // Store cost
+  await storage.record(cost);
+
+  // Check thresholds
+  if (config.requestThreshold && cost.totalCost > config.requestThreshold) {
+    await config.onThresholdExceeded?.(cost, config.requestThreshold);
   }
+
+  if (config.hourlyThreshold) {
+    const hourAgo = Date.now() - 60 * 60 * 1000;
+    const hourTotal = await storage.getTotal(hourAgo);
+    if (hourTotal > config.hourlyThreshold) {
+      await config.onThresholdExceeded?.(cost, config.hourlyThreshold);
+    }
+  }
+
+  if (config.dailyThreshold) {
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const dayTotal = await storage.getTotal(dayAgo);
+    if (dayTotal > config.dailyThreshold) {
+      await config.onThresholdExceeded?.(cost, config.dailyThreshold);
+    }
+  }
+
+  // Log cost if configured
+  if (config.logCosts) {
+    console.warn(
+      `[Cost] ${cost.provider}/${cost.model}: $${cost.totalCost.toFixed(6)} ` +
+        `(${cost.inputTokens} in, ${cost.outputTokens} out)`
+    );
+  }
+
+  // Call callback
+  await config.onCost?.(cost);
+}
+
+/**
+ * Calculate cost for a request/response
+ */
+export function calculateCost(
+  usage: IRUsage,
+  provider: string,
+  model: string,
+  config: CostTrackingConfig
+): CostCalculation {
+  // If still no pricing, use zero cost
+  const pricing = resolvePricing(provider, model, config) ?? {
+    inputCostPer1M: 0,
+    outputCostPer1M: 0,
+  };
 
   // Calculate costs
   const inputCost = (usage.promptTokens / 1_000_000) * pricing.inputCostPer1M;
@@ -498,40 +567,7 @@ export function createCostTrackingMiddleware(config: CostTrackingConfig = {}): M
       cost.requestId = context.request.metadata?.requestId || '';
       cost.metadata = context.request.metadata?.custom;
 
-      // Store cost
-      await storage.record(cost);
-
-      // Check thresholds
-      if (config.requestThreshold && cost.totalCost > config.requestThreshold) {
-        await config.onThresholdExceeded?.(cost, config.requestThreshold);
-      }
-
-      if (config.hourlyThreshold) {
-        const hourAgo = Date.now() - 60 * 60 * 1000;
-        const hourTotal = await storage.getTotal(hourAgo);
-        if (hourTotal > config.hourlyThreshold) {
-          await config.onThresholdExceeded?.(cost, config.hourlyThreshold);
-        }
-      }
-
-      if (config.dailyThreshold) {
-        const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
-        const dayTotal = await storage.getTotal(dayAgo);
-        if (dayTotal > config.dailyThreshold) {
-          await config.onThresholdExceeded?.(cost, config.dailyThreshold);
-        }
-      }
-
-      // Log cost if configured
-      if (config.logCosts) {
-        console.warn(
-          `[Cost] ${provider}/${model}: $${cost.totalCost.toFixed(6)} ` +
-            `(${cost.inputTokens} in, ${cost.outputTokens} out)`
-        );
-      }
-
-      // Call callback
-      await config.onCost?.(cost);
+      await recordCost(cost, config, storage);
 
       // Include in metadata if configured
       if (config.includeInMetadata) {

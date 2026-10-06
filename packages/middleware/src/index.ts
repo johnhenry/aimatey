@@ -20,3 +20,4 @@ export * from './telemetry.js';
 export * from './transform.js';
 export * from './validation.js';
 export * from './embeddings.js';
+export * from './decisions/index.js';

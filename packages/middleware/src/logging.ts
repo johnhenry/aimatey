@@ -80,8 +80,10 @@ export interface LoggingConfig {
 
 /**
  * Default console logger.
+ *
+ * @internal Shared with the decision logging middleware.
  */
-const defaultLogger: Logger = {
+export const defaultLogger: Logger = {
   debug: (message: string, data?: unknown) => {
     // eslint-disable-next-line no-console
     console.debug(message, data !== undefined ? data : '');
@@ -104,8 +106,10 @@ const defaultLogger: Logger = {
 
 /**
  * Sanitize sensitive data from objects.
+ *
+ * @internal Shared with the decision logging middleware.
  */
-function sanitizeData(data: unknown): unknown {
+export function sanitizeData(data: unknown): unknown {
   if (data === null || data === undefined) {
     return data;
   }
@@ -168,7 +172,8 @@ const LOG_LEVELS: Record<LogLevel, number> = {
   error: 3,
 };
 
-function shouldLog(currentLevel: LogLevel, targetLevel: LogLevel): boolean {
+/** @internal Shared with the decision logging middleware. */
+export function shouldLog(currentLevel: LogLevel, targetLevel: LogLevel): boolean {
   return LOG_LEVELS[targetLevel] >= LOG_LEVELS[currentLevel];
 }
 

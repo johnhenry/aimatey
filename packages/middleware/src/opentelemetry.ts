@@ -308,8 +308,10 @@ async function getOrCreateTracerProvider(config: OpenTelemetryConfig): Promise<a
 
 /**
  * Determine if this request should be sampled.
+ *
+ * @internal Shared with the decision OpenTelemetry middleware.
  */
-function shouldSample(samplingRate: number): boolean {
+export function shouldSample(samplingRate: number): boolean {
   return Math.random() < samplingRate;
 }
 
@@ -360,6 +362,42 @@ function getServedModel(response: IRChatResponse): string | undefined {
 }
 
 // ============================================================================
+// Tracer Acquisition
+// ============================================================================
+
+/**
+ * Load the optional OpenTelemetry packages and return a tracer from the
+ * shared provider singleton, plus the loaded `@opentelemetry/api` module.
+ *
+ * The one place the "are the peer packages installed" check, the provider
+ * setup and the tracer lookup live, shared by the chat and decision
+ * middleware so both report spans through the same provider.
+ *
+ * @throws Error if OpenTelemetry packages are not installed
+ * @internal
+ */
+export async function acquireTracer(
+  config: OpenTelemetryConfig
+): Promise<{ tracer: Tracer; api: any }> {
+  // Check if OpenTelemetry is available
+  const available = await checkOpenTelemetryAvailability();
+  if (!available) {
+    throw new Error(
+      'OpenTelemetry packages are not installed. Please install:\n' +
+        'npm install @opentelemetry/api @opentelemetry/sdk-trace-base ' +
+        '@opentelemetry/exporter-trace-otlp-http @opentelemetry/resources ' +
+        '@opentelemetry/semantic-conventions'
+    );
+  }
+
+  const { tracerName = 'ai-matey-tracer' } = config;
+
+  // Initialize tracer provider (async to handle race conditions)
+  const provider = await getOrCreateTracerProvider(config);
+  return { tracer: provider.getTracer(tracerName), api };
+}
+
+// ============================================================================
 // Middleware Factory
 // ============================================================================
 
@@ -403,22 +441,8 @@ function getServedModel(response: IRChatResponse): string | undefined {
 export async function createOpenTelemetryMiddleware(
   config: OpenTelemetryConfig = {}
 ): Promise<Middleware> {
-  // Check if OpenTelemetry is available
-  const available = await checkOpenTelemetryAvailability();
-  if (!available) {
-    throw new Error(
-      'OpenTelemetry packages are not installed. Please install:\n' +
-        'npm install @opentelemetry/api @opentelemetry/sdk-trace-base ' +
-        '@opentelemetry/exporter-trace-otlp-http @opentelemetry/resources ' +
-        '@opentelemetry/semantic-conventions'
-    );
-  }
-
-  const { samplingRate = 1.0, tracerName = 'ai-matey-tracer' } = config;
-
-  // Initialize tracer provider (async to handle race conditions)
-  const provider = await getOrCreateTracerProvider(config);
-  const tracer = provider.getTracer(tracerName);
+  const { samplingRate = 1.0 } = config;
+  const { tracer, api } = await acquireTracer(config);
 
   return async (context: MiddlewareContext, next: MiddlewareNext): Promise<IRChatResponse> => {
     // Check if we should sample this request
