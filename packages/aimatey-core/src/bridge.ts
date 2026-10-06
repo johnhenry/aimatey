@@ -47,10 +47,13 @@ import {
 import { AdapterError, ErrorCode, ValidationError } from '@johnhenry/aimatey-errors';
 import {
   validateIRChatRequest,
+  validateDecisionRequest,
+  validateDecisionResponse,
   createGenerateObject,
   createStreamObject,
 } from '@johnhenry/aimatey-utils';
 import { createRunTools } from './run-tools.js';
+import { mapWithConcurrency } from './concurrency.js';
 import {
   supportsEmbeddings,
   chunkEmbedInputs,
@@ -73,11 +76,34 @@ import type {
   DecisionOptions,
   IRDecisionRequest,
   IRDecisionResponse,
+  IRWarning,
 } from '@johnhenry/aimatey-types';
 
 // ============================================================================
 // Bridge Implementation
 // ============================================================================
+
+/**
+ * Options for {@link Bridge.decideBatch}: the per-item {@link DecisionOptions}
+ * plus batch controls.
+ */
+export interface DecideBatchOptions extends DecisionOptions {
+  /**
+   * Most states in flight at once. Defaults to the backend's
+   * `capabilities.decisionLimits.maxConcurrency`, else 4.
+   */
+  readonly concurrency?: number;
+
+  /** Called as each state finishes (success, or failure under `'collect'`). */
+  readonly onProgress?: (done: number, total: number) => void;
+
+  /**
+   * What a failing state means: `'throw'` (default) rejects with the first
+   * error and aborts the rest; `'collect'` returns a `PromiseSettledResult`
+   * per state.
+   */
+  readonly onError?: 'throw' | 'collect';
+}
 
 /**
  * Bridge connects frontend and backend adapters.
@@ -1229,28 +1255,157 @@ export class Bridge<
   }
 
   /**
-   * Run a built decision request through the decision middleware chain and
-   * the backend. Shared by `decide()` and `decideFrom()`.
+   * Answer the same questions about many states, in input order.
+   *
+   * Each state goes through exactly what `decide()` does -- the same
+   * pre-flight validation, decision middleware chain and response checks --
+   * with at most `concurrency` in flight. The default is the backend's
+   * `capabilities.decisionLimits.maxConcurrency` (1 for a single-session
+   * local model such as Laya), else 4.
+   *
+   * `onError` picks what a failing item means:
+   * - `'throw'` (default): reject with the first error, abort the in-flight
+   *   items through a shared signal and start no more;
+   * - `'collect'`: run everything and return a `PromiseSettledResult` per
+   *   state, in input order.
+   *
+   * `options.signal` aborts the whole batch in either mode.
+   *
+   * @throws AdapterError UNSUPPORTED_FEATURE when the backend lacks decide()
+   */
+  async decideBatch(
+    states: readonly unknown[],
+    questions: IRDecisionRequest['questions'],
+    options: DecideBatchOptions & { onError: 'collect' }
+  ): Promise<readonly PromiseSettledResult<IRDecisionResponse>[]>;
+  async decideBatch(
+    states: readonly unknown[],
+    questions: IRDecisionRequest['questions'],
+    options?: DecideBatchOptions & { onError?: 'throw' }
+  ): Promise<readonly IRDecisionResponse[]>;
+  async decideBatch(
+    states: readonly unknown[],
+    questions: IRDecisionRequest['questions'],
+    options: DecideBatchOptions = {}
+  ): Promise<readonly IRDecisionResponse[] | readonly PromiseSettledResult<IRDecisionResponse>[]> {
+    const backend = this.backend;
+    if (!supportsDecisions(backend)) {
+      throw new AdapterError({
+        code: ErrorCode.UNSUPPORTED_FEATURE,
+        message: `Backend '${backend.metadata.name}' does not support typed decisions`,
+        isRetryable: false,
+        provenance: { backend: backend.metadata.name },
+      });
+    }
+
+    const { concurrency, onProgress, onError = 'throw', signal, ...decideOptions } = options;
+    const limit = concurrency ?? backend.metadata.capabilities.decisionLimits?.maxConcurrency ?? 4;
+    const collect = onError === 'collect';
+
+    // Shared by every item: in 'throw' mode the first failure aborts the rest.
+    const controller = new AbortController();
+    const itemSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+
+    let done = 0;
+    let firstError: { reason: unknown } | undefined;
+
+    const results = await mapWithConcurrency(
+      states,
+      limit,
+      async (state) => {
+        itemSignal.throwIfAborted();
+        try {
+          const response = await this.decide(state, questions, {
+            ...decideOptions,
+            signal: itemSignal,
+          });
+          onProgress?.(++done, states.length);
+          return response;
+        } catch (error) {
+          if (collect) {
+            onProgress?.(++done, states.length);
+          } else if (!firstError) {
+            firstError = { reason: error };
+            controller.abort(error);
+          }
+          throw error;
+        }
+      },
+      () => itemSignal.aborted
+    );
+
+    if (collect) {
+      // Items never started (the caller aborted) are rejections, not holes.
+      return results.map(
+        (result): PromiseSettledResult<IRDecisionResponse> =>
+          result ?? { status: 'rejected', reason: signal?.reason ?? new Error('Batch aborted') }
+      );
+    }
+
+    // 'throw': the first failure wins; a caller abort with no item failure
+    // surfaces as the abort reason.
+    if (firstError) {
+      throw firstError.reason;
+    }
+    signal?.throwIfAborted();
+    return results.map((result) => (result as PromiseFulfilledResult<IRDecisionResponse>).value);
+  }
+
+  /**
+   * Run a built decision request through pre-flight validation, the decision
+   * middleware chain and the backend, then validate the answers. Shared by
+   * `decide()` and `decideFrom()`.
+   *
+   * Validation warnings (request and response) land in `metadata.warnings`;
+   * hard failures throw `ValidationError`. The request check runs before the
+   * chain, so a request the backend cannot serve never reaches middleware.
    */
   private runDecision(
     backend: BackendAdapter & Required<Pick<BackendAdapter, 'decide'>>,
     request: IRDecisionRequest,
     signal?: AbortSignal
   ): Promise<IRDecisionResponse> {
-    const execute = (finalRequest: IRDecisionRequest): Promise<IRDecisionResponse> =>
-      backend.decide(finalRequest, signal).then((response) => ({
+    const requestWarnings = validateDecisionRequest(request, backend.metadata.capabilities);
+    const checked: IRDecisionRequest =
+      requestWarnings.length === 0
+        ? request
+        : {
+            ...request,
+            metadata: {
+              ...request.metadata,
+              warnings: [...(request.metadata.warnings ?? []), ...requestWarnings],
+            },
+          };
+
+    const execute = async (finalRequest: IRDecisionRequest): Promise<IRDecisionResponse> => {
+      const response = await backend.decide(finalRequest, signal);
+      // The backend may rebuild `metadata` without the request's warnings;
+      // re-attach the ones validated above, then check the answers
+      // (middleware may have changed the questions, so use `finalRequest`).
+      const warnings: IRWarning[] = [...(response.metadata.warnings ?? [])];
+      for (const warning of [
+        ...requestWarnings,
+        ...validateDecisionResponse(finalRequest, response),
+      ]) {
+        if (!warnings.includes(warning)) {
+          warnings.push(warning);
+        }
+      }
+      return {
         ...response,
         metadata: {
           ...response.metadata,
+          ...(warnings.length > 0 && { warnings }),
           provenance: { ...response.metadata.provenance, backend: backend.metadata.name },
         },
-      }));
+      };
+    };
 
     const chain = this.decisionMiddleware.reduceRight<
       (request: IRDecisionRequest) => Promise<IRDecisionResponse>
     >((next, middleware) => (req) => middleware(req, next), execute);
 
-    return chain(request);
+    return chain(checked);
   }
 
   /**

@@ -123,6 +123,10 @@ const response = await bridge.chat({
   model: 'gpt-4',
   messages: [{ role: 'user', content: 'Hello!' }],
 });
+
+// Typed decisions route the same way: skips backends that can't serve the
+// question types/limits, then falls back down the chain
+const verdict = await router.decide({ state: ticket, questions, metadata: { requestId: 'r1', timestamp: Date.now() } });
 ```
 
 ### Parallel Dispatch

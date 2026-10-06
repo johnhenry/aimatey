@@ -167,7 +167,7 @@ describe('Bridge.decide', () => {
         return response;
       });
 
-    await bridge.decide('state', { q: { type: 'noul', instructions: 'x' } });
+    await bridge.decide('state', { urgent: { type: 'noul', instructions: 'x' } });
     expect(order).toEqual(['outer-before', 'inner-before', 'inner-after', 'outer-after']);
   });
 
@@ -175,7 +175,7 @@ describe('Bridge.decide', () => {
     const backend = makeDecisionBackend({});
     await makeBridge(backend).decide(
       'state',
-      { q: { type: 'noul', instructions: 'x' } },
+      { urgent: { type: 'noul', instructions: 'x' } },
       { principal: 'tenant-7:user-42' }
     );
 
@@ -485,7 +485,7 @@ describe('IR v2 answer fields', () => {
   it('flows an answer with no probabilities or confidence through Bridge.decide', async () => {
     const backend = createMockDecisionBackend({ handler: () => bare });
     const response = await makeBridge(backend).decide('s', {
-      department: { type: 'choice', instructions: 'x', criteria: { billing: 'b' } },
+      department: { type: 'choice', instructions: 'x', criteria: { billing: 'b', technical: 't' } },
     });
     expect(response.answers.department).toEqual({
       type: 'choice',
@@ -613,6 +613,7 @@ describe('decision capability limits', () => {
       maxScoreLevels: 10,
       maxStateTokens: 512,
       maxImages: 0,
+      maxConcurrency: 1,
     });
     expect(capabilities.decisionImages).toBe(false);
   });
@@ -721,7 +722,10 @@ describe('Bridge.decideFrom', () => {
     const controller = new AbortController();
     controller.abort();
     await expect(
-      bridge.decideFrom({ state: 'x', questions: {} }, { signal: controller.signal })
+      bridge.decideFrom(
+        { state: 'x', questions: { urgent: { type: 'noul', instructions: 'u' } } },
+        { signal: controller.signal }
+      )
     ).rejects.toMatchObject({ name: 'AbortError' });
 
     await bridge.decideFrom(
