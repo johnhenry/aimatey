@@ -28,13 +28,18 @@ import { createWarning } from './warnings.js';
 
 /**
  * Type guard: does this backend implement typed decisions?
+ *
+ * Reads the adapter's static `metadata.capabilities` unless `capabilities` is
+ * given -- pass the result of `resolveCapabilities()` to judge a backend by
+ * what its far side currently offers.
  */
 export function supportsDecisions(
-  adapter: BackendAdapter
+  adapter: BackendAdapter,
+  capabilities: IRCapabilities = adapter.metadata.capabilities
 ): adapter is BackendAdapter & Required<Pick<BackendAdapter, 'decide'>> {
   // Mirrors `supportsEmbeddings`: an inherited decide() can be explicitly
   // opted out of via the capability flag.
-  return typeof adapter.decide === 'function' && adapter.metadata.capabilities.decisions !== false;
+  return typeof adapter.decide === 'function' && capabilities.decisions !== false;
 }
 
 /**

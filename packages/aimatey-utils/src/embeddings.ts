@@ -10,6 +10,7 @@
 
 import type {
   BackendAdapter,
+  IRCapabilities,
   IREmbedRequest,
   IREmbedResponse,
   IRMetadata,
@@ -21,14 +22,19 @@ import type {
 
 /**
  * Type guard: does this backend implement embeddings?
+ *
+ * Reads the adapter's static `metadata.capabilities` unless `capabilities` is
+ * given -- pass the result of `resolveCapabilities()` to judge a backend by
+ * what its far side currently offers.
  */
 export function supportsEmbeddings(
-  adapter: BackendAdapter
+  adapter: BackendAdapter,
+  capabilities: IRCapabilities = adapter.metadata.capabilities
 ): adapter is BackendAdapter & Required<Pick<BackendAdapter, 'embed'>> {
   // An inherited embed() can be explicitly opted out of via the capability
   // flag (e.g. providers subclassing the OpenAI adapter without an
   // embeddings endpoint set `capabilities.embeddings: false`)
-  return typeof adapter.embed === 'function' && adapter.metadata.capabilities.embeddings !== false;
+  return typeof adapter.embed === 'function' && capabilities.embeddings !== false;
 }
 
 // ============================================================================

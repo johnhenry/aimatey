@@ -51,6 +51,8 @@ import {
   validateDecisionResponse,
   createGenerateObject,
   createStreamObject,
+  withCancellation,
+  withStreamCancellation,
 } from '@johnhenry/aimatey-utils';
 import { createRunTools } from './run-tools.js';
 import { mapWithConcurrency } from './concurrency.js';
@@ -242,7 +244,12 @@ export class Bridge<
           // Non-null: chat() and executeIR() both check `backend.execute` exists
           // before reaching this closure -- TS narrowing doesn't survive the
           // closure boundary, so this asserts what the earlier guard verified.
-          const response = await this.backend.execute!(context.request, options?.signal);
+          const response = await withCancellation(
+            this.backend,
+            enrichedRequest.metadata.requestId,
+            options?.signal,
+            () => this.backend.execute!(context.request, options?.signal)
+          );
           this.narrowContextBackend(context, response.metadata.provenance?.backend);
           return response;
         });
@@ -416,7 +423,12 @@ export class Bridge<
           this.trackContextBackend(
             // Non-null: chatStream() and executeIRStream() both check
             // `backend.executeStream` exists before reaching this point.
-            this.backend.executeStream!(context.request, options?.signal),
+            withStreamCancellation(
+              this.backend,
+              enrichedRequest.metadata.requestId,
+              options?.signal,
+              this.backend.executeStream!(context.request, options?.signal)
+            ),
             context
           )
         )
@@ -906,7 +918,12 @@ export class Bridge<
       // Non-null: chat() and executeIR() both check `backend.execute` exists
       // before reaching this closure -- TS narrowing doesn't survive the
       // closure boundary, so this asserts what the earlier guard verified.
-      const response = await this.backend.execute!(context.request, options?.signal);
+      const response = await withCancellation(
+        this.backend,
+        enrichedRequest.metadata.requestId,
+        options?.signal,
+        () => this.backend.execute!(context.request, options?.signal)
+      );
       this.narrowContextBackend(context, response.metadata.provenance?.backend);
       return response;
     });
@@ -954,7 +971,12 @@ export class Bridge<
       Promise.resolve(
         this.trackContextBackend(
           // Non-null: the guard above already verified this exists.
-          this.backend.executeStream!(context.request, options?.signal),
+          withStreamCancellation(
+            this.backend,
+            enrichedRequest.metadata.requestId,
+            options?.signal,
+            this.backend.executeStream!(context.request, options?.signal)
+          ),
           context
         )
       )
