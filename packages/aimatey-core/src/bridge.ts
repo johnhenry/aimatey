@@ -1181,6 +1181,7 @@ export class Bridge<
     const request: IRDecisionRequest = {
       state,
       questions,
+      ...(options.images?.length && { images: options.images }),
       parameters: {
         model: options.model,
         custom: options.custom,

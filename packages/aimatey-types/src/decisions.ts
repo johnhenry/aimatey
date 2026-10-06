@@ -245,6 +245,14 @@ export interface DecisionOptions {
    */
   readonly principal?: string;
 
+  /**
+   * Images to consider alongside `state`. Becomes `IRDecisionRequest.images`;
+   * rejected with `UNSUPPORTED_FEATURE` when the backend does not declare
+   * `capabilities.decisionImages`. For `decideBatch`, the same images go
+   * with every state.
+   */
+  readonly images?: readonly ImageContent[];
+
   /** Provider-specific passthrough parameters. */
   readonly custom?: Record<string, unknown>;
 }

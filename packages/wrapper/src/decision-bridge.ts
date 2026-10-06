@@ -71,18 +71,10 @@ export async function runDecision<TRequest, TResponse>(
   }
 
   const ir = await adapter.decisionToIR(request);
-  if (ir.images?.length) {
-    throw new AdapterError({
-      code: ErrorCode.UNSUPPORTED_FEATURE,
-      message:
-        `This Bridge's frontend is '${bridge.frontend.metadata.name}', not '${adapter.metadata.name}', ` +
-        `and Bridge.decide() cannot carry images; build the Bridge with '${adapter.metadata.name}' to send them`,
-      isRetryable: false,
-    });
-  }
   const response = await bridge.decide(ir.state, ir.questions, {
     model: ir.parameters?.model,
     custom: ir.parameters?.custom,
+    images: ir.images,
     signal,
   });
   return adapter.decisionFromIR(response, ir);
