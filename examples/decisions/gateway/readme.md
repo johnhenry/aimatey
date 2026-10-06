@@ -32,8 +32,8 @@ decision backends, and escalates unsure answers to an LLM fallback.
   reported the way Vercel does -- `routing.modelAttempts[].triggeredBy` under
   `providerMetadata.gateway` (`/v1/evaluate`) or `provider_metadata.gateway`
   (the others) -- and in `x-aimatey-decision-fallback-*` headers.
-  Requests with only `noul` questions are never escalated (a `noul` answer
-  carries no confidence to threshold).
+  The rule uses `onUnmatchable: 'skip'`, so requests with only `noul`
+  questions (nothing a confidence threshold can judge) are never escalated.
 - **Delegation.** Anything that is not a decision route goes to
   `@johnhenry/aimatey-http`'s core handler (this gateway has no chat backend,
   so only the core handler's own responses come back).

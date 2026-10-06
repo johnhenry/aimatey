@@ -134,16 +134,21 @@ export interface IRDecisionRequest {
  * A single typed answer, shaped by which question primitive produced it.
  *
  * `probabilities` is the full distribution over `criteria` (`choice`:
- * per-option; `score`: per-level); `confidence` is the probability mass on
- * the winning answer specifically. **Both are optional** on `choice` and
- * `score`: OpenRouter's schema marks them optional, and an answer produced
- * by an LLM through structured output has neither. Absence means "the
+ * per-option; `score`: per-level); `confidence` is how concentrated that
+ * distribution is, `1 - H(p) / ln(n)` with `H` the Shannon entropy (1 for a
+ * one-hot distribution, 0 for a uniform one; `decisionConfidence()` and
+ * `noulConfidence()` in `@johnhenry/aimatey-utils`). It is not the winning
+ * option's probability and not accuracy. A provider that reports its own
+ * `confidence` (Jev, Ollama, Laya) is passed through as reported.
+ * **Both are optional** on `choice` and `score`: OpenRouter's schema marks
+ * them optional, and an answer produced by an LLM through structured output has neither. Absence means "the
  * provider did not report it" -- there is no sentinel value such as
  * `confidence: 0`, so consumers must handle `undefined`.
  *
  * Both are omitted for `noul`, where the probability itself *is* the answer
  * -- but `confidence` alone is still a real, separate quantity there
- * (`max(p, 1-p)`, i.e. distance from 0.5, not the same number as `value`):
+ * (the concentration of `[p, 1-p]`, i.e. distance from a coin flip, not the
+ * same number as `value`):
  * Jev's wire format doesn't report it, Laya's does, so it's optional rather
  * than absent -- a provider that has it should not have to throw it away to
  * fit this type.

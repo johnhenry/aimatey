@@ -16,6 +16,7 @@ import type {
   IRDecisionResponse,
   IRWarning,
 } from '@johnhenry/aimatey-types';
+import { noulConfidence } from '@johnhenry/aimatey-utils';
 import { createRng, shuffled, invalid } from './shared.js';
 
 /** Options for {@link createNeutralOptionKeys}. */
@@ -203,7 +204,7 @@ function mapBack(
   return {
     type: 'noul',
     value: pTrue,
-    ...(answer.probabilities && { confidence: Math.max(pTrue, 1 - pTrue) }),
+    ...(answer.probabilities && { confidence: noulConfidence(pTrue) }),
     ...(answer.reasoning !== undefined && { reasoning: answer.reasoning }),
   };
 }
