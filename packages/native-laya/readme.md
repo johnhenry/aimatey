@@ -37,13 +37,44 @@ await backend.initialize();
 
 const bridge = new Bridge(new LayaFrontendAdapter(), backend);
 
+// IR in, IR out. The frontend is not involved.
 const response = await bridge.decide(
   { headline: 'Local sea levels rising faster than predicted' },
   { urgency: { type: 'score', instructions: 'How urgent is this?', criteria: ['low', 'medium', 'high'] } }
 );
 
+// Laya's own request/response shapes in and out, via the frontend adapter.
+const native = await bridge.decideFrom({
+  state: { headline: 'Local sea levels rising faster than predicted' },
+  questions: { urgency: { type: 'score', instructions: 'How urgent is this?', criteria: ['low', 'medium', 'high'] } },
+});
+
 await backend.close();
 ```
+
+## What the adapter declares
+
+- `decisionModels`: `english`, `multilingual`, `typed-decisions`
+- `decisionTypes`: `choice`, `score`, `noul`
+- `decisionLimits`: 20 choice options (Laya is weak beyond that), 10 score
+  levels, 512 state tokens (the English checkpoint; multilingual allows 1024),
+  no images (`decisionImages: false`; images are dropped with a
+  `capability-unsupported` warning)
+
+## Behaviour notes
+
+- `decide(request, signal)` honours `signal` before loading, before running,
+  and once the result arrives. An in-flight ONNX run cannot be cancelled.
+- The checkpoint is chosen when the session loads (`subfolder`), and
+  `@receptron/laya`'s `systemOne()` takes no `task`/`lang`. A
+  `parameters.model` that differs from `subfolder`, and
+  `parameters.custom.task`/`lang`, are reported as `parameter-unsupported`
+  warnings on `response.metadata.warnings` rather than ignored silently.
+- Laya's per-answer `rl_agent` sub-object is kept under
+  `response.raw.rl_agent`, keyed by question. Convai measured its
+  `act_probability` as uninformative, so treat it as diagnostic.
+- Laya reports no `confidence` for `noul` answers; the adapter derives
+  `max(p, 1 - p)`.
 
 ## License
 

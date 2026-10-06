@@ -88,14 +88,19 @@ function formatPercent(p: number): string {
   return `${(p * 100).toFixed(1)}%`;
 }
 
+// Confidence (like probabilities) is optional on an answer: not every provider reports it.
+function formatConfidence(confidence: number | undefined): string {
+  return confidence !== undefined ? formatPercent(confidence) : 'n/a';
+}
+
 function formatAnswer(name: string, answer: IRDecisionAnswer): string {
   switch (answer.type) {
     case 'choice': {
-      const probs = Object.entries(answer.probabilities)
+      const probs = Object.entries(answer.probabilities ?? {})
         .sort((a, b) => b[1] - a[1])
         .map(([option, p]) => `${option}: ${formatPercent(p)}`)
         .join(', ');
-      return `  ${name}: ${answer.value} (confidence ${formatPercent(answer.confidence)})\n    [${probs}]`;
+      return `  ${name}: ${answer.value} (confidence ${formatConfidence(answer.confidence)})\n    [${probs}]`;
     }
     case 'score': {
       // `value` is a probability-weighted expected value over the level
@@ -105,14 +110,13 @@ function formatAnswer(name: string, answer: IRDecisionAnswer): string {
       // rather than treating it as a discrete pick.
       const levels = TRIAGE_QUESTIONS.urgency.criteria;
       const nearestLevel = levels[Math.round(answer.value)] ?? String(answer.value);
-      const probs = answer.probabilities
+      const probs = (answer.probabilities ?? [])
         .map((p, i) => `${levels[i] ?? i}: ${formatPercent(p)}`)
         .join(', ');
-      return `  ${name}: ~${nearestLevel} (score ${answer.value.toFixed(2)}, confidence ${formatPercent(answer.confidence)})\n    [${probs}]`;
+      return `  ${name}: ~${nearestLevel} (score ${answer.value.toFixed(2)}, confidence ${formatConfidence(answer.confidence)})\n    [${probs}]`;
     }
     case 'noul': {
-      const confidence = answer.confidence !== undefined ? formatPercent(answer.confidence) : 'n/a';
-      return `  ${name}: ${formatPercent(answer.value)} likely (confidence ${confidence})`;
+      return `  ${name}: ${formatPercent(answer.value)} likely (confidence ${formatConfidence(answer.confidence)})`;
     }
   }
 }

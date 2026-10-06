@@ -906,7 +906,8 @@ exportCsvBtn.addEventListener('click', () => {
 // ============================================================================
 
 function pct(p) {
-  return `${(p * 100).toFixed(1)}%`;
+  // Confidence is optional on an answer: not every provider reports it.
+  return p === undefined ? 'n/a' : `${(p * 100).toFixed(1)}%`;
 }
 
 function bar(name, p, color) {
@@ -992,7 +993,9 @@ function renderAnswers(container, answers, questions) {
 
     if (answer.type === 'choice') {
       const optionKeys =
-        question && question.type === 'choice' ? Object.keys(question.criteria) : Object.keys(answer.probabilities);
+        question && question.type === 'choice'
+          ? Object.keys(question.criteria)
+          : Object.keys(answer.probabilities ?? {});
 
       const row = document.createElement('div');
       row.className = 'answer-row';
@@ -1002,7 +1005,7 @@ function renderAnswers(container, answers, questions) {
 
       const barsWrap = document.createElement('div');
       for (const key of optionKeys) {
-        barsWrap.appendChild(bar(key, answer.probabilities[key] ?? 0));
+        barsWrap.appendChild(bar(key, answer.probabilities?.[key] ?? 0));
       }
       container.appendChild(barsWrap);
       continue;
@@ -1012,7 +1015,7 @@ function renderAnswers(container, answers, questions) {
       const levels =
         question && question.type === 'score'
           ? question.criteria
-          : answer.probabilities.map((_, i) => String(i));
+          : (answer.probabilities ?? []).map((_, i) => String(i));
       const nearestIndex = Math.max(0, Math.min(levels.length - 1, Math.round(answer.value)));
       const nearestLabel = levels[nearestIndex] ?? String(answer.value);
 
@@ -1024,7 +1027,7 @@ function renderAnswers(container, answers, questions) {
 
       const barsWrap = document.createElement('div');
       levels.forEach((label, i) => {
-        const p = answer.probabilities[i] ?? 0;
+        const p = answer.probabilities?.[i] ?? 0;
         const frac = levels.length > 1 ? i / (levels.length - 1) : 0;
         barsWrap.appendChild(bar(label, p, colorForFraction(frac)));
       });

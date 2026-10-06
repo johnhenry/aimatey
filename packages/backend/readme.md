@@ -72,6 +72,18 @@ precisely so it isn't forced to fake a chat capability it doesn't have.
 
 - **TypeSafe (Jev)** - "System One" typed decisions, 70-500ms latency, input-token-only pricing
 
+Decision backends describe themselves through `capabilities`:
+`decisionModels`, `decisionTypes` (which of `choice`/`score`/`noul` they
+answer), `decisionImages`, and `decisionLimits` (`maxQuestions`,
+`maxChoiceOptions`, `maxScoreLevels`, `maxStateTokens`, `maxImages`). The
+TypeSafe adapter declares all three types, 255 options, 10 score levels,
+32,000 state tokens and no images (images on a request are dropped with a
+`capability-unsupported` warning). A response carries `usage.inputTokens`,
+`usage.outputTokens` and `usage.cost`, plus `id`/`provider` when known, and
+the adapter throws if the provider leaves a question unanswered. Use
+`validateDecisionResponse()` from `@johnhenry/aimatey-utils` to check any
+decision response against its request.
+
 For browser-compatible adapters (Chrome AI, Function, Mock), see [`@johnhenry/aimatey-backend-browser`](../backend-browser).
 
 ## Usage

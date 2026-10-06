@@ -2,10 +2,10 @@
  * Laya Frontend Adapter
  *
  * Translates Laya-native `Router.predict()`/`Agent.system_one()`-shaped
- * calls into the Universal Decision IR. Same reasoning as
- * `TypeSafeFrontendAdapter` for why this isn't an implementation of
- * `FrontendAdapter` (that interface is chat-hardwired) -- see that file's
- * module comment, not repeated here.
+ * calls into the Universal Decision IR. Like
+ * `TypeSafeFrontendAdapter` (see that file's module comment for why), this
+ * implements `FrontendAdapter` through its decision hooks
+ * (`decisionToIR`/`decisionFromIR`) rather than the chat ones.
  *
  * Types below are verified against Laya's actual source
  * (github.com/NandhaKishorM/laya `laya/agent.py`'s `system_one()` and
@@ -57,6 +57,7 @@
 
 import type {
   AdapterMetadata,
+  FrontendAdapter,
   IRDecisionRequest,
   IRDecisionResponse,
   IRDecisionQuestion,
@@ -93,15 +94,22 @@ export interface LayaRequest {
   readonly model?: LayaModel;
   readonly task?: string;
   readonly lang?: string;
+  /** Images to consider alongside `state`, for models that take them. */
+  readonly images?: IRDecisionRequest['images'];
 }
 
-/** A single answer, exactly as `Agent.system_one()` builds it. */
+/**
+ * A single answer, exactly as `Agent.system_one()` builds it -- except that
+ * `probabilities`/`confidence` are optional here because the IR's are: an
+ * answer from a backend that never reported them (an LLM emulation, say) is
+ * passed on without them rather than with a sentinel.
+ */
 export type LayaAnswer =
   | {
       readonly type: 'choice';
       readonly choice: string;
-      readonly probabilities: Record<string, number>;
-      readonly confidence: number;
+      readonly probabilities?: Record<string, number>;
+      readonly confidence?: number;
       readonly rl_agent?: { readonly act_probability: number };
     }
   | {
@@ -110,8 +118,8 @@ export type LayaAnswer =
       /** Level index (stringified) -> human-readable label, from the question's own `criteria`. */
       readonly legend: Record<string, string>;
       /** Keyed by stringified level index -- NOT an array, unlike Jev's `score` answers. */
-      readonly probabilities: Record<string, number>;
-      readonly confidence: number;
+      readonly probabilities?: Record<string, number>;
+      readonly confidence?: number;
       readonly rl_agent?: { readonly act_probability: number };
     }
   | {
@@ -138,7 +146,7 @@ export interface LayaResponse {
 // Laya Frontend Adapter
 // ============================================================================
 
-export class LayaFrontendAdapter {
+export class LayaFrontendAdapter implements FrontendAdapter<LayaRequest, LayaResponse> {
   readonly metadata: AdapterMetadata = {
     name: 'laya-frontend',
     version: '1.0.0',
@@ -161,10 +169,11 @@ export class LayaFrontendAdapter {
    * vocabulary into the universal request shape is exactly the kind of
    * provider-specific leakage the IR's `custom` escape hatch exists for.
    */
-  toIR(request: LayaRequest): Promise<IRDecisionRequest> {
+  decisionToIR(request: LayaRequest): Promise<IRDecisionRequest> {
     return Promise.resolve({
       state: request.state,
       questions: request.questions,
+      ...(request.images && { images: request.images }),
       parameters: {
         model: request.model,
         custom: {
@@ -191,7 +200,10 @@ export class LayaFrontendAdapter {
    * rather than being fabricated or omitted outright -- a real, honest
    * degradation, not silently wrong data.
    */
-  fromIR(response: IRDecisionResponse, originalRequest?: IRDecisionRequest): Promise<LayaResponse> {
+  decisionFromIR(
+    response: IRDecisionResponse,
+    originalRequest?: IRDecisionRequest
+  ): Promise<LayaResponse> {
     const answers: Record<string, LayaAnswer> = {};
     for (const [name, answer] of Object.entries(response.answers)) {
       const question = originalRequest?.questions[name];
@@ -218,23 +230,29 @@ function toLayaAnswer(answer: IRDecisionAnswer, question?: IRDecisionQuestion): 
       return {
         type: 'choice',
         choice: answer.value,
-        probabilities: answer.probabilities,
-        confidence: answer.confidence,
+        ...(answer.probabilities !== undefined && { probabilities: answer.probabilities }),
+        ...(answer.confidence !== undefined && { confidence: answer.confidence }),
       };
     case 'score': {
       const criteria = question?.type === 'score' ? question.criteria : undefined;
+      const levels = criteria?.length ?? answer.probabilities?.length ?? 0;
       const legend: Record<string, string> = {};
-      const probabilities: Record<string, number> = {};
-      answer.probabilities.forEach((p, i) => {
+      for (let i = 0; i < levels; i++) {
         legend[String(i)] = criteria?.[i] ?? String(i);
-        probabilities[String(i)] = p;
-      });
+      }
+      let probabilities: Record<string, number> | undefined;
+      if (answer.probabilities) {
+        probabilities = {};
+        answer.probabilities.forEach((p, i) => {
+          probabilities![String(i)] = p;
+        });
+      }
       return {
         type: 'score',
         score: answer.value,
         legend,
-        probabilities,
-        confidence: answer.confidence,
+        ...(probabilities && { probabilities }),
+        ...(answer.confidence !== undefined && { confidence: answer.confidence }),
       };
     }
     case 'noul':

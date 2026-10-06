@@ -161,6 +161,16 @@ export class LayaBackendAdapter implements BackendAdapter {
       capabilities: {
         decisions: true,
         decisionModels: ['english', 'multilingual', 'typed-decisions'],
+        decisionTypes: ['choice', 'score', 'noul'],
+        decisionImages: false,
+        // Laya's own guidance: weak past ~20 options. The state budget is
+        // the English checkpoint's 512 tokens (multilingual allows 1024).
+        decisionLimits: {
+          maxChoiceOptions: 20,
+          maxScoreLevels: 10,
+          maxStateTokens: 512,
+          maxImages: 0,
+        },
         // Chat-shaped fields don't apply -- see TypeSafeBackendAdapter's
         // identical reasoning for why these are `false`/'not-supported'
         // rather than omitted.
@@ -247,6 +257,7 @@ export class LayaBackendAdapter implements BackendAdapter {
       const warnings = this.unsupportedParameterWarnings(request);
 
       return {
+        provider: 'laya',
         answers,
         model: response.model,
         usage: { inputTokens: response.usage.input_tokens },
@@ -292,6 +303,16 @@ export class LayaBackendAdapter implements BackendAdapter {
           `parameters.model '${model}' was ignored. Construct a LayaBackendAdapter with subfolder '${model}' instead.`,
         field: 'parameters.model',
         originalValue: model,
+        source,
+      });
+    }
+
+    if (request.images?.length) {
+      warnings.push({
+        category: 'capability-unsupported',
+        severity: 'warning',
+        message: `Laya takes no images; ${request.images.length} image(s) were ignored.`,
+        field: 'images',
         source,
       });
     }

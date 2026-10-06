@@ -11,6 +11,7 @@
 
 import type {
   BackendAdapter,
+  FrontendAdapter,
   IRDecisionAnswer,
   IRDecisionQuestion,
   IRDecisionRequest,
@@ -57,6 +58,39 @@ export function supportsChatStream(
   adapter: BackendAdapter
 ): adapter is BackendAdapter & Required<Pick<BackendAdapter, 'executeStream'>> {
   return typeof adapter.executeStream === 'function';
+}
+
+// ============================================================================
+// Frontend Capability Detection
+// ============================================================================
+
+/**
+ * Type guard: does this frontend implement chat conversion?
+ *
+ * `toIR`/`fromIR`/`fromIRStream` became optional on `FrontendAdapter` when
+ * decision-only frontends (TypeSafe, Laya) were made real `FrontendAdapter`s
+ * -- the frontend-side mirror of {@link supportsChat}. `Bridge.chat()` and
+ * `chatStream()` use it to fail with `UNSUPPORTED_FEATURE` rather than call
+ * an absent method.
+ */
+export function supportsChatFrontend<T extends FrontendAdapter>(
+  adapter: T
+): adapter is T & Required<Pick<FrontendAdapter, 'toIR' | 'fromIR' | 'fromIRStream'>> {
+  return (
+    typeof adapter.toIR === 'function' &&
+    typeof adapter.fromIR === 'function' &&
+    typeof adapter.fromIRStream === 'function'
+  );
+}
+
+/**
+ * Type guard: does this frontend implement decision conversion
+ * (`decisionToIR` and `decisionFromIR`)?
+ */
+export function supportsDecisionFrontend<T extends FrontendAdapter>(
+  adapter: T
+): adapter is T & Required<Pick<FrontendAdapter, 'decisionToIR' | 'decisionFromIR'>> {
+  return typeof adapter.decisionToIR === 'function' && typeof adapter.decisionFromIR === 'function';
 }
 
 // ============================================================================

@@ -636,6 +636,34 @@ export interface IRCapabilities {
   readonly decisionModels?: readonly string[];
 
   /**
+   * Whether `IRDecisionRequest.images` are accepted.
+   */
+  readonly decisionImages?: boolean;
+
+  /**
+   * Question types the backend can answer. Omitted means all three; a
+   * choice-only model (Tev1) or noul-only one (Span-01) lists its own.
+   */
+  readonly decisionTypes?: readonly ('choice' | 'score' | 'noul')[];
+
+  /**
+   * Per-request limits, for pre-flight checks. Each is omitted when the
+   * provider documents none.
+   */
+  readonly decisionLimits?: {
+    /** Most questions in one request. */
+    readonly maxQuestions?: number;
+    /** Most options in one `choice` question. */
+    readonly maxChoiceOptions?: number;
+    /** Most levels in one `score` question. */
+    readonly maxScoreLevels?: number;
+    /** Largest `state`, in tokens. */
+    readonly maxStateTokens?: number;
+    /** Most images per request (0: none). */
+    readonly maxImages?: number;
+  };
+
+  /**
    * Maximum context window size (tokens).
    */
   readonly maxContextTokens?: number;
