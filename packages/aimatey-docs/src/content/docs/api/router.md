@@ -203,6 +203,36 @@ console.log(result.response, result.successfulBackends, result.totalTimeMs);
 
 ---
 
+### `decide(request, signal?)`
+
+Answer typed decision questions via the best available backend. Mirrors
+`embed()`: candidates are registered backends that implement `decide()`, whose
+circuit is not open, and that can serve the request (a backend whose
+`decisionTypes`, `decisionLimits` or `decisionImages` rule it out is skipped,
+not failed). They are tried in fallback-chain order, then the default backend,
+then registration order.
+
+**Parameters:**
+
+- `request: IRDecisionRequest`
+- `signal?: AbortSignal`
+
+**Returns:** `Promise<IRDecisionResponse>`
+
+```typescript
+const response = await router.decide({
+  state: ticket,
+  questions,
+  metadata: { requestId: 'r1', timestamp: Date.now() },
+});
+```
+
+`parameters.model` is a hint: a candidate that declares `decisionModels` without
+it is tried after the rest, not excluded. Throws `UNSUPPORTED_FEATURE` when no
+backend supports decisions.
+
+---
+
 ### `checkHealth(name?)`
 
 Actively probe backends by calling each adapter's `healthCheck()`. An adapter

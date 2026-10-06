@@ -58,6 +58,7 @@ export GEMINI_API_KEY="AIza..."
 - `laya/triage-demo.ts` - Support-ticket triage using Laya's on-device typed-decision model (`Bridge.decide()`, not chat)
 - `laya/gui-demo/` - Same triage capability behind a persistent server + browser dashboard (`server.ts`, plain HTML/CSS/JS in `public/`, no build step) -- see `laya/gui-demo/readme.md`
 - `decisions/gateway/` - A demo decision gateway: `/v1/systemone` (TypeSafe/Ollama), `/v1/decisions` (OpenRouter) and `/v1/evaluate` (Vercel) in front of one `Bridge` + `Router`, with caching, cost tracking, logging, validation and confidence-based escalation to an LLM fallback (`npx tsx examples/decisions/gateway/server.ts`) -- see `decisions/gateway/readme.md`
+- `decisions/bench/` - Benchmark harness: a 40-item built-in triage set (or the public Typed Decisions / Decision Index data) run across Ollama, TypeSafe, OpenRouter, Cloudflare, any System One server, an LLM-emulated backend or Laya, reporting accuracy per question type, Brier, ECE, p50/p95 latency, cost and optional name-invariance flip rate (`npx tsx examples/decisions/bench/bench.ts --backend ollama --limit 10`) -- see `decisions/bench/readme.md`
 
 ## Documentation
 

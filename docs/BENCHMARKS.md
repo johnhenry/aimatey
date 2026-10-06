@@ -575,7 +575,27 @@ All test applications available in [`aimatey-examples`](https://github.com/johnh
 
 ---
 
+## Typed-Decision Models
+
+The decision benchmark harness (`examples/decisions/bench`) measures accuracy per question type, Brier score, ECE, p50 / p95 latency and cost per backend, and optionally the option-name flip rate. Results are committed under [`examples/decisions/bench/results/`](../examples/decisions/bench/results); the harness is documented in [its readme](../examples/decisions/bench/readme.md).
+
+First run (2026-10-06, 4-core CPU, no GPU, shared machine, Ollama 0.35.1, built-in set, first 10 items):
+
+| backend | choice | score | noul | overall | Brier | ECE | p50 ms | p95 ms | cost |
+|---|---|---|---|---|---|---|---|---|---|
+| `ollama:tev1:0.8b` | 90.0% | 20.0% | 70.0% | 60.0% | 0.419 | 0.183 | 9509 | 13541 | $0 |
+| `emulated:qwen2.5:3b` | 100.0% | 55.6% | 77.8% | 77.8% | 0.222 | 0.222 | 23331 | 27484 | $0 |
+
+Read it with care: it is ten items, so one answer moves a cell by 10 points; the emulated row reports no probabilities for `choice` and `score`, so its Brier and ECE rest on `noul` answers only; one emulated item failed outright (the model answered a boolean with the string `"true"`). These numbers are a smoke test of the harness, not a ranking.
+
+**Vendor latency and quality numbers are not comparable across hardware.** A published 33 ms (Laya) or 524 ms (Jev) median was measured on the vendor's hardware, with their batching and network path; the table above is a 4-core CPU. Compare backends within one run on one machine, and re-run the harness on your own hardware with `--hardware` noting what it was.
+
+Public datasets (Typed Decisions, a Decision Index subset) load through `--dataset <path>` after conversion; see [`fetch-datasets.md`](../examples/decisions/bench/fetch-datasets.md). No public-dataset results are committed yet.
+
+---
+
 **Related Documentation:**
 - [Integration Patterns](./PATTERNS.md) - Patterns using these benchmarks
 - [Testing Guide](./TESTING.md) - Test methodology and coverage
 - [Roadmap](./ROADMAP.md) - Future performance improvements
+- [Decisions guide](../packages/aimatey-docs/src/content/docs/guides/decisions.md) - Typed-decision models and the benchmark harness

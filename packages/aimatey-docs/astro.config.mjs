@@ -147,6 +147,7 @@ export default defineConfig({
           label: 'Guides',
           items: [
             { label: 'IR Format', slug: 'guides/architecture/ir-format' },
+            { label: 'Decisions', slug: 'guides/decisions' },
             { label: 'Testing', slug: 'guides/testing' },
           ],
         },

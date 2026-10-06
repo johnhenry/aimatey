@@ -98,9 +98,27 @@ for await (const chunk of stream) {
 
 ### Decisions
 
-Typed-decision models answer typed questions with calibrated probabilities in one forward pass:
-`bridge.decide(state, questions)`, plus tool-call gating, a React hook and dataset capture. See
-[docs/plans/decision-models.md](./docs/plans/decision-models.md).
+Decision models answer typed questions about a state (`choice`, `score`, `noul`) in one forward pass, with calibrated probabilities instead of generated text. Run one locally with Ollama 0.35 or newer (`ollama pull tev1:0.8b`):
+
+```typescript
+import { Bridge } from '@johnhenry/aimatey-core';
+import { createGenericFrontend } from '@johnhenry/aimatey-frontend';
+import { OllamaBackendAdapter } from '@johnhenry/aimatey-backend';
+
+const bridge = new Bridge(createGenericFrontend(), new OllamaBackendAdapter({ defaultModel: 'tev1:0.8b' }));
+
+const { answers } = await bridge.decide('I was charged twice. Please refund me.', {
+  team: { type: 'choice', instructions: 'Who handles this?', criteria: { billing: 'charges, refunds', technical: 'bugs, outages' } },
+  refund: { type: 'noul', instructions: 'Is a refund requested?' },
+}); // answers.team.value === 'billing', answers.refund.value is P(yes)
+```
+
+- **Routing and fallback:** `router.decide()` ([Router with Fallback](#router-with-fallback)) skips backends that cannot serve the question types or limits.
+- **Confidence controls:** escalation, neutral option keys, ensembles, state screening and temperature scaling in [Production Patterns](#production-patterns).
+- **Agent safety:** gate tool calls with `createDecisionGate` ([Agentic Tool Loop](#agentic-tool-loop)); `useDecision` for React ([React Hooks](#react-hooks)).
+- **Gateway demo:** [`examples/decisions/gateway`](./examples/decisions/gateway) serves `/v1/systemone`, `/v1/decisions` and `/v1/evaluate`; `ai-matey decide` is the CLI ([CLI Tools](#cli-tools)).
+- **Benchmark:** [`examples/decisions/bench`](./examples/decisions/bench) measures accuracy, Brier, ECE, latency and cost per backend.
+- **Everything else:** the [Decisions guide](./packages/aimatey-docs/src/content/docs/guides/decisions.md) and [`docs/plans/decision-models.md`](./docs/plans/decision-models.md).
 
 ### Router with Fallback
 
@@ -443,10 +461,10 @@ registerModels([
 | [`@johnhenry/aimatey-core`](./packages/aimatey-core) | Bridge, Router, MiddlewareStack | [README](./packages/aimatey-core/readme.md) |
 | [`@johnhenry/aimatey-types`](./packages/aimatey-types) | TypeScript type definitions | [README](./packages/aimatey-types/readme.md) |
 | [`@johnhenry/aimatey-errors`](./packages/aimatey-errors) | Error classes and utilities | [README](./packages/aimatey-errors/readme.md) |
-| [`@johnhenry/aimatey-utils`](./packages/aimatey-utils) | Shared utility functions | [README](./packages/aimatey-utils/readme.md) |
-| [`@johnhenry/aimatey-testing`](./packages/aimatey-testing) | Testing utilities and mocks | [README](./packages/aimatey-testing/readme.md) |
-| [`@johnhenry/aimatey-cli`](./packages/cli) | CLI and conversion utilities | [README](./packages/cli/readme.md) |
-| [`@johnhenry/aimatey-patterns`](./packages/patterns) | Production integration patterns | [README](./packages/patterns/readme.md) |
+| [`@johnhenry/aimatey-utils`](./packages/aimatey-utils) | Shared utility functions (incl. `validateDecisionRequest` / `validateDecisionResponse`) | [README](./packages/aimatey-utils/readme.md) |
+| [`@johnhenry/aimatey-testing`](./packages/aimatey-testing) | Testing utilities and mocks (incl. `createMockDecisionBackend`, `calibrationReport`, `fitTemperature`, `nameInvariance`, `createDecisionCapture`) | [README](./packages/aimatey-testing/readme.md) |
+| [`@johnhenry/aimatey-cli`](./packages/cli) | CLI and conversion utilities (incl. `ai-matey decide` and decision routes on `proxy`) | [README](./packages/cli/readme.md) |
+| [`@johnhenry/aimatey-patterns`](./packages/patterns) | Production integration patterns (incl. decision escalation, neutral keys, ensemble, screening, calibration, emulation) | [README](./packages/patterns/readme.md) |
 
 ### Backend Adapters
 
@@ -499,6 +517,7 @@ import { OpenAIBackendAdapter } from '@johnhenry/aimatey-backend/openai';
 - OpenRouter -- `decide()` via `/api/alpha/decisions` (Jev, Kev, Mercury Decide), with `provider` routing, `trace` and `usage.cost`
 - Perplexity -- `decide()` with `pplx-decider-v1-27b` via `/v1/decisions`
 - Inception -- `decide()` for Mercury Decide (native endpoint unverified; works through OpenRouter today)
+- Together AI (Tev1) -- `decide()` over chat-completions with a one-letter answer protocol (choice native, 2 to 24 options; `noul`/`score` emulated with a warning); probabilities from logprobs
 - SystemOne (generic) -- `SystemOneBackendAdapter` for any System One-compatible server (Kev, Strands Decider, `laya[serve]`, Nimble, Vercel AI Gateway, OpenRouter), with a selectable wire dialect
 - Laya (ConvAI) -- the same question types, run on-device via ONNX Runtime; lives in [`@johnhenry/aimatey-native-laya`](./packages/native-laya)
 
@@ -580,7 +599,7 @@ import {
 | Package | Purpose | Documentation |
 |---------|---------|---------------|
 | [`@johnhenry/aimatey-react-core`](./packages/react-core) | Core hooks (useChat, useCompletion) | [README](./packages/react-core/readme.md) |
-| [`@johnhenry/aimatey-react-hooks`](./packages/react-hooks) | Additional hooks | [README](./packages/react-hooks/readme.md) |
+| [`@johnhenry/aimatey-react-hooks`](./packages/react-hooks) | Additional hooks (incl. `useDecision`, `useDecisionBatch`) | [README](./packages/react-hooks/readme.md) |
 | [`@johnhenry/aimatey-react-stream`](./packages/react-stream) | Streaming components | [README](./packages/react-stream/readme.md) |
 | [`@johnhenry/aimatey-react-nextjs`](./packages/react-nextjs) | Next.js App Router | [README](./packages/react-nextjs/readme.md) |
 
@@ -665,24 +684,30 @@ ai-matey create-backend --provider groq --output ./groq-backend.mjs
 ┌─────────────────────────────────────────────────────────────┐
 │                    Frontend Adapter                         │
 │  Translates client format → Internal IR                     │
+│  (decide() builds the IR directly; decideFrom() uses        │
+│   decisionToIR / decisionFromIR)                            │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                      Bridge / Router                        │
-│  Middleware stack, routing, fallback                        │
+│  chat() / embed()  →  middleware stack, routing, fallback   │
+│  decide()          →  decision middleware, Router.decide    │
+│                       (type/limit/image-aware candidates)   │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    Backend Adapter                          │
 │  Translates Internal IR → Provider API                      │
+│  execute() chat · embed() vectors · decide() typed answers  │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                      AI Provider                            │
-│  (OpenAI, Anthropic, Gemini, Ollama, etc.)                  │
+│  (OpenAI, Anthropic, Gemini, Ollama, etc.; decision models: │
+│   Jev, Clef, Ollama tev1/nimble, Laya, ...)                 │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -696,6 +721,10 @@ node demo/demo.mjs
 
 # Run the router demo
 npx tsx demo/router-demo.ts
+
+# Typed decisions: a gateway in front of decision backends, and a benchmark
+npx tsx examples/decisions/gateway/server.ts
+npx tsx examples/decisions/bench/bench.ts --backend ollama --limit 10
 ```
 
 ## Development

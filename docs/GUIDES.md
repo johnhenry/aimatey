@@ -7,6 +7,7 @@ Comprehensive guides for advanced aimatey features.
 - [Parallel Dispatch](#parallel-dispatch)
 - [Response Conversion](#response-conversion)
 - [CLI Tools](#cli-tools)
+- [Typed Decisions](#typed-decisions)
 
 ---
 
@@ -721,3 +722,33 @@ curl http://localhost:3000/v1/chat/completions \
 - [API Reference](./api.md) - Complete API documentation
 - [Examples](../examples/) - Working code examples
 - [README](../readme.md) - Getting started and overview
+
+---
+
+## Typed Decisions
+
+Decision ("System One") models answer typed questions about a state in one forward pass, with calibrated probabilities instead of generated text. aimatey exposes them as a third modality beside `chat()` and `embed()`:
+
+```typescript
+import { Bridge } from '@johnhenry/aimatey-core';
+import { createGenericFrontend } from '@johnhenry/aimatey-frontend';
+import { OllamaBackendAdapter } from '@johnhenry/aimatey-backend';
+
+const bridge = new Bridge(
+  createGenericFrontend(),
+  new OllamaBackendAdapter({ defaultModel: 'tev1:0.8b' })
+);
+
+const { answers } = await bridge.decide('I was charged twice. Please refund me.', {
+  team: {
+    type: 'choice',
+    instructions: 'Which team should handle this?',
+    criteria: { billing: 'charges and refunds', technical: 'bugs and outages' },
+  },
+  refund: { type: 'noul', instructions: 'Is a refund requested?' },
+});
+```
+
+The full guide, with every backend and dialect, `Router.decide`, the confidence-control patterns (neutral keys, escalation, ensembles, screening, calibration), `useDecision`, tool-call gating, dataset capture, the demo gateway and the benchmark harness, is the [Decisions guide](../packages/aimatey-docs/src/content/docs/guides/decisions.md). The wire-level types are in the [IR format](./IR-FORMAT.md#decision-ir).
+
+---
