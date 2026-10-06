@@ -9,6 +9,9 @@
 
 import type { BackendAdapter, AdapterMetadata } from '@johnhenry/aimatey-types';
 import type {
+  IRDecisionAnswer,
+  IRDecisionRequest,
+  IRDecisionResponse,
   IRChatRequest,
   IRChatResponse,
   IRChatStream,
@@ -167,6 +170,18 @@ export interface MockBackendConfig {
    * Can be model IDs (strings) or full AIModel objects
    */
   models?: readonly (string | AIModel)[];
+
+  /**
+   * Canned decision answers, keyed by question name, for `decide()`.
+   * A question with no entry (and no `decisionHandler`) rejects, naming it.
+   */
+  decisionAnswers?: Record<string, IRDecisionAnswer>;
+
+  /**
+   * Build the whole decision response yourself. Takes precedence over
+   * `decisionAnswers`.
+   */
+  decisionHandler?: (request: IRDecisionRequest) => IRDecisionResponse | Promise<IRDecisionResponse>;
 }
 
 /**
@@ -224,6 +239,7 @@ export class MockBackendAdapter implements BackendAdapter {
       tools: true,
       systemMessageStrategy: 'in-messages',
       supportsMultipleSystemMessages: true,
+      decisions: true,
     },
   };
 
@@ -245,6 +261,11 @@ export class MockBackendAdapter implements BackendAdapter {
    * All requests received by this adapter (for testing).
    */
   public allRequests: IRChatRequest[] = [];
+
+  /**
+   * All decision requests received by this adapter (for testing).
+   */
+  public allDecisionRequests: IRDecisionRequest[] = [];
 
   constructor(config: MockBackendConfig = {}) {
     this.config = {
@@ -645,6 +666,41 @@ export class MockBackendAdapter implements BackendAdapter {
   public clearHistory(): void {
     this.lastRequest = undefined;
     this.allRequests = [];
+  }
+
+  /**
+   * Answer a typed-decision request from `decisionHandler` or
+   * `decisionAnswers`, without calling any model.
+   *
+   * @throws {Error} If a question has no configured answer, or the signal is aborted
+   */
+  async decide(request: IRDecisionRequest, signal?: AbortSignal): Promise<IRDecisionResponse> {
+    this.allDecisionRequests.push(request);
+    signal?.throwIfAborted();
+
+    if (this.config.decisionHandler) {
+      return this.config.decisionHandler(request);
+    }
+
+    const answers: Record<string, IRDecisionAnswer> = {};
+    for (const question of Object.keys(request.questions)) {
+      const answer = this.config.decisionAnswers?.[question];
+      if (!answer) {
+        throw new Error(
+          `MockBackendAdapter: no decisionAnswers entry configured for question '${question}'`
+        );
+      }
+      answers[question] = answer;
+    }
+
+    return {
+      answers,
+      model: this.config.defaultModel,
+      metadata: {
+        ...request.metadata,
+        provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+      },
+    };
   }
 
   /**
