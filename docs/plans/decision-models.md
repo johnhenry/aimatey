@@ -311,7 +311,7 @@ Everything in the plan below had shipped on `main` by 2026-10-06 except the item
 | 4a | Vercel and OpenRouter decision frontends; `createTypeSafeClient`, `createDecide` / `createDecisionModel` wrappers | #156 |
 | 4b | Demo gateway (`examples/decisions/gateway`), `ai-matey decide`, decision routes on the CLI proxy | #158 |
 | 4c | `useDecision` / `useDecisionBatch`, `runTools` `gate`, `createDecisionGate`, `createDecisionTool`, decision dataset capture | #157 |
-| 4d | Benchmark harness (`examples/decisions/bench`), Decisions guide, IR / patterns / benchmarks docs, readme | this PR |
+| 4d | Benchmark harness (`examples/decisions/bench`), Decisions guide, IR / patterns / benchmarks docs, readme | #159 |
 
 Decisions 1 to 3 in section 7 held: probabilities are optional, emulation is opt-in in `aimatey-patterns`, and the gateway is a demo.
 
