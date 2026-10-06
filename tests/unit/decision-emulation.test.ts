@@ -152,7 +152,7 @@ describe('createEmulatedDecisionBackend', () => {
     const response = await createEmulatedDecisionBackend(fakeChat(goodReply)).decide!(req());
     const warning = response.metadata.warnings?.find((w) => /emulat/i.test(w.message));
     expect(warning).toBeDefined();
-    expect(warning!.category).toBe('capability-unsupported');
+    expect(warning!.category).toBe('capability-emulated');
     expect(warning!.message).toMatch(/no calibrated probabilities/i);
   });
 
