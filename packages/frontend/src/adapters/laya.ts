@@ -30,16 +30,14 @@
  *   this reason; both `toLayaAnswer` below and `native-laya`'s
  *   `toIRAnswer` derive `max(p, 1-p)` when the wire response omits one,
  *   rather than one of the two providers reliably reporting it.
- * - Every Laya answer carries an RL-agent action-selection sub-object
- *   with no IR equivalent (looks tied to the package's `RLAgent` class
- *   alias). This adapter's original source reading named it
- *   `action: { act_probability }`; a live `@receptron/laya` response
- *   names it `rl_agent: { act_probability }` instead -- likely a
- *   difference between the original Python reference this frontend
- *   adapter's types model and the TS/ONNX port `native-laya` actually
- *   talks to, not a correction of one over the other. Either way, it's
- *   dropped on the way into the IR; there is nothing to reconstruct it
- *   from on the way back out.
+ * - Every Laya answer carries an RL-agent action-selection sub-object with
+ *   no IR equivalent, named `rl_agent: { act_probability }` (the name a
+ *   live `@receptron/laya` response uses; this adapter's original source
+ *   reading of the Python reference called it `action`, so `LayaAnswer`
+ *   used that until it was renamed to match). It is optional here and
+ *   dropped on the way into the IR -- `LayaBackendAdapter` keeps it in
+ *   `response.raw.rl_agent` -- and there is nothing to reconstruct it
+ *   from on the way back out, so `fromIR` never sets it.
  *
  * ---
  *
@@ -104,7 +102,7 @@ export type LayaAnswer =
       readonly choice: string;
       readonly probabilities: Record<string, number>;
       readonly confidence: number;
-      readonly action?: { readonly act_probability: number };
+      readonly rl_agent?: { readonly act_probability: number };
     }
   | {
       readonly type: 'score';
@@ -114,13 +112,13 @@ export type LayaAnswer =
       /** Keyed by stringified level index -- NOT an array, unlike Jev's `score` answers. */
       readonly probabilities: Record<string, number>;
       readonly confidence: number;
-      readonly action?: { readonly act_probability: number };
+      readonly rl_agent?: { readonly act_probability: number };
     }
   | {
       readonly type: 'noul';
       readonly noul: number;
       readonly confidence: number;
-      readonly action?: { readonly act_probability: number };
+      readonly rl_agent?: { readonly act_probability: number };
     };
 
 /**
