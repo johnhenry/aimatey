@@ -19,7 +19,7 @@ import type {
 import type { StreamConversionOptions } from '@johnhenry/aimatey-types';
 import { resolveServedModel } from '@johnhenry/aimatey-types';
 import { AdapterConversionError, ErrorCode } from '@johnhenry/aimatey-errors';
-import { convertStreamMode } from '@johnhenry/aimatey-utils';
+import { convertStreamMode, requireResolvedContent } from '@johnhenry/aimatey-utils';
 
 // ============================================================================
 // Anthropic API Types
@@ -765,7 +765,8 @@ export class AnthropicFrontendAdapter implements FrontendAdapter<
       return [{ type: 'text', text: content }];
     }
 
-    return content.map((block): AnthropicContentBlock => {
+    return content.map((rawBlock): AnthropicContentBlock => {
+      const block = requireResolvedContent(rawBlock, 'anthropic-frontend');
       switch (block.type) {
         case 'text':
           return { type: 'text', text: block.text };

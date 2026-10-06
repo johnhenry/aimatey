@@ -24,7 +24,11 @@ import type {
   IRWarning,
 } from '@johnhenry/aimatey-types';
 import { ProviderError, ErrorCode, createErrorFromHttpResponse } from '@johnhenry/aimatey-errors';
-import { getModelPricingInfo, validateDecisionResponse } from '@johnhenry/aimatey-utils';
+import {
+  getModelPricingInfo,
+  validateDecisionResponse,
+  rejectBlobRef,
+} from '@johnhenry/aimatey-utils';
 
 // ============================================================================
 // Dialects
@@ -181,6 +185,9 @@ export function buildSystemOneRequest(
 
   if (opts.sendImages && ir.images?.length) {
     body.images = ir.images.map((image) => {
+      // A transport-owned blob handle is not data this client can send, and not a
+      // 'url' either: refuse it as unsupported rather than mislabel it (#122).
+      rejectBlobRef(image.source, opts.backendName ?? 'systemone');
       if (image.source.type !== 'base64') {
         throw new ProviderError({
           code: ErrorCode.PROVIDER_ERROR,

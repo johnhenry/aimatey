@@ -19,7 +19,7 @@ import type {
 import type { StreamConversionOptions } from '@johnhenry/aimatey-types';
 import { resolveServedModel } from '@johnhenry/aimatey-types';
 import { AdapterConversionError, ErrorCode } from '@johnhenry/aimatey-errors';
-import { convertStreamMode } from '@johnhenry/aimatey-utils';
+import { convertStreamMode, requireResolvedContent } from '@johnhenry/aimatey-utils';
 
 // ============================================================================
 // OpenAI API Types
@@ -751,7 +751,8 @@ export class OpenAIFrontendAdapter implements FrontendAdapter<
     const toolUses = message.content.filter((block) => block.type === 'tool_use');
     const otherBlocks = message.content.filter((block) => block.type !== 'tool_use');
 
-    const content: OpenAIMessageContent = otherBlocks.map((block) => {
+    const content: OpenAIMessageContent = otherBlocks.map((rawBlock) => {
+      const block = requireResolvedContent(rawBlock, 'openai-frontend');
       switch (block.type) {
         case 'text':
           return { type: 'text' as const, text: block.text };

@@ -27,7 +27,7 @@ import {
   ErrorCode,
   createErrorFromHttpResponse,
 } from '@johnhenry/aimatey-errors';
-import { normalizeSystemMessages } from '@johnhenry/aimatey-utils';
+import { normalizeSystemMessages, mediaSourceToUrl } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
 import {
   buildStructuredOutputFallbackMessages,
@@ -174,10 +174,7 @@ export class XAIBackendAdapter implements BackendAdapter<XAIRequest, XAIResponse
                 return {
                   type: 'image_url',
                   image_url: {
-                    url:
-                      block.source.type === 'url'
-                        ? block.source.url
-                        : `data:${block.source.mediaType};base64,${block.source.data}`,
+                    url: mediaSourceToUrl(block.source, 'xai-backend'),
                   },
                 };
               }

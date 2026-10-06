@@ -30,7 +30,11 @@ import {
   ErrorCode,
   createErrorFromHttpResponse,
 } from '@johnhenry/aimatey-errors';
-import { normalizeSystemMessages, createWarning } from '@johnhenry/aimatey-utils';
+import {
+  normalizeSystemMessages,
+  createWarning,
+  requireResolvedContent,
+} from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
 import { getModelPricingInfo } from '@johnhenry/aimatey-utils';
 import {
@@ -794,7 +798,8 @@ export class AnthropicBackendAdapter implements BackendAdapter<
       content = message.content;
     } else {
       // Convert content blocks
-      content = message.content.map((block) => {
+      content = message.content.map((rawBlock) => {
+        const block = requireResolvedContent(rawBlock, 'anthropic-backend');
         switch (block.type) {
           case 'text':
             return { type: 'text', text: block.text };

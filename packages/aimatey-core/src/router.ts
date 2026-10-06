@@ -37,6 +37,8 @@ import {
   supportsChat,
   supportsChatStream,
   validateDecisionRequest,
+  assertNoUnresolvedBlobRefs,
+  withTerminationGuard,
 } from '@johnhenry/aimatey-utils';
 import type {
   IRDecisionRequest,
@@ -1715,6 +1717,11 @@ export class Router implements IRouter {
       this.checkCircuitBreaker(name, state);
     }
 
+    // A blob reference this backend cannot resolve is the request's fault, not
+    // the backend's: refuse it before it is counted, so it can neither trip the
+    // breaker nor skew the backend's failure rate (#122).
+    assertNoUnresolvedBlobRefs(request, name, state.adapter.metadata.capabilities);
+
     state.totalRequests++;
     const startTime = Date.now();
 
@@ -1833,6 +1840,9 @@ export class Router implements IRouter {
       this.checkCircuitBreaker(name, state);
     }
 
+    // See executeOnBackend(): an unresolved blob reference is not a backend fault (#122).
+    assertNoUnresolvedBlobRefs(request, name, state.adapter.metadata.capabilities);
+
     return this.trackStream(name, state, request, signal);
   }
 
@@ -1842,9 +1852,14 @@ export class Router implements IRouter {
    *
    * Three outcomes, all of which count one `totalRequests`:
    *
-   * - **Success** -- a `done` chunk is seen, or the backend's iterator
-   *   finishes without one. {@link Router.recordSuccess}.
-   * - **Failure** -- the iterator throws, or yields an in-band `error` chunk.
+   * - **Success** -- a `done` chunk is seen. {@link Router.recordSuccess}.
+   * - **Failure** -- the iterator throws, yields an in-band `error` chunk, or
+   *   *finishes without a terminal chunk at all* (#126). The last is a
+   *   truncation -- a socket that closed cleanly mid-answer looks exactly like
+   *   an adapter that forgot `done`, and the router cannot tell them apart --
+   *   so the stream contract (`IRChatStream`: exactly one `done` or `error`)
+   *   is enforced here by `withTerminationGuard()`, which closes it with a
+   *   `stream-truncated` error chunk that is counted like any other.
    *   {@link Router.recordFailure}, which may trip the breaker.
    * - **Abandoned** -- the consumer stops reading (`break`, `return()`,
    *   `throw()`, or an aborted request). Counted as a completed request
@@ -1881,7 +1896,11 @@ export class Router implements IRouter {
     let settled = false;
 
     try {
-      for await (const chunk of state.adapter.executeStream(request, signal)) {
+      const guarded = withTerminationGuard(state.adapter.executeStream(request, signal), {
+        signal,
+        backend: name,
+      });
+      for await (const chunk of guarded) {
         if (!settled && chunk.type === 'error') {
           settled = true;
           this.recordFailure(name, state);
@@ -1895,10 +1914,8 @@ export class Router implements IRouter {
         yield chunk;
       }
 
-      if (!settled) {
-        settled = true;
-        await this.recordSuccess(state, request, startTime);
-      }
+      // Reaching here unsettled means the guard ended the stream silently, which
+      // it does only for a cancelled request: abandoned, handled in `finally`.
     } catch (error) {
       if (!settled) {
         settled = true;
