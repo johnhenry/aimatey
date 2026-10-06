@@ -217,7 +217,7 @@ export function createEmulatedDecisionBackend(
           (w) => !(request.metadata.warnings ?? []).includes(w)
         ),
         {
-          category: 'capability-unsupported',
+          category: 'capability-emulated',
           severity: 'info',
           message: `Decisions were emulated by chat backend '${chatName}' through structured output, not answered by a decision model; the answers carry no calibrated probabilities or confidence.`,
           field: 'decisions',

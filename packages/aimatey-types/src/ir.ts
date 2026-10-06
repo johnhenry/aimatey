@@ -758,6 +758,16 @@ export type WarningCategory =
   | 'parameter-clamped'
   | 'parameter-unsupported'
   | 'capability-unsupported'
+  /**
+   * The backend does not natively provide what was asked and an adapter or
+   * wrapper stood in for it -- e.g. a typed decision answered by a chat model
+   * through structured output. The request was served; what changed is the
+   * *quality* of the answer (no calibrated probabilities), which is a
+   * different claim from `'capability-unsupported'` (the backend could not do
+   * it and it was dropped). Caching middleware treats it as uncacheable by
+   * default, since an emulated answer is not a stable property of the input.
+   */
+  | 'capability-emulated'
   | 'token-limit-exceeded'
   | 'stop-sequences-truncated'
   | 'system-message-transformed'

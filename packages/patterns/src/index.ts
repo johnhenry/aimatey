@@ -39,3 +39,5 @@ export {
   createEmulatedDecisionBackend,
   type EmulatedDecisionOptions,
 } from './decision-emulation.js';
+
+export * from './decisions/index.js';

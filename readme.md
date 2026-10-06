@@ -364,6 +364,13 @@ and rate-limited batch processing.
 has no calibrated distribution to report. Answers carry a warning and the backend declares
 `decisionsEmulated: true`.
 
+Decision patterns (all default-off, in `@johnhenry/aimatey-patterns`):
+- `createDecisionEscalation({ fallback, when })`: rerun on a stronger backend (Vercel's `when` contract), plus `decisionBands()` -- pick its thresholds from your own `calibrationReport()`, not defaults.
+- `createNeutralOptionKeys()`: hide option names behind `opt_1..n` (arXiv 2609.26758: name-following flips answers up to 76.9 % of the time).
+- `createDecisionEnsemble(backends)`: aggregate several decision backends, with disagreement lowering confidence.
+- `createStateScreening({ screener })`: fence untrusted state and screen it before the model (confidence does not drop under injection).
+- `createTemperatureScaling()` with `calibrationReport`, `fitTemperature` and `nameInvariance` from `@johnhenry/aimatey-testing`.
+
 ### Production HTTP Endpoints
 
 The HTTP handler ships health, metrics, and embeddings endpoints for every framework adapter:
