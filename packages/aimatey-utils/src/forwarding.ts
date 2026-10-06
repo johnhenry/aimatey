@@ -35,17 +35,6 @@ export interface ForwardingOptions {
   readonly proxyName: string;
 }
 
-/** Options for {@link prepareForwardedRequest}. */
-export interface ForwardRequestOptions extends ForwardingOptions {
-  /**
-   * `'forward'` (default) sends `metadata.principal` to the far side, which
-   * is what lets its caching middleware keep tenants apart; `'strip'`
-   * withholds it, for a far side that must not learn who the caller is (its
-   * caching middleware will then refuse to cache, by design).
-   */
-  readonly principal?: 'forward' | 'strip';
-}
-
 /** Options for {@link prepareForwardedResponse}. */
 export interface ForwardResponseOptions extends ForwardingOptions {
   /**
@@ -78,7 +67,7 @@ function forwardableCustom(
  * | `metadata.requestId` | forward -- it is the correlation and cancel key (see `BackendAdapter.cancel`) |
  * | `metadata.timestamp`, `metadata.warnings` | forward |
  * | `metadata.provenance` | forward, with `proxyName` **appended** to `middleware`, never replacing |
- * | `metadata.principal` | forward by default; `principal: 'strip'` withholds |
+ * | `metadata.principal` | **strip**: it names the caller as seen by this process; the far side sees the proxy as its caller and has its own principal |
  * | `metadata.custom` | **strip** every key not prefixed {@link FORWARDED_CUSTOM_PREFIX} |
  * | `metadata.providerResponseId` | strip (a response-side field) |
  *
@@ -91,9 +80,14 @@ function forwardableCustom(
  */
 export function prepareForwardedRequest(
   request: IRChatRequest,
-  options: ForwardRequestOptions
+  options: ForwardingOptions
 ): IRChatRequest {
-  const { custom, principal, providerResponseId: _dropped, ...metadata } = request.metadata;
+  const {
+    custom,
+    principal: _principal,
+    providerResponseId: _dropped,
+    ...metadata
+  } = request.metadata;
   const forwardedCustom = forwardableCustom(custom);
   const provenance = request.metadata.provenance;
 
@@ -107,7 +101,6 @@ export function prepareForwardedRequest(
           },
         }
       : {}),
-    ...(principal !== undefined && options.principal !== 'strip' ? { principal } : {}),
     ...(forwardedCustom ? { custom: forwardedCustom } : {}),
   };
 

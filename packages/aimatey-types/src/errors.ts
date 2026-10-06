@@ -271,6 +271,16 @@ export interface BaseErrorOptions {
     readonly response?: Partial<IRChatResponse>;
   };
   readonly details?: Record<string, unknown>;
+  /**
+   * Text that is safe to show an **end user**, as opposed to `message`, which
+   * is for developers and logs.
+   *
+   * Optional. When absent, `toUserMessage(error)` (in `@johnhenry/aimatey-errors`)
+   * supplies a generic sentence for the error's code. Whatever is supplied
+   * here is shown verbatim, so it must never be built from provider payloads,
+   * backend names, request content or anything else an end user should not see.
+   */
+  readonly userMessage?: string;
 }
 
 /**
@@ -282,6 +292,8 @@ export interface AuthenticationErrorOptions {
     | typeof ErrorCode.MISSING_API_KEY
     | typeof ErrorCode.EXPIRED_API_KEY;
   readonly message: string;
+  /** See {@link BaseErrorOptions.userMessage}. */
+  readonly userMessage?: string;
   readonly provenance?: ErrorProvenance;
   readonly cause?: Error;
 }
@@ -292,6 +304,8 @@ export interface AuthenticationErrorOptions {
 export interface AuthorizationErrorOptions {
   readonly code: typeof ErrorCode.INSUFFICIENT_PERMISSIONS | typeof ErrorCode.QUOTA_EXCEEDED;
   readonly message: string;
+  /** See {@link BaseErrorOptions.userMessage}. */
+  readonly userMessage?: string;
   readonly provenance?: ErrorProvenance;
   readonly cause?: Error;
 }
@@ -301,6 +315,8 @@ export interface AuthorizationErrorOptions {
  */
 export interface RateLimitErrorOptions {
   readonly message: string;
+  /** See {@link BaseErrorOptions.userMessage}. */
+  readonly userMessage?: string;
   readonly provenance?: ErrorProvenance;
   readonly cause?: Error;
   readonly rateLimitDetails?: RateLimitErrorDetails;
@@ -318,6 +334,8 @@ export interface ValidationErrorOptions {
     | typeof ErrorCode.UNSUPPORTED_FEATURE
     | typeof ErrorCode.CONTEXT_LENGTH_EXCEEDED;
   readonly message: string;
+  /** See {@link BaseErrorOptions.userMessage}. */
+  readonly userMessage?: string;
   readonly validationDetails: ValidationErrorDetails[];
   readonly provenance?: ErrorProvenance;
   readonly irState?: {
@@ -335,6 +353,8 @@ export interface ProviderErrorOptions {
     | typeof ErrorCode.PROVIDER_TIMEOUT
     | typeof ErrorCode.PROVIDER_OVERLOADED;
   readonly message: string;
+  /** See {@link BaseErrorOptions.userMessage}. */
+  readonly userMessage?: string;
   readonly isRetryable?: boolean;
   readonly provenance?: ErrorProvenance;
   readonly cause?: Error;
@@ -356,6 +376,8 @@ export interface AdapterConversionErrorOptions {
     | typeof ErrorCode.UNSUPPORTED_CONVERSION
     | typeof ErrorCode.SEMANTIC_DRIFT_ERROR;
   readonly message: string;
+  /** See {@link BaseErrorOptions.userMessage}. */
+  readonly userMessage?: string;
   readonly provenance?: ErrorProvenance;
   readonly cause?: Error;
   readonly irState?: {
@@ -373,6 +395,8 @@ export interface NetworkErrorOptions {
     | typeof ErrorCode.CONNECTION_TIMEOUT
     | typeof ErrorCode.DNS_RESOLUTION_FAILED;
   readonly message: string;
+  /** See {@link BaseErrorOptions.userMessage}. */
+  readonly userMessage?: string;
   readonly provenance?: ErrorProvenance;
   readonly cause?: Error;
 }
@@ -387,6 +411,8 @@ export interface StreamErrorOptions {
     | typeof ErrorCode.STREAM_PARSE_ERROR
     | typeof ErrorCode.STREAM_CANCELLED;
   readonly message: string;
+  /** See {@link BaseErrorOptions.userMessage}. */
+  readonly userMessage?: string;
   readonly provenance?: ErrorProvenance;
   readonly cause?: Error;
   readonly irState?: {
@@ -403,6 +429,8 @@ export interface RouterErrorOptions {
     | typeof ErrorCode.ROUTING_FAILED
     | typeof ErrorCode.ALL_BACKENDS_FAILED;
   readonly message: string;
+  /** See {@link BaseErrorOptions.userMessage}. */
+  readonly userMessage?: string;
   readonly provenance?: ErrorProvenance;
   readonly cause?: Error;
   readonly attemptedBackends?: string[];
@@ -426,6 +454,8 @@ export interface RouterErrorOptions {
  */
 export interface MiddlewareErrorOptions {
   readonly message: string;
+  /** See {@link BaseErrorOptions.userMessage}. */
+  readonly userMessage?: string;
   readonly middlewareName?: string;
   readonly provenance?: ErrorProvenance;
   readonly cause?: Error;
@@ -441,6 +471,11 @@ export interface MiddlewareErrorOptions {
 
 /**
  * Base error class interface.
+ *
+ * **`message` is for developers and logs; never show it to an end user.** It
+ * routinely names backends, models, registration tables, provider payloads and
+ * configuration. Display `userMessage` instead -- or, when it is absent, the
+ * generic sentence `toUserMessage(error)` returns for the error's code.
  */
 export interface AdapterError extends Error {
   readonly code: ErrorCode;
@@ -454,6 +489,8 @@ export interface AdapterError extends Error {
   };
   readonly details?: Record<string, unknown>;
   readonly timestamp: number;
+  /** End-user-safe text, when the thrower supplied one. See {@link BaseErrorOptions.userMessage}. */
+  readonly userMessage?: string;
 
   isCategory(category: ErrorCategory): boolean;
   toJSON(): Record<string, unknown>;

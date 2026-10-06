@@ -84,6 +84,9 @@ class AdapterError extends Error {
   /** Milliseconds since epoch, set at construction */
   readonly timestamp: number;
 
+  /** End-user-safe text, when the thrower supplied one (see below) */
+  readonly userMessage?: string;
+
   isCategory(category: ErrorCategory): boolean;
   toJSON(): Record<string, unknown>;
 }
@@ -100,6 +103,7 @@ class AdapterError extends Error {
 | `cause` | `Error` | no | |
 | `irState` | `{ request?, response? }` | no | Partial IR snapshots |
 | `details` | `Record<string, unknown>` | no | |
+| `userMessage` | `string` | no | End-user-safe text; see [Showing errors to users](#showing-errors-to-users) |
 
 `ErrorProvenance` has four optional string fields: `frontend`, `backend`,
 `middleware` and `router`.
@@ -132,8 +136,52 @@ if (error instanceof AdapterError && error.isCategory(ErrorCategory.NETWORK)) {
 ```
 
 **`toJSON()`** returns a plain object with `name`, `code`, `category`,
-`message`, `isRetryable`, `provenance`, `irState`, `details`, `timestamp`,
+`message`, `userMessage`, `isRetryable`, `provenance`, `irState`, `details`, `timestamp`,
 `stack` and a flattened `cause`. It is what `JSON.stringify(error)` produces.
+
+---
+
+## Showing errors to users
+
+**`message` is for developers and logs. Never show it to an end user.** It
+routinely names backends, models, registration tables, provider response bodies
+and configuration - for example `Requested backend 'x' is not registered.
+Registered backends: ...`. **`userMessage` is for display.**
+
+Use `toUserMessage(error)`; it always returns something safe to render:
+
+```typescript
+import { toUserMessage } from '@johnhenry/aimatey-errors';
+
+try {
+  await bridge.chat(request);
+} catch (error) {
+  logger.error(error);               // developers: the full error
+  showToast(toUserMessage(error));   // users: a generic sentence
+}
+```
+
+It resolves, in order: the error's own non-empty `userMessage`; a fixed default
+sentence for the error's `code` (`DEFAULT_USER_MESSAGES`); the sentence for its
+category (an unknown code from a newer version); then `GENERIC_USER_MESSAGE`. It
+is total: it accepts any caught value, never throws, and **never returns
+`error.message`**.
+
+**What cannot leak.** The defaults are fixed strings; nothing from the error -
+message, `details`, `cause`, `provenance`, a provider response body - is ever
+interpolated into them. The only caller-controlled text is an explicit
+`userMessage`, which is shown verbatim, so build it from nothing an end user
+should not see.
+
+**Compatibility.** The default table is typed `Record<ErrorCode, string>`, so a
+new `ErrorCode` cannot be added to this library without a sentence for it. If you
+switch exhaustively on `ErrorCode` yourself, adding a code is still a compile
+error for you; `toUserMessage` and `error.category` are the forward-compatible
+alternatives. The default sentences are plain English, not a localisation system:
+to localise, switch on `error.code` or supply your own `userMessage`.
+
+`@johnhenry/aimatey-http-core` error bodies carry `userMessage` beside `message`
+in every format; render `userMessage`, log `message`.
 
 ---
 

@@ -96,15 +96,10 @@ describe('prepareForwardedRequest', () => {
     expect(out.metadata.warnings).toEqual(request().metadata.warnings);
   });
 
-  it('forwards principal by default, and can withhold it', () => {
-    expect(prepareForwardedRequest(request(), { proxyName: 'tunnel' }).metadata.principal).toBe(
-      'tenant-7:user-42'
-    );
-    const withheld = prepareForwardedRequest(request(), {
-      proxyName: 'tunnel',
-      principal: 'strip',
-    });
-    expect('principal' in withheld.metadata).toBe(false);
+  it('never forwards principal: the far side sees the proxy as its caller', () => {
+    const out = prepareForwardedRequest(request(), { proxyName: 'tunnel' });
+
+    expect('principal' in out.metadata).toBe(false);
   });
 
   it('appends this hop to the request provenance middleware chain rather than replacing it', () => {

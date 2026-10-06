@@ -28,6 +28,10 @@ import type {
   ModelPatternMapping,
   ParallelDispatchOptions,
   ParallelDispatchResult,
+  BackendRegistrationOptions,
+  EffectiveCircuitBreakerPolicy,
+  UnregisterOptions,
+  UnregisterResult,
 } from '@johnhenry/aimatey-types';
 import { AdapterError, ErrorCode, RouterError } from '@johnhenry/aimatey-errors';
 import {
@@ -80,6 +84,33 @@ interface BackendState {
    * reachable after the backend has left the router.
    */
   circuitTimer?: ReturnType<typeof setTimeout>;
+  /**
+   * Rest period of the *current* open, in milliseconds.
+   *
+   * Recorded by {@link Router.openCircuitBreaker} so that the elapsed-time
+   * check in `checkCircuitBreaker` honours the same period the recovery timer
+   * was armed with. Before this existed the check read only the router-wide
+   * timeout, so an explicit `openCircuitBreaker(name, timeoutMs)` rested for
+   * `min(timeoutMs, circuitBreakerTimeout)` -- never longer than the default.
+   */
+  circuitRestMs?: number;
+  /** Per-backend overrides given at `register()`; they belong to the name. */
+  options?: BackendRegistrationOptions;
+  /**
+   * Calls currently running against this backend (unary calls until they
+   * settle; a stream until it ends, fails, or is abandoned).
+   */
+  inFlight: number;
+  /**
+   * Set when the backend has been unregistered. A detached state is owned by
+   * the calls still holding it and by nobody else: their outcome is not
+   * accounted, and must not open a breaker -- `openCircuitBreaker(name)`
+   * resolves by *name*, so a late failure would otherwise land on whatever was
+   * registered under that name next.
+   */
+  detached: boolean;
+  /** Resolvers waiting for `inFlight` to reach zero (`unregister` with `drain`). */
+  idleWaiters: Array<() => void>;
   latencies: number[];
   totalRequests: number;
   successfulRequests: number;
@@ -245,7 +276,9 @@ export class Router implements IRouter {
    * adapter behind a name that already exists — the API-key-rotation case —
    * use {@link Router.replace}.
    */
-  register(name: string, adapter: BackendAdapter): Router {
+  register(name: string, adapter: BackendAdapter, options?: BackendRegistrationOptions): Router {
+    this.validateRegistrationOptions(name, options);
+
     if (this.backends.has(name)) {
       throw new AdapterError({
         code: ErrorCode.ROUTING_FAILED,
@@ -260,6 +293,12 @@ export class Router implements IRouter {
       isHealthy: true,
       circuitBreakerState: 'closed',
       consecutiveFailures: 0,
+      options: options?.circuitBreaker
+        ? { circuitBreaker: { ...options.circuitBreaker } }
+        : undefined,
+      inFlight: 0,
+      detached: false,
+      idleWaiters: [],
       latencies: [],
       totalRequests: 0,
       successfulRequests: 0,
@@ -297,6 +336,11 @@ export class Router implements IRouter {
    *   working key until `circuitBreakerTimeout` elapsed — or, if this is the
    *   only backend, fail every request outright.
    *
+   * - **Kept** — the per-backend options given to {@link Router.register}
+   *   (`circuitBreaker` overrides). They are policy about the *name*, not a
+   *   verdict about the adapter, so a rotated key does not silently change
+   *   how tolerant the router is of that backend.
+   *
    * Callers who want a genuinely fresh slate can follow this with
    * {@link Router.resetStats}.
    *
@@ -325,6 +369,7 @@ export class Router implements IRouter {
     state.circuitBreakerState = 'closed';
     state.consecutiveFailures = 0;
     state.circuitOpenedAt = undefined;
+    state.circuitRestMs = undefined;
     state.lastHealthCheck = undefined;
 
     return this;
@@ -345,9 +390,30 @@ export class Router implements IRouter {
    * warning is emitted through {@link RouterConfig.onWarning} so the change
    * is not silent.
    *
-   * @throws AdapterError ROUTING_FAILED if `name` is not registered.
+   * **Requests already in flight** run to their natural end -- `unregister()`
+   * is not cancellation. The call holds the adapter it was started on, so an
+   * `execute()` resolves and a stream keeps yielding. From the moment this
+   * returns, no new request is routed to the name, the recovery timer is
+   * cancelled, and the in-flight call's outcome is **not accounted** (no
+   * counters, no breaker): the backend is gone, so its late result must not
+   * land on an object nobody can read, nor trip the breaker of a different
+   * backend registered under the same name later.
+   *
+   * If the answer must not be *delivered* (revocation), abort the call with its
+   * `AbortSignal`; only the transport can guarantee that.
+   *
+   * With `{ drain: true | timeoutMs }` the backend is still removed
+   * synchronously, but a promise is returned that settles once in-flight calls
+   * (streams included) have finished, or the timeout passed. See
+   * {@link UnregisterOptions}.
+   *
+   * @throws AdapterError ROUTING_FAILED if `name` is not registered
+   *   (synchronously, with or without `drain`).
    */
-  unregister(name: string): Router {
+  unregister(name: string, options?: { readonly drain?: false }): Router;
+  unregister(name: string, options: { readonly drain: true | number }): Promise<UnregisterResult>;
+  unregister(name: string, options?: UnregisterOptions): Router | Promise<UnregisterResult>;
+  unregister(name: string, options?: UnregisterOptions): Router | Promise<UnregisterResult> {
     const removed = this.backends.get(name);
     if (!removed) {
       throw new AdapterError({
@@ -364,6 +430,18 @@ export class Router implements IRouter {
     // the timer expires.
     this.clearCircuitTimer(removed);
 
+    const drain = options?.drain;
+    if (typeof drain === 'number' && !(Number.isFinite(drain) && drain >= 0)) {
+      throw new AdapterError({
+        code: ErrorCode.INVALID_PARAMETERS,
+        message: `unregister('${name}'): drain timeout must be a non-negative number of milliseconds, got ${drain}`,
+        isRetryable: false,
+        provenance: { router: this.metadata.name },
+      });
+    }
+
+    // From here on the state belongs to the calls still holding it.
+    removed.detached = true;
     this.backends.delete(name);
 
     // Drop routing rules that now point at a backend that no longer exists.
@@ -399,7 +477,101 @@ export class Router implements IRouter {
       );
     }
 
-    return this;
+    if (drain === undefined || drain === false) {
+      return this;
+    }
+    return this.waitForIdle(removed, drain === true ? undefined : drain);
+  }
+
+  /**
+   * Resolve once `state` has no call in flight, or after `timeoutMs`.
+   *
+   * Holds the state directly: the backend is already out of the map, and
+   * draining must not depend on being able to look it up.
+   */
+  private waitForIdle(state: BackendState, timeoutMs?: number): Promise<UnregisterResult> {
+    if (state.inFlight === 0) {
+      return Promise.resolve({ drained: true, inFlight: 0 });
+    }
+
+    return new Promise<UnregisterResult>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+
+      const onIdle = (): void => {
+        if (timer !== undefined) {
+          clearTimeout(timer);
+        }
+        resolve({ drained: true, inFlight: 0 });
+      };
+      state.idleWaiters.push(onIdle);
+
+      if (timeoutMs !== undefined) {
+        timer = setTimeout(() => {
+          state.idleWaiters = state.idleWaiters.filter((waiter) => waiter !== onIdle);
+          resolve({ drained: false, inFlight: state.inFlight });
+        }, timeoutMs);
+      }
+    });
+  }
+
+  /** Mark a call as running against `state`. Pair with {@link Router.endCall}. */
+  private beginCall(state: BackendState): void {
+    state.inFlight++;
+  }
+
+  /** Mark a call as finished, releasing anyone draining the backend. */
+  private endCall(state: BackendState): void {
+    state.inFlight--;
+    if (state.inFlight === 0 && state.idleWaiters.length > 0) {
+      const waiters = state.idleWaiters;
+      state.idleWaiters = [];
+      for (const waiter of waiters) {
+        waiter();
+      }
+    }
+  }
+
+  /**
+   * Reject circuit-breaker overrides that could never behave, before anything
+   * is registered. A threshold of 0 would open on the first success; a
+   * fractional one is unreachable by an integer count.
+   */
+  private validateRegistrationOptions(name: string, options?: BackendRegistrationOptions): void {
+    const breaker = options?.circuitBreaker;
+    if (!breaker) {
+      return;
+    }
+
+    const problem =
+      breaker.threshold !== undefined &&
+      !(Number.isInteger(breaker.threshold) && breaker.threshold >= 1)
+        ? `circuitBreaker.threshold must be a positive integer, got ${breaker.threshold}`
+        : breaker.timeout !== undefined &&
+            !(Number.isFinite(breaker.timeout) && breaker.timeout >= 0)
+          ? `circuitBreaker.timeout must be a non-negative number of milliseconds, got ${breaker.timeout}`
+          : undefined;
+
+    if (problem !== undefined) {
+      throw new AdapterError({
+        code: ErrorCode.INVALID_PARAMETERS,
+        message: `Backend '${name}': ${problem}`,
+        isRetryable: false,
+        provenance: { router: this.metadata.name },
+      });
+    }
+  }
+
+  /**
+   * The circuit-breaker policy in force for a backend: its registration
+   * overrides resolved against the router-wide defaults.
+   */
+  private breakerPolicy(state: BackendState): EffectiveCircuitBreakerPolicy {
+    const override = state.options?.circuitBreaker;
+    return {
+      enabled: override?.enabled ?? this.config.enableCircuitBreaker ?? false,
+      threshold: override?.threshold ?? this.config.circuitBreakerThreshold ?? 5,
+      timeout: override?.timeout ?? this.config.circuitBreakerTimeout ?? 60000,
+    };
   }
 
   /**
@@ -1273,8 +1445,11 @@ export class Router implements IRouter {
     state.circuitBreakerState = 'open';
     state.circuitOpenedAt = Date.now();
 
-    // Auto-close after timeout
-    const timeout = timeoutMs ?? this.config.circuitBreakerTimeout;
+    // Rest for the period asked for, else the backend's own, else the
+    // router's. Recorded so `checkCircuitBreaker` honours the same period the
+    // timer is armed with, rather than re-reading the router-wide one.
+    const timeout = timeoutMs ?? this.breakerPolicy(state).timeout;
+    state.circuitRestMs = timeout;
     if (timeout) {
       state.circuitTimer = setTimeout(() => {
         state.circuitTimer = undefined;
@@ -1303,6 +1478,7 @@ export class Router implements IRouter {
     state.circuitBreakerState = 'closed';
     state.consecutiveFailures = 0;
     state.circuitOpenedAt = undefined;
+    state.circuitRestMs = undefined;
   }
 
   /**
@@ -1449,7 +1625,7 @@ export class Router implements IRouter {
     // Copy backend registrations, along with the state that describes the
     // adapter instance being shared rather than the config being changed.
     for (const [name, state] of this.backends.entries()) {
-      newRouter.register(name, state.adapter);
+      newRouter.register(name, state.adapter, state.options);
 
       const clonedState = newRouter.backends.get(name);
       /* c8 ignore next 3 -- register() just created it */
@@ -1471,9 +1647,12 @@ export class Router implements IRouter {
 
       // An open circuit is only inherited by a router that can reopen and
       // recover it; otherwise it would be permanent.
-      if (newRouter.config.enableCircuitBreaker) {
+      if (newRouter.breakerPolicy(clonedState).enabled) {
         clonedState.circuitBreakerState = state.circuitBreakerState;
         clonedState.circuitOpenedAt = state.circuitOpenedAt;
+        // `circuitRestMs` is deliberately not inherited: the clone's own
+        // (possibly different) timeout governs how long an inherited open
+        // circuit rests, which is what "clone to change the timeout" means.
       }
     }
 
@@ -1559,16 +1738,17 @@ export class Router implements IRouter {
         continue;
       }
 
-      if (this.config.enableCircuitBreaker) {
-        try {
-          this.checkCircuitBreaker(name, state);
-        } catch {
-          continue;
-        }
+      // Policy-aware: a backend exempted from (or opted into) the breaker is
+      // decided inside the check, not by the router-wide flag.
+      try {
+        this.checkCircuitBreaker(name, state);
+      } catch {
+        continue;
       }
 
       state.totalRequests++;
       const startTime = Date.now();
+      this.beginCall(state);
 
       try {
         const adapter = state.adapter;
@@ -1598,18 +1778,13 @@ export class Router implements IRouter {
         return response;
       } catch (error) {
         lastError = error as Error;
-        state.failedRequests++;
-        state.consecutiveFailures++;
-        if (
-          this.config.enableCircuitBreaker &&
-          state.consecutiveFailures >= (this.config.circuitBreakerThreshold ?? 5)
-        ) {
-          this.openCircuitBreaker(name);
-        }
+        this.recordFailure(name, state);
         // Fall through to the next candidate (sequential fallback)
         if (this.config.fallbackStrategy === 'none') {
           throw error;
         }
+      } finally {
+        this.endCall(state);
       }
     }
 
@@ -1717,16 +1892,17 @@ export class Router implements IRouter {
         continue;
       }
 
-      if (this.config.enableCircuitBreaker) {
-        try {
-          this.checkCircuitBreaker(name, state);
-        } catch {
-          continue;
-        }
+      // Policy-aware: a backend exempted from (or opted into) the breaker is
+      // decided inside the check, not by the router-wide flag.
+      try {
+        this.checkCircuitBreaker(name, state);
+      } catch {
+        continue;
       }
 
       state.totalRequests++;
       const startTime = Date.now();
+      this.beginCall(state);
 
       try {
         const adapter = state.adapter;
@@ -1767,18 +1943,13 @@ export class Router implements IRouter {
         return response;
       } catch (error) {
         lastError = error as Error;
-        state.failedRequests++;
-        state.consecutiveFailures++;
-        if (
-          this.config.enableCircuitBreaker &&
-          state.consecutiveFailures >= (this.config.circuitBreakerThreshold ?? 5)
-        ) {
-          this.openCircuitBreaker(name);
-        }
+        this.recordFailure(name, state);
         // Fall through to the next candidate (sequential fallback)
         if (this.config.fallbackStrategy === 'none') {
           throw error;
         }
+      } finally {
+        this.endCall(state);
       }
     }
 
@@ -1810,10 +1981,8 @@ export class Router implements IRouter {
       });
     }
 
-    // Check circuit breaker
-    if (this.config.enableCircuitBreaker) {
-      this.checkCircuitBreaker(name, state);
-    }
+    // Check circuit breaker (policy-aware: a no-op for an exempt backend)
+    this.checkCircuitBreaker(name, state);
 
     state.totalRequests++;
     const startTime = Date.now();
@@ -1827,6 +1996,9 @@ export class Router implements IRouter {
       });
     }
 
+    // The call holds `state` (and so the adapter) for as long as it runs, even
+    // if the backend is unregistered underneath it.
+    this.beginCall(state);
     try {
       const response = await state.adapter.execute(request, signal);
       await this.recordSuccess(state, request, startTime);
@@ -1834,6 +2006,8 @@ export class Router implements IRouter {
     } catch (error) {
       this.recordFailure(name, state);
       throw error;
+    } finally {
+      this.endCall(state);
     }
   }
 
@@ -1857,6 +2031,11 @@ export class Router implements IRouter {
     request: IRChatRequest,
     startTime: number
   ): Promise<void> {
+    // A backend that has left the router is not accounted: see `detached`.
+    if (state.detached) {
+      return;
+    }
+
     state.successfulRequests++;
     state.consecutiveFailures = 0;
 
@@ -1892,13 +2071,18 @@ export class Router implements IRouter {
    * unary requests.
    */
   private recordFailure(name: string, state: BackendState): void {
+    // A backend that has left the router is not accounted: see `detached`.
+    // Without this guard `openCircuitBreaker(name)` would resolve the *name*
+    // and open the breaker of whichever backend was registered under it next.
+    if (state.detached) {
+      return;
+    }
+
     state.failedRequests++;
     state.consecutiveFailures++;
 
-    if (
-      this.config.enableCircuitBreaker &&
-      state.consecutiveFailures >= (this.config.circuitBreakerThreshold ?? 5)
-    ) {
+    const policy = this.breakerPolicy(state);
+    if (policy.enabled && state.consecutiveFailures >= policy.threshold) {
       this.openCircuitBreaker(name);
     }
   }
@@ -1929,9 +2113,7 @@ export class Router implements IRouter {
     // Check circuit breaker. Note this runs before totalRequests is counted
     // (in trackStream), so a request the breaker refuses is never counted as
     // one this router sent.
-    if (this.config.enableCircuitBreaker) {
-      this.checkCircuitBreaker(name, state);
-    }
+    this.checkCircuitBreaker(name, state);
 
     return this.trackStream(name, state, request, signal);
   }
@@ -1980,6 +2162,8 @@ export class Router implements IRouter {
 
     let settled = false;
 
+    // An open stream is a call in flight until it ends, fails, or is abandoned.
+    this.beginCall(state);
     try {
       for await (const chunk of state.adapter.executeStream(request, signal)) {
         if (!settled && chunk.type === 'error') {
@@ -2009,8 +2193,11 @@ export class Router implements IRouter {
       if (!settled) {
         // Reached only when the consumer abandoned the iterator.
         settled = true;
-        state.successfulRequests++;
+        if (!state.detached) {
+          state.successfulRequests++;
+        }
       }
+      this.endCall(state);
     }
   }
 
@@ -2363,9 +2550,14 @@ export class Router implements IRouter {
    * Check circuit breaker state.
    */
   private checkCircuitBreaker(name: string, state: BackendState): void {
+    const policy = this.breakerPolicy(state);
+    if (!policy.enabled) {
+      return;
+    }
+
     if (state.circuitBreakerState === 'open') {
-      // Check if timeout has passed
-      const timeout = this.config.circuitBreakerTimeout ?? 60000;
+      // Check if the rest period of *this open* has passed.
+      const timeout = state.circuitRestMs ?? policy.timeout;
       if (state.circuitOpenedAt && Date.now() - state.circuitOpenedAt > timeout) {
         state.circuitBreakerState = 'half-open';
       } else {
@@ -2677,6 +2869,8 @@ export class Router implements IRouter {
       lastHealthCheck: state.lastHealthCheck,
       circuitBreakerState: state.circuitBreakerState,
       consecutiveFailures: state.consecutiveFailures,
+      circuitBreaker: this.breakerPolicy(state),
+      inFlight: state.inFlight,
       stats: this.calculateBackendStats(state),
     };
   }
