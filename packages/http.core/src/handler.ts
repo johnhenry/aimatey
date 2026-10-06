@@ -22,6 +22,7 @@ import { openaiEmbedRequestToIR, irToOpenAIEmbedResponse } from '@johnhenry/aima
 import { normalizeCORSOptions } from './cors.js';
 import { detectProviderFormat, sanitizeErrorMessage } from './response-formatter.js';
 import { getHTTPStatusCode } from './status-mapping.js';
+import { toUserMessage } from '@johnhenry/aimatey-errors';
 
 /**
  * Core HTTP request handler (framework-agnostic)
@@ -490,11 +491,14 @@ export class CoreHTTPHandler {
     format: 'openai' | 'anthropic' | 'generic'
   ): any {
     const message = sanitizeErrorMessage(error, statusCode);
+    // `message` is developer-facing; `userMessage` is what a client displays.
+    const userMessage = toUserMessage(error);
 
     if (format === 'openai') {
       return {
         error: {
           message,
+          userMessage,
           type: 'server_error',
           code: statusCode >= 500 ? 'internal_server_error' : 'invalid_request_error',
         },
@@ -507,6 +511,7 @@ export class CoreHTTPHandler {
         error: {
           type: statusCode >= 500 ? 'api_error' : 'invalid_request_error',
           message,
+          userMessage,
         },
       };
     }
@@ -514,6 +519,7 @@ export class CoreHTTPHandler {
     // Generic format
     return {
       error: message,
+      userMessage,
       statusCode,
     };
   }

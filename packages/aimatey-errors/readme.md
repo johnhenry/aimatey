@@ -24,6 +24,7 @@ npm install @johnhenry/aimatey-errors
 - `ProviderError`
 - `NetworkError`
 - `ErrorCode`
+- `toUserMessage`, `DEFAULT_USER_MESSAGES`, `GENERIC_USER_MESSAGE` - end-user-safe text (`message` is for developers; show `userMessage` / `toUserMessage(error)`)
 
 ## Usage
 

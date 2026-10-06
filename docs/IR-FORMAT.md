@@ -791,6 +791,7 @@ interface IRProvenance {
   readonly middleware?: readonly string[];
   readonly router?: string;
   readonly upstream?: IRProvenance;
+  readonly locality?: 'in-process' | 'same-host' | 'external';
 }
 ```
 
@@ -843,6 +844,59 @@ provenance: withUpstreamProvenance(
 
 Forwarding the far side's provenance upward unchanged is the mistake this prevents: the
 backend it names would silently become this process's backend.
+
+#### Where a hop went (`locality`)
+
+Provenance can name every hop of `phone -> desktop -> llama-cpp`, but a name does not say
+*where* a hop is. `locality` records the link this hop crossed to reach what it talked to:
+
+| Value | Meaning | Typical adapter |
+|-------|---------|-----------------|
+| `'in-process'` | A function call in this process | A native / local-model adapter |
+| `'same-host'` | Loopback or a unix socket on this machine | A client of a local daemon |
+| `'external'` | Anything else: a LAN peer and a cloud API alike | Every HTTP provider, a tunnel |
+
+The rules:
+
+1. **Set by the adapter that performed the hop, never inferred.** Only the adapter
+   knows whether it made a function call, a loopback connection, or an internet request.
+   Neither the Bridge, the Router nor a walker stamps it, because a stamp they invented
+   is the confident wrong label this field exists to prevent.
+2. **Fail closed.** Absent means *unknown*, and unknown is treated as `'external'`.
+3. **Only adapter-knowable facts.** There is deliberately no `'same-owner'` member:
+   "this machine belongs to the user" is a pairing relationship the application knows, not
+   a property of the link. The IR does not carry trust assertions its adapters cannot
+   originate. An application that wants to render "your own desktop" keeps its own
+   allow-list of hops and uses `locality` only for the part an adapter can know.
+
+It is per-hop, like `servedModel`: on the phone, the tunnel hop is `'external'` and the
+desktop's own hop, under `upstream`, is `'in-process'`. Reading only the near hop would say
+the reply stayed local. Use `resolveEgress()` to take the widest link across the chain:
+
+```typescript
+import { resolveEgress } from '@johnhenry/aimatey-types';
+
+resolveEgress({
+  backend: 'tunnel', locality: 'external',
+  upstream: { backend: 'llama-cpp', locality: 'in-process' },
+});
+// => { locality: 'external', declared: true }
+
+resolveEgress({ backend: 'tunnel', upstream: { backend: 'llama-cpp', locality: 'in-process' } });
+// => { locality: 'external', declared: false }   -- the tunnel never said; fail closed
+```
+
+`declared: false` lets a UI tell "external, as stated" from "external, because nobody said"
+(and a response whose provenance never arrived at all is `declared: false` too: render
+nothing, not a guess).
+
+#### `metadata.principal` and the boundary
+
+`IRMetadata.principal` names the caller **as seen by the process that set it**. It is never
+sent to a provider and never forwarded across an `upstream` link: the far side of a proxy
+sees the proxy as its caller and has its own principal. Do not read it as "who the request
+ultimately belongs to" or as a statement about any hop. Facts about a hop - including how
+far it reached - live on `IRProvenance`.
 
 ### IRWarning
 

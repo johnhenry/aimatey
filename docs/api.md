@@ -436,10 +436,20 @@ interface RouterConfig {
 Manage the backend registry. All three return the router for chaining.
 
 ```typescript
-register(name: string, adapter: BackendAdapter): Router
+register(name: string, adapter: BackendAdapter, options?: BackendRegistrationOptions): Router
 replace(name: string, adapter: BackendAdapter): Router
 unregister(name: string): Router
+unregister(name: string, options: { drain: true | number }): Promise<UnregisterResult>
 ```
+
+- `register`'s `options.circuitBreaker` (`{ enabled?, threshold?, timeout? }`)
+  overrides the router-wide circuit-breaker settings for that one backend; omitted
+  fields inherit `RouterConfig`. The overrides survive `replace()` and `clone()`, and
+  `getBackendInfo()` reports the effective policy.
+- `unregister` is not cancellation: in-flight calls (streams included) run to their
+  natural end and are not accounted. `{ drain }` returns a promise that settles when
+  they finish, or after the timeout. To stop delivery, abort with the call's
+  `AbortSignal`.
 
 ##### `execute(request, signal?)`
 
