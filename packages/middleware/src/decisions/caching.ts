@@ -17,6 +17,7 @@ import type {
   DecisionMiddleware,
   IRDecisionRequest,
   IRDecisionResponse,
+  WarningCategory,
 } from '@johnhenry/aimatey-types';
 import { InMemoryCacheStorage, resolveCacheScope, withBypassWarning } from '../caching.js';
 import { stableHash } from '../hash.js';
@@ -43,7 +44,7 @@ export interface DecisionCacheStorage {
  * dropped part of the request, so a later call (to a fixed backend or a
  * different one) should be allowed to do better.
  */
-export const DEFAULT_UNCACHEABLE_WARNINGS: readonly string[] = [
+export const DEFAULT_UNCACHEABLE_WARNINGS: readonly WarningCategory[] = [
   'response-malformed',
   'capability-emulated',
   'capability-unsupported',
@@ -112,7 +113,7 @@ export interface DecisionCachingConfig {
    * never stored.
    * @default ['response-malformed', 'capability-emulated', 'capability-unsupported']
    */
-  uncacheableWarnings?: readonly string[];
+  uncacheableWarnings?: readonly WarningCategory[];
 }
 
 // ============================================================================
