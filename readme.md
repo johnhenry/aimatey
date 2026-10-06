@@ -353,6 +353,12 @@ import { createComplexityRouter, createBatchProcessor } from '@johnhenry/aimatey
 Complexity-based routing, parallel aggregation, failover, cost optimization with budget windows,
 and rate-limited batch processing.
 
+`createEmulatedDecisionBackend(chatBackend)` is the typed-decision pattern: wrap any chat backend and
+`Bridge.decide()` works on it through one structured-output call. It is opt-in (nothing in `Bridge` or
+`Router` emulates decisions silently) and returns no `probabilities` or `confidence`, since a chat model
+has no calibrated distribution to report. Answers carry a warning and the backend declares
+`decisionsEmulated: true`.
+
 ### Production HTTP Endpoints
 
 The HTTP handler ships health, metrics, and embeddings endpoints for every framework adapter:

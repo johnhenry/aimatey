@@ -647,6 +647,22 @@ export interface IRCapabilities {
   readonly decisionTypes?: readonly ('choice' | 'score' | 'noul')[];
 
   /**
+   * True when `decide()` is answered by a chat model through structured
+   * output rather than a decision model, so answers carry no calibrated
+   * probabilities. Set by `createEmulatedDecisionBackend()` in
+   * `@johnhenry/aimatey-patterns`; `Bridge` never emulates on its own.
+   */
+  readonly decisionsEmulated?: boolean;
+
+  /**
+   * Question types a decision backend answers by emulation (a letter
+   * protocol, a structured-output call) rather than natively. These are
+   * not listed in `decisionTypes`, which stays the native set, so a
+   * pre-flight check keyed on `decisionTypes` will not route them here.
+   */
+  readonly decisionsEmulatedTypes?: readonly ('choice' | 'score' | 'noul')[];
+
+  /**
    * Per-request limits, for pre-flight checks. Each is omitted when the
    * provider documents none.
    */

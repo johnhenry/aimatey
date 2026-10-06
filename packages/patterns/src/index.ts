@@ -34,3 +34,8 @@ export {
   type BatchProcessor,
   type BatchStats,
 } from './batch-processor.js';
+
+export {
+  createEmulatedDecisionBackend,
+  type EmulatedDecisionOptions,
+} from './decision-emulation.js';
