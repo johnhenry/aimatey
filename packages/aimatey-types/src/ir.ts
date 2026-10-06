@@ -677,6 +677,12 @@ export interface IRCapabilities {
     readonly maxStateTokens?: number;
     /** Most images per request (0: none). */
     readonly maxImages?: number;
+    /**
+     * Most requests the backend can usefully run at once (`1` for a
+     * single-session local model). `Bridge.decideBatch` defaults its
+     * concurrency to this.
+     */
+    readonly maxConcurrency?: number;
   };
 
   /**
@@ -808,6 +814,13 @@ export type WarningCategory =
    * category stops carrying information.
    */
   | 'transport-degraded'
+  /**
+   * The request is valid but likely to give poor answers -- e.g. a typed-decision
+   * question whose choice keys are polar words (`yes`/`no`), which decision
+   * models follow by name rather than by definition. Nothing was changed or
+   * dropped; the caller can act on the advice or ignore it.
+   */
+  | 'request-advisory'
   /**
    * A response arrived where the receiver had reason to expect
    * {@link IRMetadata.provenance} and there was none.
