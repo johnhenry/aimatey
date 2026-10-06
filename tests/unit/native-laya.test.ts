@@ -14,8 +14,9 @@
  * the other direction) and the adapter's capability declaration.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { LayaBackendAdapter, toIRAnswer } from '@johnhenry/aimatey-native-laya';
+import { ProviderError } from '@johnhenry/aimatey-errors';
 import type { IRDecisionRequest } from '@johnhenry/aimatey-types';
 
 function makeRequest(): IRDecisionRequest {
@@ -43,6 +44,14 @@ describe('LayaBackendAdapter', () => {
     expect(backend.metadata.capabilities.streaming).toBe(false);
     expect(typeof (backend as unknown as { execute?: unknown }).execute).toBe('undefined');
     expect(typeof (backend as unknown as { fromIR?: unknown }).fromIR).toBe('undefined');
+  });
+
+  it('advertises the three checkpoints as decision models', () => {
+    expect(new LayaBackendAdapter().metadata.capabilities.decisionModels).toEqual([
+      'english',
+      'multilingual',
+      'typed-decisions',
+    ]);
   });
 
   it('estimateDecisionCost is always 0 -- local inference has no per-call billing, unlike a hosted API', async () => {
@@ -99,5 +108,152 @@ describe('LayaBackendAdapter', () => {
       value: 0.1923,
       confidence: 0.8077,
     });
+  });
+});
+
+// ============================================================================
+// decide() -- driven through a fake Laya session, since @receptron/laya itself
+// is not installed in this workspace (see the header comment).
+// ============================================================================
+
+const wireResponse = (answers: Record<string, unknown>) => ({
+  model: 'laya-rl-agent',
+  answers,
+  usage: { input_tokens: 12, output_tokens: 0 },
+});
+
+function makeBackend(
+  systemOne: (state: unknown, questions: unknown) => unknown,
+  config: ConstructorParameters<typeof LayaBackendAdapter>[0] = {}
+) {
+  const backend = new LayaBackendAdapter(config);
+  // initialize() is idempotent on a set instance, so this skips the real load.
+  (backend as unknown as { instance: unknown }).instance = {
+    systemOne: vi.fn(async (state: unknown, questions: unknown) => systemOne(state, questions)),
+    close: vi.fn(async () => undefined),
+  };
+  return backend;
+}
+
+describe('LayaBackendAdapter.decide', () => {
+  it('maps answers, usage and provenance', async () => {
+    const backend = makeBackend(() =>
+      wireResponse({
+        urgency: {
+          type: 'score',
+          score: 1.5,
+          legend: {},
+          probabilities: { '0': 0.1, '1': 0.5, '2': 0.4 },
+          confidence: 0.5,
+          rl_agent: { act_probability: 0.4 },
+        },
+      })
+    );
+    const response = await backend.decide(makeRequest());
+
+    expect(response.answers.urgency).toEqual({
+      type: 'score',
+      value: 1.5,
+      probabilities: [0.1, 0.5, 0.4],
+      confidence: 0.5,
+    });
+    expect(response.model).toBe('laya-rl-agent');
+    expect(response.usage).toEqual({ inputTokens: 12 });
+    expect(response.metadata.provenance?.backend).toBe('laya-backend');
+  });
+
+  it('builds answers from the request questions and throws, naming the question, on a missing one', async () => {
+    const backend = makeBackend(() => wireResponse({}));
+    const error = await backend.decide(makeRequest()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ProviderError);
+    expect((error as Error).message).toMatch(/urgency/);
+  });
+
+  it('ignores answers for questions that were not asked', async () => {
+    const backend = makeBackend(() =>
+      wireResponse({
+        urgency: { type: 'noul', noul: 0.2, rl_agent: { act_probability: 0.1 } },
+        stray: { type: 'noul', noul: 0.9 },
+      })
+    );
+    const response = await backend.decide({
+      ...makeRequest(),
+      questions: { urgency: { type: 'noul', instructions: 'Urgent?' } },
+    });
+    expect(Object.keys(response.answers)).toEqual(['urgency']);
+  });
+
+  it('keeps the rl_agent sub-object per question under raw.rl_agent', async () => {
+    const backend = makeBackend(() =>
+      wireResponse({ urgency: { type: 'noul', noul: 0.2, rl_agent: { act_probability: 0.1 } } })
+    );
+    const response = await backend.decide({
+      ...makeRequest(),
+      questions: { urgency: { type: 'noul', instructions: 'Urgent?' } },
+    });
+    expect(response.raw?.rl_agent).toEqual({ urgency: { act_probability: 0.1 } });
+  });
+
+  it('rejects with an AbortError, without loading or running, when already aborted', async () => {
+    const backend = new LayaBackendAdapter(); // no instance: a load attempt would throw a different error
+    const controller = new AbortController();
+    controller.abort();
+    await expect(backend.decide(makeRequest(), controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+  });
+
+  it('does not call systemOne when aborted before the run', async () => {
+    const backend = makeBackend(() => wireResponse({}));
+    const controller = new AbortController();
+    controller.abort();
+    await backend.decide(makeRequest(), controller.signal).catch(() => undefined);
+    const instance = (backend as unknown as { instance: { systemOne: ReturnType<typeof vi.fn> } }).instance;
+    expect(instance.systemOne).not.toHaveBeenCalled();
+  });
+
+  it('rejects with an AbortError when aborted while the run was in flight', async () => {
+    const controller = new AbortController();
+    const backend = makeBackend(() => {
+      controller.abort();
+      return wireResponse({
+        urgency: { type: 'score', score: 0, probabilities: { '0': 1 }, confidence: 1 },
+      });
+    });
+    await expect(backend.decide(makeRequest(), controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+  });
+
+  it('warns that task/lang cannot be applied, since systemOne() takes neither', async () => {
+    const backend = makeBackend(() =>
+      wireResponse({ q: { type: 'noul', noul: 0.5, rl_agent: { act_probability: 0.5 } } })
+    );
+    const request: IRDecisionRequest = {
+      ...makeRequest(),
+      questions: { q: { type: 'noul', instructions: 'x' } },
+      parameters: { custom: { task: 'customer_service', lang: 'de' } },
+    };
+    const response = await backend.decide(request);
+    const fields = (response.metadata.warnings ?? []).map((w) => w.field);
+    expect(fields).toEqual(['parameters.custom.task', 'parameters.custom.lang']);
+    expect(response.metadata.warnings?.every((w) => w.category === 'parameter-unsupported')).toBe(true);
+  });
+
+  it('warns when parameters.model differs from the checkpoint loaded at construction', async () => {
+    const backend = makeBackend(
+      () => wireResponse({ q: { type: 'noul', noul: 0.5, rl_agent: { act_probability: 0.5 } } }),
+      { subfolder: 'english' }
+    );
+    const base: IRDecisionRequest = {
+      ...makeRequest(),
+      questions: { q: { type: 'noul', instructions: 'x' } },
+    };
+
+    const mismatched = await backend.decide({ ...base, parameters: { model: 'multilingual' } });
+    expect(mismatched.metadata.warnings?.map((w) => w.field)).toEqual(['parameters.model']);
+
+    const matching = await backend.decide({ ...base, parameters: { model: 'english' } });
+    expect(matching.metadata.warnings ?? []).toEqual([]);
   });
 });
