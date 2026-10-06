@@ -20,15 +20,13 @@ import type {
   IRDecisionRequest,
   IRDecisionResponse,
   IRDecisionQuestion,
-  IRDecisionAnswer,
-  IRWarning,
 } from '@johnhenry/aimatey-types';
 import {
-  NetworkError,
-  ProviderError,
-  ErrorCode,
-  createErrorFromHttpResponse,
-} from '@johnhenry/aimatey-errors';
+  buildImageDroppedWarning,
+  buildSystemOneRequest,
+  decideViaSystemOne,
+  parseSystemOneResponse,
+} from '../decisions/systemone-client.js';
 
 // ============================================================================
 // TypeSafe (Jev) API Types
@@ -127,121 +125,44 @@ export class TypeSafeBackendAdapter implements BackendAdapter<TypeSafeRequest, T
    * Convert IR decision request to TypeSafe's wire format.
    *
    * Not part of `BackendAdapter` (that interface's `fromIR`/`toIR` are
-   * chat-typed and optional) — a plain method the adapter uses internally
+   * chat-typed and optional) -- a plain method the adapter uses internally
    * and exposes for the same debugging/testing reasons `fromIR` exists on
-   * chat backends.
+   * chat backends. Delegates to the shared System One client.
    */
   public decisionFromIR(request: IRDecisionRequest): TypeSafeRequest {
-    return {
-      state: request.state,
-      questions: request.questions,
-      model: request.parameters?.model,
-    };
+    return buildSystemOneRequest(request, { dialect: 'systemone' }) as unknown as TypeSafeRequest;
   }
 
   /**
-   * Convert TypeSafe's response to IR, mapping each answer to the
-   * discriminated {@link IRDecisionAnswer} shape by the question's own
-   * `type` (the wire response doesn't repeat it, unlike the request).
+   * Convert TypeSafe's response to IR via the shared System One client.
+   * Throws if a question is unanswered or answered with the wrong shape.
    */
   public decisionToIR(
     response: TypeSafeResponse,
     originalRequest: IRDecisionRequest
   ): IRDecisionResponse {
-    const answers: Record<string, IRDecisionAnswer> = {};
-
-    for (const [name, question] of Object.entries(originalRequest.questions)) {
-      const raw = response.answers[name];
-      if (!raw) {
-        // Nothing upstream validates the response, so a silently skipped
-        // question would reach the caller as `answers[name] === undefined`.
-        throw new ProviderError({
-          code: ErrorCode.PROVIDER_ERROR,
-          message: `TypeSafe response is missing an answer for question '${name}'`,
-          isRetryable: false,
-          provenance: { backend: this.metadata.name },
-        });
-      }
-      answers[name] = toIRAnswer(question, raw, name, this.metadata.name);
-    }
-
-    const warnings: IRWarning[] = [];
-    if (originalRequest.images?.length) {
-      warnings.push({
-        category: 'capability-unsupported',
-        severity: 'warning',
-        message: `Jev takes no images; ${originalRequest.images.length} image(s) were not sent.`,
-        field: 'images',
-        source: this.metadata.name,
-      });
-    }
-
-    return {
-      id: response.id,
+    return parseSystemOneResponse(response, originalRequest, {
+      dialect: 'systemone',
+      backendName: this.metadata.name,
       provider: 'typesafe',
-      answers,
-      model: response.model,
-      usage: response.usage
-        ? {
-            inputTokens: response.usage.input_tokens ?? 0,
-            outputTokens: response.usage.output_tokens,
-            cost: response.usage.cost,
-            // Kept alongside `cost` for one release; read `usage.cost` instead.
-            details: response.usage.cost !== undefined ? { cost: response.usage.cost } : undefined,
-          }
-        : undefined,
-      metadata: {
-        ...originalRequest.metadata,
-        provenance: {
-          ...originalRequest.metadata.provenance,
-          backend: this.metadata.name,
-        },
-        ...(warnings.length > 0 && {
-          warnings: [...(originalRequest.metadata.warnings ?? []), ...warnings],
-        }),
-      },
-      raw: response as unknown as Record<string, unknown>,
-    };
+      warnings: buildImageDroppedWarning(originalRequest, this.metadata.name, 'Jev'),
+    });
   }
 
   /**
    * Answer a typed-decision request via Jev's `/systemone` endpoint.
    */
-  async decide(request: IRDecisionRequest, signal?: AbortSignal): Promise<IRDecisionResponse> {
-    try {
-      const typesafeRequest = this.decisionFromIR(request);
-
-      const response = await fetch(`${this.baseURL}/systemone`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(typesafeRequest),
-        signal,
-      });
-
-      if (!response.ok) {
-        throw createErrorFromHttpResponse(
-          response.status,
-          response.statusText,
-          await response.text(),
-          { backend: this.metadata.name }
-        );
-      }
-
-      const data = (await response.json()) as TypeSafeResponse;
-      return this.decisionToIR(data, request);
-    } catch (error) {
-      if (error instanceof NetworkError || error instanceof ProviderError) {
-        throw error;
-      }
-
-      throw new ProviderError({
-        code: ErrorCode.PROVIDER_ERROR,
-        message: `TypeSafe request failed: ${error instanceof Error ? error.message : String(error)}`,
-        isRetryable: true,
-        provenance: { backend: this.metadata.name },
-        cause: error instanceof Error ? error : undefined,
-      });
-    }
+  decide(request: IRDecisionRequest, signal?: AbortSignal): Promise<IRDecisionResponse> {
+    return decideViaSystemOne(request, {
+      url: `${this.baseURL}/systemone`,
+      dialect: 'systemone',
+      headers: this.getHeaders(),
+      signal,
+      backendName: this.metadata.name,
+      provider: 'typesafe',
+      // Jev takes no images: dropped here, with a warning on the response.
+      warnings: buildImageDroppedWarning(request, this.metadata.name, 'Jev'),
+    });
   }
 
   /**
@@ -291,42 +212,4 @@ export class TypeSafeBackendAdapter implements BackendAdapter<TypeSafeRequest, T
       return false;
     }
   }
-}
-
-// ============================================================================
-// Response Mapping
-// ============================================================================
-
-function toIRAnswer(
-  question: IRDecisionQuestion,
-  raw: TypeSafeAnswer,
-  name: string,
-  backendName: string
-): IRDecisionAnswer {
-  if (question.type === 'choice' && 'choice' in raw) {
-    return {
-      type: 'choice',
-      value: raw.choice,
-      ...(raw.probabilities !== undefined && { probabilities: raw.probabilities }),
-      ...(raw.confidence !== undefined && { confidence: raw.confidence }),
-    };
-  }
-  if (question.type === 'score' && 'score' in raw) {
-    return {
-      type: 'score',
-      value: raw.score,
-      ...(raw.probabilities !== undefined && { probabilities: raw.probabilities }),
-      ...(raw.confidence !== undefined && { confidence: raw.confidence }),
-    };
-  }
-  if (question.type === 'noul' && 'noul' in raw) {
-    return { type: 'noul', value: raw.noul };
-  }
-
-  throw new ProviderError({
-    code: ErrorCode.PROVIDER_ERROR,
-    message: `TypeSafe answered question '${name}' (type '${question.type}') with a response shape that doesn't match: ${JSON.stringify(raw)}`,
-    isRetryable: false,
-    provenance: { backend: backendName },
-  });
 }

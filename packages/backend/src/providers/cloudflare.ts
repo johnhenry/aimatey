@@ -13,6 +13,8 @@ import type {
   AdapterMetadata,
 } from '@johnhenry/aimatey-types';
 import type {
+  IRDecisionRequest,
+  IRDecisionResponse,
   IRChatRequest,
   IRChatResponse,
   IRChatStream,
@@ -37,6 +39,7 @@ import {
   buildToolsUnsupportedWarning,
   estimateTokens,
 } from '../shared.js';
+import { decideViaSystemOne, estimateSystemOneCost } from '../decisions/systemone-client.js';
 
 // ============================================================================
 // Cloudflare Workers AI API Types (OpenAI-compatible)
@@ -109,6 +112,17 @@ export interface CloudflareConfig extends ApiKeyBackendAdapterConfig {
 }
 
 // ============================================================================
+// Clef decision models
+// ============================================================================
+
+/** Clef models served at `/ai/run/@cf/cloudflare/<name>`. */
+export const CLOUDFLARE_DECISION_MODELS = ['clef', 'clef-flash'] as const;
+export type CloudflareDecisionModel = (typeof CLOUDFLARE_DECISION_MODELS)[number];
+
+const DEFAULT_DECISION_MODEL: CloudflareDecisionModel = 'clef-flash';
+const MAX_DECISION_IMAGES = 4;
+
+// ============================================================================
 // Cloudflare Workers AI Backend Adapter
 // ============================================================================
 
@@ -170,6 +184,18 @@ export class CloudflareBackendAdapter implements BackendAdapter<
         supportsFrequencyPenalty: true,
         supportsPresencePenalty: true,
         maxStopSequences: 4,
+        // Typed decisions: Clef / Clef-flash via `/ai/run/@cf/cloudflare/...`.
+        decisions: true,
+        decisionModels: [...CLOUDFLARE_DECISION_MODELS],
+        decisionTypes: ['choice', 'score', 'noul'],
+        decisionImages: true,
+        decisionLimits: {
+          maxQuestions: 64,
+          maxChoiceOptions: 255,
+          maxScoreLevels: 10,
+          maxImages: MAX_DECISION_IMAGES,
+          maxStateTokens: 65_536,
+        },
       },
       config: {
         baseURL: this.baseURL,
@@ -468,6 +494,88 @@ export class CloudflareBackendAdapter implements BackendAdapter<
         },
       } as IRStreamChunk;
     }
+  }
+
+  /**
+   * Normalise a Clef model name: `clef`, `clef-flash`, or the full
+   * `@cf/cloudflare/clef[-flash]` id. Anything else is a `ProviderError`
+   * listing the valid names (Workers AI itself answers code 5006).
+   */
+  private resolveDecisionModel(model: string | undefined): CloudflareDecisionModel {
+    const name = (model || this.config.defaultModel || DEFAULT_DECISION_MODEL).replace(
+      /^@cf\/cloudflare\//,
+      ''
+    );
+    if (!(CLOUDFLARE_DECISION_MODELS as readonly string[]).includes(name)) {
+      throw new ProviderError({
+        code: ErrorCode.PROVIDER_ERROR,
+        message: `Cloudflare decide() supports only ${CLOUDFLARE_DECISION_MODELS.join(' and ')} (optionally as '@cf/cloudflare/<name>'); got '${model}'`,
+        isRetryable: false,
+        provenance: { backend: this.metadata.name },
+      });
+    }
+    return name as CloudflareDecisionModel;
+  }
+
+  /**
+   * The Workers AI run URL for a Clef model. It is not under the adapter's
+   * `/ai/v1` OpenAI-compatible base: `.../accounts/<id>/ai/run/@cf/cloudflare/<model>`.
+   */
+  private decisionURL(model: CloudflareDecisionModel): string {
+    const base = this.baseURL.replace(/\/+$/, '');
+    const match = /^(.*\/ai)\/v1$/.exec(base);
+    const aiRoot = match
+      ? match[1]
+      : this.accountId
+        ? `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/ai`
+        : undefined;
+    if (!aiRoot) {
+      throw new ProviderError({
+        code: ErrorCode.PROVIDER_ERROR,
+        message:
+          "Cloudflare decide() cannot derive the '/ai/run' URL: baseURL does not end in '/ai/v1' and no accountId is configured",
+        isRetryable: false,
+        provenance: { backend: this.metadata.name },
+      });
+    }
+    return `${aiRoot}/run/@cf/cloudflare/${model}`;
+  }
+
+  /**
+   * Answer a typed-decision request with Clef or Clef-flash (default
+   * `clef-flash`). Images (at most 4) go as `data:<type>;base64,...` URLs; a
+   * `url` image source throws, as does a fifth image. The response is
+   * unwrapped from Workers AI's `result` envelope (a Workers-binding-style
+   * unwrapped body also parses), and an error envelope
+   * (`{ success: false, errors: [{ code, message }] }`) surfaces as an error.
+   */
+  async decide(request: IRDecisionRequest, signal?: AbortSignal): Promise<IRDecisionResponse> {
+    const model = this.resolveDecisionModel(request.parameters?.model);
+    if ((request.images?.length ?? 0) > MAX_DECISION_IMAGES) {
+      throw new ProviderError({
+        code: ErrorCode.PROVIDER_ERROR,
+        message: `Clef accepts at most ${MAX_DECISION_IMAGES} images; got ${request.images?.length}`,
+        isRetryable: false,
+        provenance: { backend: this.metadata.name },
+      });
+    }
+    return await decideViaSystemOne(request, {
+      url: this.decisionURL(model),
+      dialect: 'cloudflare',
+      model,
+      sendImages: true,
+      imageFormat: 'data-url',
+      headers: this.getHeaders(),
+      signal,
+      backendName: this.metadata.name,
+      provider: 'cloudflare',
+    });
+  }
+
+  /** Input-token pricing from the model registry ($0.24 clef / $0.09 clef-flash per 1M; output free). */
+  // eslint-disable-next-line @typescript-eslint/require-await -- rejects (not throws) on a bad model
+  async estimateDecisionCost(request: IRDecisionRequest): Promise<number | null> {
+    return estimateSystemOneCost(request, this.resolveDecisionModel(request.parameters?.model));
   }
 
   /**
