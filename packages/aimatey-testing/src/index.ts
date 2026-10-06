@@ -85,3 +85,6 @@ export {
   propertyValidRequest,
   propertyMultiTurnAlternates,
 } from './property-testing.js';
+
+// Decision calibration and name-invariance helpers
+export * from './decisions/index.js';
