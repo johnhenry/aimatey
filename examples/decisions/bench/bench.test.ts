@@ -377,6 +377,21 @@ describe('runBench', () => {
     expect(result.model).toBe('clef');
   });
 
+  it('books local backends at $0 instead of guessing a hosted price', async () => {
+    const local = createMockDecisionBackend({
+      name: 'local',
+      handler: (req) => ({
+        answers: perfectAnswers(req, 0.9, items[0]!.gold),
+        model: 'tev1:0.8b',
+        usage: { inputTokens: 1_000_000 },
+        metadata: req.metadata,
+      }),
+    });
+    (local.metadata as { provider: string }).provider = 'Ollama';
+    const result = await runBench({ backend: local, label: 'local', items: [items[0]!] });
+    expect(result.totalCost).toBe(0);
+  });
+
   it('counts a thrown backend as an error and keeps going', async () => {
     const backend = createMockDecisionBackend({ error: new Error('boom') });
     const result = await runBench({ backend, label: 'bad', items, concurrency: 1 });

@@ -18,6 +18,9 @@ import type { BackendAdapter, IRDecisionAnswer, IRDecisionRequest } from '@johnh
 import { answerMatchesQuestion, isCorrect, priceFor } from './scoring.js';
 import type { BenchItem, GoldValue, ScoredRow } from './types.js';
 
+/** Providers that run on the caller's machine: their calls cost nothing per token. */
+const LOCAL_PROVIDERS = new Set(['Ollama', 'ConvAI (Laya)']);
+
 export interface RunOptions {
   readonly backend: BackendAdapter;
   /** Name shown in the report. */
@@ -89,6 +92,7 @@ export async function runBench(options: RunOptions): Promise<BackendResult> {
   const declared = backend.metadata.capabilities.decisionLimits?.maxConcurrency;
   const concurrency = Math.max(1, Math.min(options.concurrency ?? 1, declared ?? Infinity));
 
+  const local = LOCAL_PROVIDERS.has(backend.metadata.provider ?? '');
   const bridge = new Bridge(createGenericFrontend(), backend);
   if (options.temperature !== undefined) {
     bridge.useDecision(createTemperatureScaling({ default: options.temperature }));
@@ -128,7 +132,7 @@ export async function runBench(options: RunOptions): Promise<BackendResult> {
         id: item.id,
         workflow: item.workflow,
         latencyMs,
-        cost: priceFor(response.usage, response.model),
+        cost: local ? 0 : priceFor(response.usage, response.model),
         ...(response.usage && { inputTokens: response.usage.inputTokens }),
         model: response.model,
         answers,
