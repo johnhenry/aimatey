@@ -24,7 +24,7 @@ import type {
   IRWarning,
 } from '@johnhenry/aimatey-types';
 import { ProviderError, ErrorCode, createErrorFromHttpResponse } from '@johnhenry/aimatey-errors';
-import { validateDecisionResponse } from '@johnhenry/aimatey-utils';
+import { getModelPricingInfo, validateDecisionResponse } from '@johnhenry/aimatey-utils';
 
 // ============================================================================
 // Dialects
@@ -46,11 +46,11 @@ export interface SystemOneDialectSpec {
    * (Cloudflare's endpoint is model-specific, so its `baseURL` is the whole URL).
    */
   readonly defaultPath: string;
-  /** Whether `model` goes in the body (Cloudflare puts it in the URL). */
+  /** Whether `model` goes in the body (Cloudflare also puts it in the URL). */
   readonly modelInBody: boolean;
   /** The response is wrapped as `{ result: { ... } }` (Cloudflare Workers AI). */
   readonly resultWrapper: boolean;
-  /** The request carries OpenRouter's `provider` / `trace` / `session_id`. */
+  /** The request carries OpenRouter's `provider` / `trace` / `session_id` / `user`. */
   readonly routingExtras: boolean;
   /** IR question type -> the `type` string this dialect uses on the wire. */
   readonly wireTypes: Readonly<Record<QuestionType, string>>;
@@ -98,10 +98,11 @@ export const SYSTEMONE_DIALECTS: Readonly<Record<SystemOneDialect, SystemOneDial
     routingExtras: false,
     wireTypes: { ...CANONICAL_TYPES, noul: 'predicate', score: 'rubric' },
   },
-  // Workers AI: `/ai/run/@cf/cloudflare/clef[-flash]`, model in the URL.
+  // Workers AI: `/ai/run/@cf/cloudflare/clef[-flash]`. The model is in the URL
+  // and the Clef schema also takes the short name (`clef`/`clef-flash`) in the body.
   cloudflare: {
     defaultPath: '',
-    modelInBody: false,
+    modelInBody: true,
     resultWrapper: true,
     routingExtras: false,
     wireTypes: CANONICAL_TYPES,
@@ -133,6 +134,11 @@ export interface BuildSystemOneRequestOptions {
    * set this; the rest drop them with {@link buildImageDroppedWarning}.
    */
   readonly sendImages?: boolean;
+  /**
+   * How images are encoded: `'base64'` (default; bare base64, Ollama) or
+   * `'data-url'` (`data:<mediaType>;base64,...`, Cloudflare Clef).
+   */
+  readonly imageFormat?: 'base64' | 'data-url';
   /** Names the backend in errors raised while building. */
   readonly backendName?: string;
 }
@@ -183,7 +189,9 @@ export function buildSystemOneRequest(
           provenance: { backend: opts.backendName ?? 'systemone' },
         });
       }
-      return image.source.data;
+      return opts.imageFormat === 'data-url'
+        ? `data:${image.source.mediaType};base64,${image.source.data}`
+        : image.source.data;
     });
   }
 
@@ -201,6 +209,9 @@ export function buildSystemOneRequest(
     const sessionId = custom?.sessionId ?? custom?.session_id;
     if (sessionId !== undefined) {
       body.session_id = sessionId;
+    }
+    if (custom?.user !== undefined) {
+      body.user = custom.user;
     }
   }
 
@@ -255,6 +266,10 @@ function num(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined;
 }
 
+function str(value: unknown, fallback: string): string {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : fallback;
+}
+
 function malformed(backendName: string, message: string): ProviderError {
   return new ProviderError({
     code: ErrorCode.PROVIDER_ERROR,
@@ -279,6 +294,13 @@ export function parseSystemOneResponse(
 ): IRDecisionResponse {
   const spec = SYSTEMONE_DIALECTS[opts.dialect];
   const label = opts.backendName;
+
+  // Cloudflare's error envelope can arrive with a 2xx: `{ success: false, errors: [...] }`.
+  if (spec.resultWrapper && isRecord(body) && body.success === false) {
+    const errors = Array.isArray(body.errors) ? body.errors.filter(isRecord) : [];
+    const detail = errors.map((e) => `${str(e.code, '?')}: ${str(e.message, '')}`).join('; ');
+    throw malformed(label, `${label} request failed${detail ? ` (${detail})` : ''}`);
+  }
 
   let data: unknown = body;
   if (spec.resultWrapper && isRecord(body) && isRecord(body.result)) {
@@ -537,4 +559,24 @@ export async function decideViaSystemOne(
   const body = buildSystemOneRequest(ir, opts);
   const json = await postSystemOne(opts.url, body, opts);
   return parseSystemOneResponse(json, ir, opts);
+}
+
+// ============================================================================
+// Cost
+// ============================================================================
+
+/**
+ * Estimate a decision call's cost from the model registry's input-token
+ * price (decision models bill input only). Tokens are approximated as
+ * `ceil(chars / 4)` over the JSON of `state` + `questions`; images are not
+ * counted. Returns `null` for a model the registry has no price for.
+ */
+export function estimateSystemOneCost(ir: IRDecisionRequest, modelId: string): number | null {
+  const pricing = getModelPricingInfo(modelId);
+  if (!pricing) {
+    return null;
+  }
+  const text = JSON.stringify({ state: ir.state, questions: ir.questions });
+  const inputTokens = Math.ceil(text.length / 4);
+  return (inputTokens / 1_000_000) * pricing.inputPer1M;
 }
