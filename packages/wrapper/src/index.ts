@@ -76,3 +76,25 @@ export {
 } from './stream-utils.js';
 
 export type { CollectedStream, TransformStreamOptions } from './stream-utils.js';
+
+// Decision SDK wrappers
+export { createTypeSafeClient } from './typesafe-sdk.js';
+export type {
+  TypeSafeClient,
+  TypeSafeClientOptions,
+  TypeSafeCallOptions,
+  TypeSafeSDKRequest,
+  TypeSafeSDKResponse,
+} from './typesafe-sdk.js';
+export { createDecide, createDecisionModel } from './ai-sdk-decide.js';
+export type {
+  DecideOptions,
+  DecideParams,
+  DecideFunction,
+  DecisionModel,
+  VercelDecideRequest,
+  VercelDecideResponse,
+  VercelDecideQuestion,
+  VercelDecideAnswer,
+} from './ai-sdk-decide.js';
+export type { DecisionBridge } from './decision-bridge.js';

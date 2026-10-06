@@ -18,3 +18,5 @@ export * from './adapters/chrome-ai.js';
 export * from './adapters/generic.js';
 export * from './adapters/typesafe.js';
 export * from './adapters/laya.js';
+export * from './adapters/vercel-decide.js';
+export * from './adapters/openrouter-decisions.js';
