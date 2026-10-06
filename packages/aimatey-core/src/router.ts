@@ -283,7 +283,9 @@ export class Router implements IRouter {
       isHealthy: true,
       circuitBreakerState: 'closed',
       consecutiveFailures: 0,
-      options: options?.circuitBreaker ? { circuitBreaker: { ...options.circuitBreaker } } : undefined,
+      options: options?.circuitBreaker
+        ? { circuitBreaker: { ...options.circuitBreaker } }
+        : undefined,
       inFlight: 0,
       detached: false,
       idleWaiters: [],
@@ -534,7 +536,8 @@ export class Router implements IRouter {
       breaker.threshold !== undefined &&
       !(Number.isInteger(breaker.threshold) && breaker.threshold >= 1)
         ? `circuitBreaker.threshold must be a positive integer, got ${breaker.threshold}`
-        : breaker.timeout !== undefined && !(Number.isFinite(breaker.timeout) && breaker.timeout >= 0)
+        : breaker.timeout !== undefined &&
+            !(Number.isFinite(breaker.timeout) && breaker.timeout >= 0)
           ? `circuitBreaker.timeout must be a non-negative number of milliseconds, got ${breaker.timeout}`
           : undefined;
 
@@ -1559,7 +1562,9 @@ export class Router implements IRouter {
       if (newRouter.breakerPolicy(clonedState).enabled) {
         clonedState.circuitBreakerState = state.circuitBreakerState;
         clonedState.circuitOpenedAt = state.circuitOpenedAt;
-        clonedState.circuitRestMs = state.circuitRestMs;
+        // `circuitRestMs` is deliberately not inherited: the clone's own
+        // (possibly different) timeout governs how long an inherited open
+        // circuit rests, which is what "clone to change the timeout" means.
       }
     }
 

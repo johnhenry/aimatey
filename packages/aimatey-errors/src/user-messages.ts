@@ -45,7 +45,8 @@ const CATEGORY_MESSAGES: Readonly<Record<ErrorCategory, string>> = {
   [ErrorCategory.VALIDATION]: "That request couldn't be processed. Please check it and try again.",
   [ErrorCategory.PROVIDER]: 'The AI service had a problem. Please try again in a moment.',
   [ErrorCategory.ADAPTER]: "That request couldn't be processed. Please try again.",
-  [ErrorCategory.NETWORK]: "We couldn't reach the AI service. Please check your connection and try again.",
+  [ErrorCategory.NETWORK]:
+    "We couldn't reach the AI service. Please check your connection and try again.",
   [ErrorCategory.STREAMING]: 'The response was interrupted. Please try again.',
   [ErrorCategory.ROUTING]: 'The AI service is temporarily unavailable. Please try again shortly.',
   [ErrorCategory.MIDDLEWARE]: GENERIC_USER_MESSAGE,

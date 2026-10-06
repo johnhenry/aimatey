@@ -724,10 +724,7 @@ export interface Router extends BackendAdapter<unknown, unknown> {
    * Throws if `name` is not registered (synchronously, with or without `drain`).
    */
   unregister(name: string, options?: { readonly drain?: false }): Router;
-  unregister(
-    name: string,
-    options: { readonly drain: true | number }
-  ): Promise<UnregisterResult>;
+  unregister(name: string, options: { readonly drain: true | number }): Promise<UnregisterResult>;
   unregister(name: string, options?: UnregisterOptions): Router | Promise<UnregisterResult>;
 
   /**
