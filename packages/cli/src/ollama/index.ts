@@ -92,6 +92,12 @@ Global Options:
 
 Run Command Options:
   --system <text>          System message
+  --state <text>           Decision models: the state each prompt is judged against
+                           (default: the prompt itself)
+
+Decision models (nimble, tev1, kev, ...):
+  'run' does not chat. Each prompt is asked as one noul question, "Is the
+  following true? <prompt>", and answered as true/false with P(true).
 
 Pull Command Options:
   --output <path>          Output file path (default: ./models/<model>.gguf)
@@ -206,6 +212,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
           verbose: options.verbose || options.v,
           system: options.system,
           noStream: options['no-stream'],
+          state: typeof options.state === 'string' ? options.state : undefined,
         });
         break;
       }

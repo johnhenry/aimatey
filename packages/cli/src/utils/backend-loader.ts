@@ -58,9 +58,11 @@ export async function loadBackend(options: LoadBackendOptions): Promise<BackendA
     const backend = module.default;
 
     // Validate backend
-    if (typeof backend.execute !== 'function') {
+    // Chat backends implement execute(); decision-only backends (Jev, Laya,
+    // Ollama's systemone models) implement decide() instead.
+    if (typeof backend.execute !== 'function' && typeof backend.decide !== 'function') {
       throw new Error(
-        `Backend module ${path} does not implement BackendAdapter interface (missing execute method)`
+        `Backend module ${path} does not implement BackendAdapter interface (missing execute or decide method)`
       );
     }
 
