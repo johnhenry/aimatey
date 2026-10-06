@@ -7,6 +7,7 @@
  */
 
 import { STATUS_CODES, type ServerResponse } from 'node:http';
+import { toUserMessage } from '@johnhenry/aimatey-errors';
 
 /**
  * Fragments of an error message that describe the *server*, not the request.
@@ -25,6 +26,12 @@ const INTERNAL_DETAIL_PATTERNS: ReadonlyArray<RegExp> = [
 
 /**
  * Reduce an error to something safe to put on the wire.
+ *
+ * This is the *developer-facing* `message` of an error body: scrubbed, and
+ * replaced by status text on 5xx, but still prose written for someone reading
+ * logs. Every error body also carries `userMessage` ({@link toUserMessage}), the
+ * generic sentence a client should show an end user. Clients render
+ * `userMessage` and log `message`.
  *
  * 5xx means *we* failed. The client can do nothing with the detail and the
  * detail is exactly what an attacker wants, so it is replaced wholesale with
@@ -102,6 +109,7 @@ function formatOpenAIError(error: Error, statusCode: number): any {
   return {
     error: {
       message: sanitizeErrorMessage(error, statusCode),
+      userMessage: toUserMessage(error),
       type: getOpenAIErrorType(statusCode),
       code: statusCode === 429 ? 'rate_limit_exceeded' : null,
     },
@@ -117,6 +125,7 @@ function formatAnthropicError(error: Error, statusCode: number): any {
     error: {
       type: getAnthropicErrorType(statusCode),
       message: sanitizeErrorMessage(error, statusCode),
+      userMessage: toUserMessage(error),
     },
   };
 }
@@ -128,6 +137,7 @@ function formatGenericError(error: Error, statusCode: number): any {
   return {
     error: {
       message: sanitizeErrorMessage(error, statusCode),
+      userMessage: toUserMessage(error),
       status: statusCode,
     },
   };
