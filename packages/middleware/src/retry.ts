@@ -7,7 +7,7 @@
  */
 
 import type { Middleware, MiddlewareContext, MiddlewareNext } from '@johnhenry/aimatey-types';
-import type { IRChatResponse } from '@johnhenry/aimatey-types';
+import type { IRChatResponse, IRMetadata } from '@johnhenry/aimatey-types';
 import { AdapterError } from '@johnhenry/aimatey-errors';
 
 // ============================================================================
@@ -83,8 +83,10 @@ export interface RetryConfig {
  * second copy of the errors package across the ESM/CJS boundary makes
  * `instanceof` quietly false, and losing retries to a packaging artifact is the
  * kind of silent failure this policy exists to prevent.
+ *
+ * @internal Shared with the decision retry middleware.
  */
-function defaultShouldRetry(error: unknown, _attempt: number): boolean {
+export function defaultShouldRetry(error: unknown, _attempt: number): boolean {
   return (error as { isRetryable?: unknown } | undefined)?.isRetryable === true;
 }
 
@@ -124,6 +126,119 @@ function sleep(ms: number): Promise<void> {
 // ============================================================================
 
 /**
+ * Run `call` with the retry policy of {@link RetryConfig}.
+ *
+ * The request-type-agnostic core behind {@link createRetryMiddleware} and
+ * `createDecisionRetryMiddleware`: backoff, jitter, the `shouldRetry` /
+ * `onRetry` contract, abort handling and the `retryAttempts` /
+ * `retrySuccess` annotation live here once. A response must carry
+ * `IRMetadata` for the annotation, which every IR response does.
+ *
+ * @param call Invoked once per attempt
+ * @param config Retry configuration
+ * @param options.signal Stops the loop once aborted
+ * @param options.rethrowAsIs Errors for which the final failure is thrown
+ *   untouched, rather than re-wrapped with `retryAttempts` details (used to
+ *   keep a `ValidationError` a `ValidationError`)
+ *
+ * @internal
+ */
+export async function runWithRetry<T extends { readonly metadata: IRMetadata }>(
+  call: () => Promise<T>,
+  config: RetryConfig,
+  options: { signal?: AbortSignal; rethrowAsIs?: (error: unknown) => boolean } = {}
+): Promise<T> {
+  const {
+    maxAttempts = 3,
+    initialDelay = 1000,
+    backoffMultiplier = 2,
+    maxDelay = 30000,
+    useJitter = true,
+    shouldRetry = defaultShouldRetry,
+    onRetry,
+  } = config;
+  const { signal, rethrowAsIs } = options;
+
+  let lastError: unknown;
+  let attempt = 0;
+
+  while (attempt < maxAttempts) {
+    try {
+      const response = await call();
+
+      // Success - add retry metadata if we retried
+      if (attempt > 0) {
+        return {
+          ...response,
+          metadata: {
+            ...response.metadata,
+            custom: {
+              ...response.metadata.custom,
+              retryAttempts: attempt,
+              retrySuccess: true,
+            },
+          },
+        };
+      }
+
+      return response;
+    } catch (error) {
+      lastError = error;
+      attempt++;
+
+      // Check if we should retry
+      const willRetry = attempt < maxAttempts && shouldRetry(error, attempt);
+
+      if (!willRetry) {
+        // No more retries - add metadata and throw
+        if (error instanceof AdapterError && !rethrowAsIs?.(error)) {
+          throw new AdapterError({
+            ...error,
+            details: {
+              ...error.details,
+              retryAttempts: attempt,
+              retrySuccess: false,
+            },
+          });
+        }
+
+        throw error;
+      }
+
+      // Calculate retry delay
+      const delay = calculateDelay(
+        attempt - 1, // 0-indexed for delay calculation
+        initialDelay,
+        backoffMultiplier,
+        maxDelay,
+        useJitter
+      );
+
+      // Call retry callback if provided
+      if (onRetry) {
+        onRetry(error, attempt, delay);
+      }
+
+      // Check if request was aborted
+      if (signal?.aborted) {
+        throw error;
+      }
+
+      // Wait before retrying
+      await sleep(delay);
+
+      // Check again if request was aborted during sleep
+      if (signal?.aborted) {
+        throw error;
+      }
+    }
+  }
+
+  // Should never reach here, but just in case
+  throw lastError;
+}
+
+/**
  * Create retry middleware.
  *
  * Retries failed requests with exponential backoff.
@@ -144,96 +259,8 @@ function sleep(ms: number): Promise<void> {
  * ```
  */
 export function createRetryMiddleware(config: RetryConfig = {}): Middleware {
-  const {
-    maxAttempts = 3,
-    initialDelay = 1000,
-    backoffMultiplier = 2,
-    maxDelay = 30000,
-    useJitter = true,
-    shouldRetry = defaultShouldRetry,
-    onRetry,
-  } = config;
-
-  return async (context: MiddlewareContext, next: MiddlewareNext): Promise<IRChatResponse> => {
-    let lastError: unknown;
-    let attempt = 0;
-
-    while (attempt < maxAttempts) {
-      try {
-        // Call next middleware/handler
-        const response = await next();
-
-        // Success - add retry metadata if we retried
-        if (attempt > 0) {
-          return {
-            ...response,
-            metadata: {
-              ...response.metadata,
-              custom: {
-                ...response.metadata.custom,
-                retryAttempts: attempt,
-                retrySuccess: true,
-              },
-            },
-          };
-        }
-
-        return response;
-      } catch (error) {
-        lastError = error;
-        attempt++;
-
-        // Check if we should retry
-        const willRetry = attempt < maxAttempts && shouldRetry(error, attempt);
-
-        if (!willRetry) {
-          // No more retries - add metadata and throw
-          if (error instanceof AdapterError) {
-            throw new AdapterError({
-              ...error,
-              details: {
-                ...error.details,
-                retryAttempts: attempt,
-                retrySuccess: false,
-              },
-            });
-          }
-
-          throw error;
-        }
-
-        // Calculate retry delay
-        const delay = calculateDelay(
-          attempt - 1, // 0-indexed for delay calculation
-          initialDelay,
-          backoffMultiplier,
-          maxDelay,
-          useJitter
-        );
-
-        // Call retry callback if provided
-        if (onRetry) {
-          onRetry(error, attempt, delay);
-        }
-
-        // Check if request was aborted
-        if (context.signal?.aborted) {
-          throw error;
-        }
-
-        // Wait before retrying
-        await sleep(delay);
-
-        // Check again if request was aborted during sleep
-        if (context.signal?.aborted) {
-          throw error;
-        }
-      }
-    }
-
-    // Should never reach here, but just in case
-    throw lastError;
-  };
+  return (context: MiddlewareContext, next: MiddlewareNext): Promise<IRChatResponse> =>
+    runWithRetry(() => next(), config, { signal: context.signal });
 }
 
 // ============================================================================
