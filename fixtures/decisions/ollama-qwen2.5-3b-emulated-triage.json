@@ -1,0 +1,58 @@
+{
+  "metadata": {
+    "provider": "ollama",
+    "scenario": "emulated-decision-triage",
+    "model": "qwen2.5:3b",
+    "ollamaVersion": "0.35.1",
+    "capturedAt": "2026-10-06T18:25:36.401Z",
+    "description": "createEmulatedDecisionBackend over OllamaBackendAdapter: choice + noul + score through Bridge.decide()"
+  },
+  "request": {
+    "state": "Subject: charged twice!! Hi, my card was billed two times for the October plan and I am locked out of my account too. Please fix today.",
+    "questions": {
+      "team": {
+        "type": "choice",
+        "instructions": "Which team?",
+        "criteria": {
+          "auth": "Login problems",
+          "billing": "Charges",
+          "other": "Other"
+        }
+      },
+      "urgent": {
+        "type": "noul",
+        "instructions": "Is it urgent?"
+      },
+      "severity": {
+        "type": "score",
+        "instructions": "How severe?",
+        "criteria": [
+          "low",
+          "medium",
+          "high"
+        ]
+      }
+    }
+  },
+  "response": {
+    "answers": {
+      "team": {
+        "type": "choice",
+        "value": "billing"
+      },
+      "urgent": {
+        "type": "noul",
+        "value": 0
+      },
+      "severity": {
+        "type": "score",
+        "value": 2
+      }
+    },
+    "usage": {
+      "inputTokens": 334,
+      "outputTokens": 21
+    },
+    "model": "qwen2.5:3b"
+  }
+}

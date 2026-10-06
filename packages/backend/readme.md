@@ -77,6 +77,7 @@ precisely so it isn't forced to fake a chat capability it doesn't have.
 - **OpenRouter** - `OpenRouterBackendAdapter.decide()` against `/api/alpha/decisions` (derived from `baseURL`; `decisionsEndpoint: 'systemone'` falls back to `/api/v1/systemone`). Routes to Jev, Kev and Mercury Decide; `parameters.custom.provider` / `trace` / `session_id` / `user` pass through; the response carries `id`, `provider` and `usage.cost`
 - **Perplexity** - `PerplexityBackendAdapter.decide()` against `<baseURL>/v1/decisions` with `pplx-decider-v1-27b` (default) and images (field name and encoding unverified)
 - **Inception (Mercury Decide)** - `InceptionBackendAdapter.decide()`; the native endpoint is unverified, so it assumes `<baseURL>/systemone`; works through OpenRouter today
+- **Together AI (Tev1)** - `TogetherAIBackendAdapter.decide()` for `together/Tev1-4B-experimental` and `together/Tev1-0.8B-experimental`. Not System One: each question is one chat-completions call and the model answers a single letter A-X, so a request makes one call per question (4 at a time by default; `parameters.custom.concurrency`). Native for `choice` only, with **2 to 24 options** (more throws), no images, $0.042 per 1M input tokens. `noul` and `score` are emulated on the same protocol with neutral option keys and each such answer carries a warning (`decisionsEmulatedTypes: ['noul', 'score']`). `probabilities` come from the first token's `top_logprobs` (softmax over the valid letters; letters outside the top 24 get 0) and `confidence` is `1 - H(p) / ln(n)`; if Together returns no logprobs the answer has neither, plus a warning.
 
 | Backend | Endpoint | Types | Images | Limits |
 |---------|----------|-------|--------|--------|
@@ -84,6 +85,7 @@ precisely so it isn't forced to fake a chat capability it doesn't have.
 | OpenRouter | `/api/alpha/decisions` | choice, score, noul | no | Jev's: 255 options, 10 levels, 32k state tokens |
 | Perplexity | `/v1/decisions` | choice, score, noul | yes (unverified encoding) | undeclared |
 | Inception | `/systemone` (unverified) | choice, score, noul | no | undeclared |
+| Together AI (Tev1) | chat-completions letter protocol (not System One) | choice native; noul/score emulated | no | 2-24 options |
 
 ```typescript
 import { SystemOneBackendAdapter } from '@johnhenry/aimatey-backend';
