@@ -87,6 +87,16 @@
         "default": "./dist/cjs/cost-tracking.js"
       }
     },
+    "./decisions": {
+      "import": {
+        "types": "./dist/types/decisions/index.d.ts",
+        "default": "./dist/esm/decisions/index.js"
+      },
+      "require": {
+        "types": "./dist/types/decisions/index.d.ts",
+        "default": "./dist/cjs/decisions/index.js"
+      }
+    },
     "./opentelemetry": {
       "import": {
         "types": "./dist/types/opentelemetry.d.ts",

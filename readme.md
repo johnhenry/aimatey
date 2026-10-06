@@ -205,6 +205,7 @@ bridge
 - **Cost Tracking** - Token usage and cost tracking per request
 - **Security** - PII redaction, content sanitization, prompt-injection detection, HTTP header policy
 - **Conversation History** - Automatic context management and persistence
+- **Decision middleware** - Caching, cost tracking, retry, logging, OpenTelemetry and validation for `bridge.decide()` (`createDecision*Middleware`, registered with `bridge.useDecision()`)
 
 ### HTTP Server
 

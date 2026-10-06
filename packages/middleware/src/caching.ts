@@ -33,7 +33,12 @@ import type {
   MiddlewareNext,
   CacheStorage,
 } from '@johnhenry/aimatey-types';
-import type { IRChatRequest, IRChatResponse, IRWarning } from '@johnhenry/aimatey-types';
+import type {
+  IRChatRequest,
+  IRChatResponse,
+  IRMetadata,
+  IRWarning,
+} from '@johnhenry/aimatey-types';
 import { stableHash } from './hash.js';
 
 // ============================================================================
@@ -132,10 +137,14 @@ export interface CachingConfig {
  * `metadata.principal`, so a deployment that derives identity out of band
  * can override what the request claims. `undefined` means the request
  * carries no identity at all.
+ *
+ * Generic over the request type so the decision caching middleware shares it.
+ *
+ * @internal
  */
-function resolveCacheScope(
-  request: IRChatRequest,
-  scopeKey?: string | ((request: IRChatRequest) => string | undefined)
+export function resolveCacheScope<R extends { readonly metadata?: IRMetadata }>(
+  request: R,
+  scopeKey?: string | ((request: R) => string | undefined)
 ): string | undefined {
   const explicit = typeof scopeKey === 'function' ? scopeKey(request) : scopeKey;
   if (explicit !== undefined && explicit !== '') {
@@ -186,16 +195,20 @@ function defaultCacheKey(request: IRChatRequest, scope: string | undefined): str
 // In-Memory Cache Storage with LRU
 // ============================================================================
 
-interface CacheEntry {
-  value: IRChatResponse;
+interface CacheEntry<T> {
+  value: T;
   expiresAt: number;
 }
 
 /**
  * In-memory cache storage with LRU eviction.
+ *
+ * Generic over the cached value so `createDecisionCachingMiddleware` can use
+ * it as `InMemoryCacheStorage<IRDecisionResponse>`; the default keeps the
+ * chat shape.
  */
-export class InMemoryCacheStorage implements CacheStorage {
-  private cache = new Map<string, CacheEntry>();
+export class InMemoryCacheStorage<T = IRChatResponse> {
+  private cache = new Map<string, CacheEntry<T>>();
   private accessOrder: string[] = [];
   private maxSize: number;
 
@@ -203,7 +216,7 @@ export class InMemoryCacheStorage implements CacheStorage {
     this.maxSize = maxSize;
   }
 
-  get(key: string): Promise<IRChatResponse | undefined> {
+  get(key: string): Promise<T | undefined> {
     const entry = this.cache.get(key);
 
     if (!entry) {
@@ -223,7 +236,7 @@ export class InMemoryCacheStorage implements CacheStorage {
     return Promise.resolve(entry.value);
   }
 
-  set(key: string, value: IRChatResponse, ttl: number = 3600000): Promise<void> {
+  set(key: string, value: T, ttl: number = 3600000): Promise<void> {
     // Evict if at max size
     if (this.cache.size >= this.maxSize && !this.cache.has(key)) {
       this.evictLRU();
@@ -346,7 +359,7 @@ export class InMemoryCacheStorage implements CacheStorage {
  * The warning attached to a response that was not cached because the request
  * carried no caller identity.
  */
-const CACHE_BYPASSED_WARNING: IRWarning = {
+export const CACHE_BYPASSED_WARNING: IRWarning = {
   category: 'cache-bypassed',
   severity: 'warning',
   message:
@@ -364,8 +377,13 @@ const CACHE_BYPASSED_WARNING: IRWarning = {
  * The bypass is deliberately noisy: a cache that silently stops working is
  * as hard to notice as one that silently leaks, so the reason travels on the
  * response rather than only in this module's documentation.
+ *
+ * Generic over the response type so the decision caching middleware shares
+ * it.
+ *
+ * @internal
  */
-function withBypassWarning(response: IRChatResponse): IRChatResponse {
+export function withBypassWarning<T extends { readonly metadata: IRMetadata }>(response: T): T {
   return {
     ...response,
     metadata: {
