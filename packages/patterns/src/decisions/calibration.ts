@@ -14,7 +14,8 @@ import type {
   IRDecisionAnswer,
   IRDecisionQuestion,
 } from '@johnhenry/aimatey-types';
-import { concentration, invalid, normalize } from './shared.js';
+import { decisionConfidence, noulConfidence } from '@johnhenry/aimatey-utils';
+import { invalid, normalize } from './shared.js';
 
 /** Options for {@link createTemperatureScaling}. */
 export interface TemperatureScalingOptions {
@@ -37,9 +38,10 @@ export interface TemperatureScalingOptions {
 
   /**
    * How `confidence` is recomputed on `choice` and `score` after rescaling.
-   * `'concentration'` is `1 - H(p) / ln(n)`, the measure the Together Tev1
-   * adapter reports; `'winner-mass'` is the largest probability, which is
-   * what the IR's `confidence` doc describes. `noul` is always `max(p, 1 - p)`.
+   * `'concentration'` is `decisionConfidence(p)` (`1 - H(p) / ln(n)`, from
+   * `@johnhenry/aimatey-utils`), the library-wide definition; `noul` uses
+   * `noulConfidence(p)`. `'winner-mass'` is the largest probability instead
+   * (`max(p, 1 - p)` for `noul`).
    * @default 'concentration'
    */
   readonly confidence?: 'concentration' | 'winner-mass';
@@ -53,7 +55,7 @@ export interface TemperatureScalingOptions {
  *   `value` is kept for `choice` (the argmax cannot change); for `score` it
  *   becomes the expected level index of the new distribution. `confidence`
  *   is recomputed from the new distribution.
- * - `noul`: `sigmoid(logit(p) / T)`; `confidence` is `max(p', 1 - p')`.
+ * - `noul`: `sigmoid(logit(p) / T)`; `confidence` is `noulConfidence(p')`.
  *   Exact 0 and 1 are left alone (their logit is infinite).
  *
  * Answers without `probabilities` (`choice`, `score`) have nothing to
@@ -125,7 +127,7 @@ function rescale(
     return w.some((x) => x > 0) ? normalize(w) : [...p];
   };
   const confidenceOf = (p: readonly number[]): number =>
-    measure === 'winner-mass' ? Math.max(...p) : concentration(p);
+    measure === 'winner-mass' ? Math.max(...p) : decisionConfidence(p);
 
   switch (answer.type) {
     case 'choice': {
@@ -156,7 +158,12 @@ function rescale(
       const v = answer.value;
       const scaled =
         v <= 0 || v >= 1 ? v : 1 / (1 + Math.exp(-Math.log(v / (1 - v)) / temperature));
-      return { ...answer, value: scaled, confidence: Math.max(scaled, 1 - scaled) };
+      return {
+        ...answer,
+        value: scaled,
+        confidence:
+          measure === 'winner-mass' ? Math.max(scaled, 1 - scaled) : noulConfidence(scaled),
+      };
     }
   }
 }

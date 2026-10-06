@@ -44,7 +44,11 @@ import {
   ErrorCode,
   createErrorFromHttpResponse,
 } from '@johnhenry/aimatey-errors';
-import { normalizeSystemMessages, getModelPricingInfo } from '@johnhenry/aimatey-utils';
+import {
+  normalizeSystemMessages,
+  getModelPricingInfo,
+  decisionConfidence,
+} from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
 
 // ============================================================================
@@ -811,9 +815,8 @@ function tev1Options(name: string, question: IRDecisionQuestion, backend: string
  * absent or hold no valid letter, the answer is returned with no
  * `probabilities` or `confidence` (both optional in the IR) and a warning.
  *
- * `confidence` is distribution concentration, not accuracy: 1 - H(p) / ln(n)
- * with H the Shannon entropy over the n options. 1 is a one-hot
- * distribution, 0 is uniform.
+ * `confidence` is distribution concentration, not accuracy:
+ * `decisionConfidence(p)` (1 - H(p) / ln(n), 1 is one-hot, 0 is uniform).
  *
  * `noul` value is the probability of the `true` option (else 0 or 1 by the
  * chosen letter); `score` value is the probability-weighted expected level
@@ -883,8 +886,7 @@ function tev1Parse(
   }
 
   const probs = weights.map((w) => w / total);
-  const entropy = -probs.reduce((h, p) => (p > 0 ? h + p * Math.log(p) : h), 0);
-  const confidence = Math.min(1, Math.max(0, 1 - entropy / Math.log(options.length)));
+  const confidence = decisionConfidence(probs);
 
   switch (question.type) {
     case 'choice':

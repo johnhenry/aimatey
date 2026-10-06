@@ -59,7 +59,11 @@ questions (`choice` / `score` / `noul`) with one structured-output call. It is *
 and `Router` never emulate decisions on their own, so a chat backend only answers `decide()` when
 you wrap it. It is also **honest**: the answers carry no `probabilities` and no `confidence` (a chat
 model has no calibrated distribution to report, and a made-up one would mislead), every response has
-a `capability-emulated` warning, and the adapter declares `decisionsEmulated: true`. Prefer a real
+a `capability-emulated` warning, and the adapter declares `decisionsEmulated: true`. Small models drift
+from the schema, so near-misses are coerced rather than rejected: `"true"` / `"false"` (any case) or
+`1` / `0` for a `noul`, a numeric string or number for a `score` index, and a trimmed,
+case-insensitive match for a `choice` key or score label (an exact match always wins). Each
+coercion adds a `response-malformed` warning; anything else outside the enum still rejects. Prefer a real
 decision model (Jev, Laya, Tev1, Ollama's `nimble`) where one is available, and use this as the
 fallback or for local experiments.
 
@@ -103,7 +107,11 @@ Vercel AI Gateway's `when` contract (`confidenceBelow`, `probabilityBetween`, `a
 `atLeast`; max 5 levels, 1-20 conditions per list), validated against the request's question types
 up front. The fallback's response is returned with `metadata.custom.escalation`
 (`triggeredBy`, `primaryModel`, `primaryBackend`, `primaryUsage`), and `usage` is the **sum of both
-stages**, as Vercel bills them. A missing `confidence` matches `confidenceBelow` (reason
+stages**, as Vercel bills them. A rule that cannot apply to a request (`confidenceBelow` with no
+`choice`/`score` question, `probabilityBetween` with no `noul` one) throws a `ValidationError` by
+default; pass `onUnmatchable: 'skip'` to treat that leaf as not matched instead, so one policy can
+serve mixed requests (a skipped leaf never matches: it adds nothing inside `any` and keeps an
+`all` from matching). Unknown question names and malformed conditions still throw. A missing `confidence` matches `confidenceBelow` (reason
 `confidence_unavailable`), so an emulated primary always escalates.
 
 ```typescript
@@ -119,9 +127,9 @@ bridge.useDecision(
 
 `evaluateDecisionCondition(condition, answers)` is the pure predicate, and
 `decisionBands(answer, { act, review })` sorts one answer into `'act' | 'review' | 'escalate'`
-(confidence for `choice`/`score`, `max(p, 1 - p)` for `noul`). **Choose the `act` and `review`
+(confidence for `choice`/`score`, `noulConfidence(value)` for `noul`). **Choose the `act` and `review`
 thresholds from your own `calibrationReport()`, not from defaults**: confidence is distribution
-concentration, not accuracy, and there are deliberately no built-in numbers.
+concentration (`decisionConfidence()` in `@johnhenry/aimatey-utils`: `1 - H(p) / ln(n)`), not accuracy, and there are deliberately no built-in numbers.
 
 **Neutral option keys.** Rewrites each `choice` to `opt_1..n` with the original key folded into the
 description (`"billing: Charges and invoices"`), and maps `value` and `probabilities` back. In

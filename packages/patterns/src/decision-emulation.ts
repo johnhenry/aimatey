@@ -90,8 +90,12 @@ const JSON_ONLY_INSTRUCTION =
  * `noul` -> boolean). When the chat backend's `structuredOutput` is
  * `'fallback'` or undeclared, a strict JSON-only instruction is added and
  * the reply is parsed defensively (fences and surrounding prose are
- * tolerated). Any answer outside its enum rejects with a `ProviderError`
- * naming the question.
+ * tolerated). Near-misses are coerced rather than rejected -- `"true"` /
+ * `"false"` (any case) or `1` / `0` for `noul`, a numeric string or number for
+ * a `score` index, a trimmed / case-insensitive match for a `choice` key or
+ * score label (exact matches always win) -- and each coercion adds a
+ * `response-malformed` warning. Any other answer outside its enum rejects
+ * with a `ProviderError` naming the question.
  *
  * `score` is asked as the level *label*, not its index: small models are
  * prone to off-by-one on bare integers, and a label cannot point the wrong
@@ -208,11 +212,20 @@ export function createEmulatedDecisionBackend(
       const { chatRequest, warnings: requestWarnings } = buildChatRequest(request);
       const reply = await gate(() => chat.execute(chatRequest, signal));
 
-      const answers = parseAnswers(request, reply, includeReasoning, name);
+      const { answers, coerced } = parseAnswers(request, reply, includeReasoning, name);
 
       const warnings: IRWarning[] = [
         ...(request.metadata.warnings ?? []),
         ...requestWarnings,
+        ...coerced.map(
+          ({ question, note }): IRWarning => ({
+            category: 'response-malformed',
+            severity: 'warning',
+            message: `Chat model's answer to question '${question}' did not match the schema and was coerced: ${note}.`,
+            field: `answers.${question}`,
+            source: name,
+          })
+        ),
         ...(reply.metadata?.warnings ?? []).filter(
           (w) => !(request.metadata.warnings ?? []).includes(w)
         ),
@@ -412,12 +425,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Answers plus a note for each one that needed coercing to fit its question. */
+interface ParsedAnswers {
+  readonly answers: Record<string, IRDecisionAnswer>;
+  readonly coerced: Array<{ readonly question: string; readonly note: string }>;
+}
+
 function parseAnswers(
   request: IRDecisionRequest,
   reply: IRChatResponse,
   includeReasoning: boolean,
   backend: string
-): Record<string, IRDecisionAnswer> {
+): ParsedAnswers {
   const parsed = extractJSON(replyText(reply));
   if (!isRecord(parsed)) {
     throw fail(backend, 'Emulated decision reply was not parseable as a JSON object');
@@ -426,6 +445,7 @@ function parseAnswers(
   const raw = isRecord(parsed.answers) ? parsed.answers : parsed;
 
   const answers: Record<string, IRDecisionAnswer> = {};
+  const coerced: ParsedAnswers['coerced'] = [];
   for (const [qName, question] of Object.entries(request.questions)) {
     if (!(qName in raw)) {
       throw fail(backend, `Emulated decision reply did not answer question '${qName}'`);
@@ -442,33 +462,61 @@ function parseAnswers(
       reasoning = typeof value.reasoning === 'string' ? value.reasoning : undefined;
       value = value.answer;
     }
-    answers[qName] = toAnswer(qName, question, value, reasoning, backend);
+    answers[qName] = toAnswer(qName, question, value, reasoning, backend, (note) =>
+      coerced.push({ question: qName, note })
+    );
   }
-  return answers;
+  return { answers, coerced };
 }
 
+/**
+ * Chat models drift from the schema even when it is enforced (a boolean
+ * answered as the string `"true"`, a score as its bare index, a choice key
+ * in the wrong case). Each answer is matched exactly first; only then is a
+ * lenient reading tried, and `onCoerced` records that it was needed. Anything
+ * that still does not fit is rejected.
+ */
 function toAnswer(
   qName: string,
   question: IRDecisionQuestion,
   value: unknown,
   reasoning: string | undefined,
-  backend: string
+  backend: string,
+  onCoerced: (note: string) => void
 ): IRDecisionAnswer {
   const extra = reasoning !== undefined ? { reasoning } : {};
   switch (question.type) {
     case 'choice': {
       const keys = Object.keys(question.criteria);
-      if (typeof value !== 'string' || !keys.includes(value)) {
-        throw fail(
-          backend,
-          `Emulated answer for question '${qName}' is ${JSON.stringify(value)}, which is not one of: ${keys.join(', ')}`
-        );
+      if (typeof value === 'string' && keys.includes(value)) {
+        return { type: 'choice', value, ...extra };
       }
-      return { type: 'choice', value, ...extra };
+      const loose = typeof value === 'string' ? looseMatches(keys, value) : [];
+      if (loose.length === 1) {
+        onCoerced(`${JSON.stringify(value)} was read as '${loose[0]}'`);
+        return { type: 'choice', value: loose[0]!, ...extra };
+      }
+      throw fail(
+        backend,
+        `Emulated answer for question '${qName}' is ${JSON.stringify(value)}, which is not one of: ${keys.join(', ')}`
+      );
     }
     case 'score': {
       const tokens = scoreTokens(question.criteria);
-      const index = typeof value === 'string' ? tokens.indexOf(value) : -1;
+      let index = typeof value === 'string' ? tokens.indexOf(value) : -1;
+      if (index === -1) {
+        const asIndex = scoreIndex(value, tokens.length);
+        if (asIndex !== undefined) {
+          index = asIndex;
+          onCoerced(`${JSON.stringify(value)} was read as the level index ${asIndex}`);
+        } else {
+          const loose = typeof value === 'string' ? looseMatches(tokens, value) : [];
+          if (loose.length === 1) {
+            index = tokens.indexOf(loose[0]!);
+            onCoerced(`${JSON.stringify(value)} was read as the level '${loose[0]}'`);
+          }
+        }
+      }
       if (index === -1) {
         throw fail(
           backend,
@@ -478,15 +526,55 @@ function toAnswer(
       return { type: 'score', value: index, ...extra };
     }
     case 'noul': {
-      if (typeof value !== 'boolean') {
+      if (typeof value === 'boolean') {
+        return { type: 'noul', value: value ? 1 : 0, ...extra };
+      }
+      const asBool = looseBoolean(value);
+      if (asBool === undefined) {
         throw fail(
           backend,
           `Emulated answer for question '${qName}' is ${JSON.stringify(value)}, expected true or false`
         );
       }
-      return { type: 'noul', value: value ? 1 : 0, ...extra };
+      onCoerced(`${JSON.stringify(value)} was read as ${asBool}`);
+      return { type: 'noul', value: asBool ? 1 : 0, ...extra };
     }
   }
+}
+
+/** Candidates equal to `value` ignoring case and surrounding whitespace. */
+function looseMatches(candidates: readonly string[], value: string): string[] {
+  const wanted = value.trim().toLowerCase();
+  return candidates.filter((c) => c.trim().toLowerCase() === wanted);
+}
+
+/** `"true"`/`"false"` (any case, padded), `"1"`/`"0"`, `1`/`0`; otherwise undefined. */
+function looseBoolean(value: unknown): boolean | undefined {
+  if (value === 1 || value === 0) {
+    return value === 1;
+  }
+  if (typeof value === 'string') {
+    switch (value.trim().toLowerCase()) {
+      case 'true':
+      case '1':
+        return true;
+      case 'false':
+      case '0':
+        return false;
+    }
+  }
+  return undefined;
+}
+
+/** An in-range integer level index given as a number or a numeric string; otherwise undefined. */
+function scoreIndex(value: unknown, levels: number): number | undefined {
+  const n =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && /^\s*\d+\s*$/.test(value)
+        ? Number(value)
+        : NaN;
+  return Number.isInteger(n) && n >= 0 && n < levels ? n : undefined;
 }
 
 // ============================================================================
