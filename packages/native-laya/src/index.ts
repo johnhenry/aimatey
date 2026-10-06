@@ -170,6 +170,8 @@ export class LayaBackendAdapter implements BackendAdapter {
           maxScoreLevels: 10,
           maxStateTokens: 512,
           maxImages: 0,
+          // One ONNX session: concurrent decide() calls only queue.
+          maxConcurrency: 1,
         },
         // Chat-shaped fields don't apply -- see TypeSafeBackendAdapter's
         // identical reasoning for why these are `false`/'not-supported'

@@ -33,10 +33,18 @@ import { AdapterError, ErrorCode, RouterError } from '@johnhenry/aimatey-errors'
 import {
   createWarning,
   supportsEmbeddings,
+  supportsDecisions,
   supportsChat,
   supportsChatStream,
+  validateDecisionRequest,
 } from '@johnhenry/aimatey-utils';
-import type { IREmbedRequest, IREmbedResponse } from '@johnhenry/aimatey-types';
+import type {
+  IRDecisionRequest,
+  IRDecisionResponse,
+  IREmbedRequest,
+  IREmbedResponse,
+  IRWarning,
+} from '@johnhenry/aimatey-types';
 import type { TranslationResult } from './model-translation.js';
 import type { AIModel } from '@johnhenry/aimatey-types';
 import type { CapabilityRequirements, BackendModel } from './capability-matcher.js';
@@ -643,7 +651,7 @@ export class Router implements IRouter {
     };
 
     // Try explicit preference first
-    if (preferredBackend && this.isBackendAvailable(preferredBackend)) {
+    if (preferredBackend && this.isChatBackendAvailable(preferredBackend)) {
       return preferredBackend;
     }
 
@@ -696,7 +704,12 @@ export class Router implements IRouter {
     }
 
     // Fallback to default backend
-    if (!selectedBackend && this.config.defaultBackend) {
+    // (A decision-only default is skipped: it cannot serve chat.)
+    if (
+      !selectedBackend &&
+      this.config.defaultBackend &&
+      !this.isDecisionOnly(this.config.defaultBackend)
+    ) {
       selectedBackend = this.config.defaultBackend;
     }
 
@@ -961,7 +974,7 @@ export class Router implements IRouter {
     // Determine which backends to use
     const backendsToUse =
       targetBackends && targetBackends.length > 0
-        ? targetBackends.filter((name) => this.isBackendAvailable(name))
+        ? targetBackends.filter((name) => this.isChatBackendAvailable(name))
         : this.getAvailableBackends();
 
     if (backendsToUse.length === 0) {
@@ -1421,7 +1434,7 @@ export class Router implements IRouter {
    * first). Success/failure and cost are tracked like chat requests.
    */
   async embed(request: IREmbedRequest, signal?: AbortSignal): Promise<IREmbedResponse> {
-    const candidates = this.getAvailableBackends().filter((name) => {
+    const candidates = this.getAvailableBackends('any').filter((name) => {
       const adapter = this.backends.get(name)?.adapter;
       return adapter !== undefined && supportsEmbeddings(adapter);
     });
@@ -1516,6 +1529,167 @@ export class Router implements IRouter {
       new RouterError({
         code: ErrorCode.ALL_BACKENDS_FAILED,
         message: 'All embedding-capable backends failed',
+        provenance: { router: this.metadata.name },
+      })
+    );
+  }
+
+  /**
+   * Answer typed decision questions via the best available backend.
+   *
+   * Mirrors {@link Router.embed}: candidates are registered backends that
+   * implement `decide()`, whose circuit is not open, and that can serve this
+   * request -- a backend whose `decisionTypes`, `decisionLimits` or
+   * `decisionImages` rule it out is skipped (reported through
+   * `config.onWarning`), not failed. Candidates are tried in fallback-chain
+   * order, then the default backend, then registration order; success,
+   * failure, latency and cost are tracked per backend like chat requests (and,
+   * like `embed()`, not in the router-level totals).
+   *
+   * `request.parameters.model` is a hint: a candidate that declares
+   * `decisionModels` without it is tried after the rest, not excluded.
+   *
+   * @throws AdapterError UNSUPPORTED_FEATURE when no backend supports decisions
+   * @throws ValidationError when decision backends exist but none can serve the request
+   */
+  async decide(request: IRDecisionRequest, signal?: AbortSignal): Promise<IRDecisionResponse> {
+    let firstRejection: Error | undefined;
+    const advisories = new Map<string, readonly IRWarning[]>();
+
+    const candidates = this.getAvailableBackends('any').filter((name) => {
+      const adapter = this.backends.get(name)?.adapter;
+      if (adapter === undefined || !supportsDecisions(adapter)) {
+        return false;
+      }
+      try {
+        advisories.set(name, validateDecisionRequest(request, adapter.metadata.capabilities));
+        return true;
+      } catch (error) {
+        firstRejection ??= error as Error;
+        this.config.onWarning?.(
+          createWarning(
+            'capability-unsupported',
+            `Backend '${name}' skipped for this decision request: ${(error as Error).message}`,
+            { severity: 'info', source: this.metadata.name }
+          )
+        );
+        return false;
+      }
+    });
+
+    // Prefer fallback-chain order, then default backend, then registration order
+    const ordered = [
+      ...this.fallbackChain.filter((name) => candidates.includes(name)),
+      ...(this.config.defaultBackend && candidates.includes(this.config.defaultBackend)
+        ? [this.config.defaultBackend]
+        : []),
+      ...candidates,
+    ].filter((name, index, all) => all.indexOf(name) === index);
+
+    // A hinted model a backend does not declare sorts last (stable).
+    const hint = request.parameters?.model;
+    if (hint) {
+      const declares = (name: string): boolean => {
+        const models = this.backends.get(name)?.adapter.metadata.capabilities.decisionModels;
+        return !models || models.length === 0 || models.includes(hint);
+      };
+      ordered.sort((a, b) => Number(!declares(a)) - Number(!declares(b)));
+    }
+
+    if (ordered.length === 0) {
+      // Decision backends exist but none can serve this request: say why.
+      if (firstRejection) {
+        throw firstRejection;
+      }
+      throw new AdapterError({
+        code: ErrorCode.UNSUPPORTED_FEATURE,
+        message: 'No registered backend supports decisions',
+        isRetryable: false,
+        provenance: { router: this.metadata.name },
+      });
+    }
+
+    let lastError: Error | undefined;
+
+    for (const name of ordered) {
+      const state = this.backends.get(name);
+      if (!state) {
+        continue;
+      }
+
+      if (this.config.enableCircuitBreaker) {
+        try {
+          this.checkCircuitBreaker(name, state);
+        } catch {
+          continue;
+        }
+      }
+
+      state.totalRequests++;
+      const startTime = Date.now();
+
+      try {
+        const adapter = state.adapter;
+        if (!supportsDecisions(adapter)) {
+          continue;
+        }
+        const warnings = advisories.get(name) ?? [];
+        const attempt: IRDecisionRequest =
+          warnings.length === 0
+            ? request
+            : {
+                ...request,
+                metadata: {
+                  ...request.metadata,
+                  warnings: [...(request.metadata.warnings ?? []), ...warnings],
+                },
+              };
+        const response = await adapter.decide(attempt, signal);
+
+        state.successfulRequests++;
+        state.consecutiveFailures = 0;
+        if (this.config.trackLatency) {
+          state.latencies.push(Date.now() - startTime);
+          if (state.latencies.length > 100) {
+            state.latencies.shift();
+          }
+        }
+        if (this.config.trackCost && adapter.estimateDecisionCost) {
+          const cost = await adapter.estimateDecisionCost(request);
+          if (cost !== null) {
+            state.totalCost += cost;
+          }
+        }
+        if (state.circuitBreakerState === 'half-open') {
+          state.circuitBreakerState = 'closed';
+        }
+
+        return response;
+      } catch (error) {
+        lastError = error as Error;
+        state.failedRequests++;
+        state.consecutiveFailures++;
+        if (
+          this.config.enableCircuitBreaker &&
+          state.consecutiveFailures >= (this.config.circuitBreakerThreshold ?? 5)
+        ) {
+          this.openCircuitBreaker(name);
+        }
+        // Fall through to the next candidate (sequential fallback)
+        if (this.config.fallbackStrategy === 'none') {
+          throw error;
+        }
+      }
+    }
+
+    // Only reached when every candidate was skipped before it was invoked
+    // (circuit open, or the adapter lost decision support), so nothing was
+    // attempted: same non-retryable RouterError as `embed()`.
+    throw (
+      lastError ??
+      new RouterError({
+        code: ErrorCode.ALL_BACKENDS_FAILED,
+        message: 'All decision-capable backends failed',
         provenance: { router: this.metadata.name },
       })
     );
@@ -2107,17 +2281,43 @@ export class Router implements IRouter {
 
   /**
    * Get list of available backends.
+   *
+   * `'chat'` (default) leaves out backends with no chat support -- decision-
+   * or embedding-only adapters would only fail a chat request with
+   * `UNSUPPORTED_FEATURE`. `embed()` and `decide()` ask for `'any'` and
+   * filter by their own capability.
    */
-  private getAvailableBackends(): string[] {
+  private getAvailableBackends(capability: 'chat' | 'any' = 'chat'): string[] {
     const available: string[] = [];
 
     for (const [name, state] of this.backends.entries()) {
-      if (state.isHealthy && state.circuitBreakerState !== 'open') {
+      if (
+        state.isHealthy &&
+        state.circuitBreakerState !== 'open' &&
+        (capability === 'any' || this.hasChat(state.adapter))
+      ) {
         available.push(name);
       }
     }
 
     return available;
+  }
+
+  /** Whether the adapter can serve chat (streaming or not). */
+  private hasChat(adapter: BackendAdapter): boolean {
+    return supportsChat(adapter) || supportsChatStream(adapter);
+  }
+
+  /** A registered backend that cannot serve chat (decision-/embedding-only). */
+  private isDecisionOnly(name: string): boolean {
+    const state = this.backends.get(name);
+    return state !== undefined && !this.hasChat(state.adapter);
+  }
+
+  /** {@link Router.isBackendAvailable}, and able to serve chat. */
+  private isChatBackendAvailable(name: string): boolean {
+    const state = this.backends.get(name);
+    return this.isBackendAvailable(name) && state !== undefined && this.hasChat(state.adapter);
   }
 
   /**
@@ -2143,7 +2343,7 @@ export class Router implements IRouter {
    * Routing: explicit backend selection.
    */
   private routeExplicit(preferredBackend?: string): string | null {
-    if (preferredBackend && this.isBackendAvailable(preferredBackend)) {
+    if (preferredBackend && this.isChatBackendAvailable(preferredBackend)) {
       return preferredBackend;
     }
     return null;
@@ -2160,13 +2360,13 @@ export class Router implements IRouter {
 
     // Check exact mapping
     const exactMatch = this.modelMapping.get(model);
-    if (exactMatch && this.isBackendAvailable(exactMatch)) {
+    if (exactMatch && this.isChatBackendAvailable(exactMatch)) {
       return exactMatch;
     }
 
     // Check pattern matching
     for (const pattern of this.modelPatterns) {
-      if (pattern.pattern.test(model) && this.isBackendAvailable(pattern.backend)) {
+      if (pattern.pattern.test(model) && this.isChatBackendAvailable(pattern.backend)) {
         return pattern.backend;
       }
     }
@@ -2186,7 +2386,7 @@ export class Router implements IRouter {
     let lowestAvgCost = Infinity;
 
     for (const [name, state] of this.backends.entries()) {
-      if (!this.isBackendAvailable(name)) {
+      if (!this.isChatBackendAvailable(name)) {
         continue;
       }
 
@@ -2214,7 +2414,7 @@ export class Router implements IRouter {
     let lowestLatency = Infinity;
 
     for (const [name, state] of this.backends.entries()) {
-      if (!this.isBackendAvailable(name)) {
+      if (!this.isChatBackendAvailable(name)) {
         continue;
       }
 
