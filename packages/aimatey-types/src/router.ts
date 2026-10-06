@@ -118,18 +118,29 @@ export interface RouterConfig {
 
   /**
    * Enable circuit breaker pattern.
+   *
+   * Router-wide **default**: a backend registered with
+   * `{ circuitBreaker: { enabled } }` overrides it for itself.
    * @default false
    */
   readonly enableCircuitBreaker?: boolean;
 
   /**
    * Number of consecutive failures before circuit breaker opens.
+   *
+   * Router-wide **default**: a backend registered with
+   * `{ circuitBreaker: { threshold } }` overrides it for itself.
    * @default 5
    */
   readonly circuitBreakerThreshold?: number;
 
   /**
    * Time to wait before attempting to close circuit breaker (milliseconds).
+   *
+   * Router-wide **default**: a backend registered with
+   * `{ circuitBreaker: { timeout } }` overrides it for itself, and
+   * {@link Router.openCircuitBreaker}'s `timeoutMs` overrides both for the one
+   * open it starts.
    * @default 60000
    */
   readonly circuitBreakerTimeout?: number;
@@ -254,6 +265,84 @@ export interface RoutingContext {
 // ============================================================================
 
 /**
+ * Circuit-breaker policy for one backend. Every field is optional; a field left
+ * out inherits the router-wide value on {@link RouterConfig}.
+ *
+ * The router-wide settings assume every backend fails the same way. They do not:
+ * a cloud API that blips for a few seconds and a LAN peer that is asleep for the
+ * night want different thresholds and very different rest periods.
+ */
+export interface BackendCircuitBreakerOptions {
+  /**
+   * Whether this backend has a breaker at all. `false` exempts it from a router
+   * that has one; `true` gives it one in a router that does not.
+   * @default {@link RouterConfig.enableCircuitBreaker}
+   */
+  readonly enabled?: boolean;
+
+  /**
+   * Consecutive failures before this backend's breaker opens. A positive integer.
+   * @default {@link RouterConfig.circuitBreakerThreshold}
+   */
+  readonly threshold?: number;
+
+  /**
+   * How long this backend rests once open, in milliseconds. Non-negative.
+   * @default {@link RouterConfig.circuitBreakerTimeout}
+   */
+  readonly timeout?: number;
+}
+
+/**
+ * Per-backend settings accepted by {@link Router.register}.
+ *
+ * They belong to the *name*, like latency history: {@link Router.replace} and
+ * {@link Router.clone} carry them over.
+ */
+export interface BackendRegistrationOptions {
+  /** Circuit-breaker policy for this backend; see {@link BackendCircuitBreakerOptions}. */
+  readonly circuitBreaker?: BackendCircuitBreakerOptions;
+}
+
+/**
+ * The circuit-breaker policy a backend is actually running under: its own
+ * overrides resolved against the router-wide defaults.
+ */
+export interface EffectiveCircuitBreakerPolicy {
+  readonly enabled: boolean;
+  readonly threshold: number;
+  readonly timeout: number;
+}
+
+/**
+ * Options for {@link Router.unregister}.
+ */
+export interface UnregisterOptions {
+  /**
+   * Also wait for requests already in flight on this backend.
+   *
+   * - `false` / omitted -- do not wait; `unregister()` returns the router synchronously.
+   * - `true` -- return a promise that settles when every in-flight call, streams
+   *   included, has finished.
+   * - a number -- the same, but give up after that many milliseconds.
+   *
+   * Draining never cancels anything. It is observation, not revocation; see
+   * {@link Router.unregister}.
+   */
+  readonly drain?: boolean | number;
+}
+
+/**
+ * Outcome of `unregister(name, { drain })`.
+ */
+export interface UnregisterResult {
+  /** `true` when the backend was idle (or became idle) before any timeout. */
+  readonly drained: boolean;
+  /** Calls still running when the promise settled; `0` whenever `drained` is `true`. */
+  readonly inFlight: number;
+}
+
+/**
  * Information about a registered backend.
  */
 export interface BackendInfo {
@@ -291,6 +380,20 @@ export interface BackendInfo {
    * Consecutive failures count (for circuit breaker).
    */
   readonly consecutiveFailures: number;
+
+  /**
+   * The circuit-breaker policy in force for this backend: its registration
+   * overrides resolved against the router-wide defaults. Read this to learn
+   * which layer won.
+   */
+  readonly circuitBreaker: EffectiveCircuitBreakerPolicy;
+
+  /**
+   * Calls currently running on this backend: `execute()`, `embed()` and
+   * `decide()` until they settle, and a stream from its first chunk request
+   * until it ends, fails, or the consumer abandons it.
+   */
+  readonly inFlight: number;
 
   /**
    * Statistics for this backend.
@@ -552,8 +655,13 @@ export interface Router extends BackendAdapter<unknown, unknown> {
    *
    * Throws if `name` is already registered — use {@link Router.replace} to
    * swap the adapter behind an existing name.
+   *
+   * `options.circuitBreaker` overrides the router-wide breaker settings for
+   * this backend alone; omitted fields inherit {@link RouterConfig}. Invalid
+   * values (a non-integer or non-positive `threshold`, a negative or
+   * non-finite `timeout`) throw before anything is registered.
    */
-  register(name: string, adapter: BackendAdapter): Router;
+  register(name: string, adapter: BackendAdapter, options?: BackendRegistrationOptions): Router;
 
   /**
    * Replace the adapter registered under an existing name, keeping the
@@ -568,7 +676,9 @@ export interface Router extends BackendAdapter<unknown, unknown> {
    * over, because they describe traffic the router sent to this logical
    * backend. Live health judgements (`isHealthy`, circuit breaker state,
    * consecutive failures) are reset, because they describe the *previous*
-   * configuration and are stale the moment it is replaced.
+   * configuration and are stale the moment it is replaced. The per-backend
+   * options given to {@link Router.register} are *kept*: they are policy about
+   * the name, not a verdict about the adapter.
    *
    * Throws if `name` is not registered — use {@link Router.register} to add a
    * new backend.
@@ -588,9 +698,34 @@ export interface Router extends BackendAdapter<unknown, unknown> {
    * and routing a request through it fails at request time with a routing
    * error.
    *
-   * Throws if `name` is not registered.
+   * **Requests already in flight.** `unregister()` is not cancellation. A call
+   * that has already been handed to the backend runs to its natural end: an
+   * `execute()` resolves, a stream keeps yielding. The call retains the adapter
+   * for exactly as long as it needs it; the router retains nothing. From the
+   * moment `unregister()` returns:
+   *
+   * - no *new* request is routed to the name;
+   * - the circuit-breaker recovery timer is cancelled;
+   * - what the in-flight call goes on to do is **not accounted**: its outcome
+   *   updates no counters, stats or breaker (the backend is gone, and a late
+   *   failure must not trip the breaker of a different backend later
+   *   registered under the same name).
+   *
+   * **This is not revocation.** If the answer must not be *delivered* -- a
+   * revoked device, a rotated credential -- stop the call with the
+   * `AbortSignal` you passed to it; only the transport can make that
+   * guarantee. Use `unregister()` to stop sending *new* work.
+   *
+   * Pass `{ drain: true }` (or a timeout in milliseconds) to get a promise that
+   * settles once the in-flight calls have finished. The backend is removed
+   * synchronously either way; draining only lets the caller know when the
+   * adapter is safe to dispose of.
+   *
+   * Throws if `name` is not registered (synchronously, with or without `drain`).
    */
-  unregister(name: string): Router;
+  unregister(name: string, options?: { readonly drain?: false }): Router;
+  unregister(name: string, options: { readonly drain: true | number }): Promise<UnregisterResult>;
+  unregister(name: string, options?: UnregisterOptions): Router | Promise<UnregisterResult>;
 
   /**
    * Get a registered backend adapter.
@@ -693,6 +828,11 @@ export interface Router extends BackendAdapter<unknown, unknown> {
 
   /**
    * Manually open circuit breaker for a backend.
+   *
+   * `timeoutMs` is the rest period of **this open**, and is honoured in full:
+   * it overrides the backend's own and the router-wide timeout alike, in both
+   * directions (a longer value is not capped by a shorter configured one). It
+   * is not remembered for later opens.
    */
   openCircuitBreaker(name: string, timeoutMs?: number): void;
 

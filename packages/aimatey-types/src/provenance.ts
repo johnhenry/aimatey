@@ -9,7 +9,7 @@
  * @module
  */
 
-import type { IRProvenance } from './ir.js';
+import type { IRProvenance, ProvenanceLocality } from './ir.js';
 
 /**
  * True when a provenance says anything at all.
@@ -143,4 +143,79 @@ export function resolveServedModel(provenance: IRProvenance | undefined): string
   }
 
   return undefined;
+}
+
+/**
+ * Widest-last ordering of {@link ProvenanceLocality}; a larger index reaches further.
+ */
+const LOCALITY_REACH: readonly ProvenanceLocality[] = ['in-process', 'same-host', 'external'];
+
+/**
+ * The widest link a request crossed anywhere along a provenance chain.
+ *
+ * `IRProvenance.locality` is a per-hop fact, so "did this reply leave the device?" is a
+ * question about the whole chain. This is the one place that answers it, so no two
+ * consumers walk the chain differently (the same reason `resolveServedModel` exists).
+ *
+ * **Fails closed.** A hop that did not declare a `locality` is *unknown*, and unknown is
+ * treated as `'external'`: a proxy that forgot to say where it went must never read as
+ * local. `undefined` provenance, an empty chain, and an `upstream` link that names
+ * nothing all resolve to `'external'` with `declared: false`.
+ *
+ * A hop that carries no information at all (an empty `{}`) is skipped rather than
+ * counted unknown, because it claims no hop exists -- the same rule
+ * `withUpstreamProvenance` applies when attaching one. A chain made only of such hops is
+ * still unknown overall.
+ *
+ * @param provenance The near hop, or `undefined`.
+ * @returns `locality`: the widest link in the chain, unknown counted as `'external'`.
+ *   `declared`: `true` only when every non-empty hop declared its own, so a UI can
+ *   distinguish "external, as stated" from "external, because nobody said".
+ *
+ * @example
+ * ```typescript
+ * resolveEgress({ backend: 'llama-cpp', locality: 'in-process' });
+ * // => { locality: 'in-process', declared: true }
+ *
+ * resolveEgress({
+ *   backend: 'tunnel', locality: 'external',
+ *   upstream: { backend: 'llama-cpp', locality: 'in-process' },
+ * });
+ * // => { locality: 'external', declared: true }   -- the phone crossed a network
+ *
+ * resolveEgress({ backend: 'tunnel', upstream: { backend: 'llama-cpp', locality: 'in-process' } });
+ * // => { locality: 'external', declared: false }  -- the tunnel never said; fail closed
+ * ```
+ */
+export function resolveEgress(provenance: IRProvenance | undefined): {
+  readonly locality: ProvenanceLocality;
+  readonly declared: boolean;
+} {
+  let widest = -1;
+  let declared = true;
+  let sawHop = false;
+
+  for (let hop = provenance; hop !== undefined; hop = hop.upstream) {
+    // `upstream` itself does not make a hop non-empty: it is a link, not a claim.
+    const makesClaims = Object.entries(hop).some(
+      ([key, value]) => key !== 'upstream' && value !== undefined
+    );
+    if (!makesClaims) {
+      continue;
+    }
+    sawHop = true;
+
+    const reach = hop.locality === undefined ? -1 : LOCALITY_REACH.indexOf(hop.locality);
+    if (reach === -1) {
+      // Absent, or a value from a newer version of the IR this copy cannot rank.
+      declared = false;
+    } else if (reach > widest) {
+      widest = reach;
+    }
+  }
+
+  if (!sawHop || !declared) {
+    return { locality: 'external', declared: false };
+  }
+  return { locality: LOCALITY_REACH[widest] ?? 'external', declared: true };
 }

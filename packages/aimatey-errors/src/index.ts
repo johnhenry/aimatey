@@ -35,6 +35,13 @@ import { ErrorCode as ErrorCodeEnum, ERROR_CODE_CATEGORIES } from '@johnhenry/ai
 
 /**
  * Base error class for all adapter errors.
+ *
+ * **`message` is for developers and logs.** It routinely names backends,
+ * models, registration tables and provider payloads, and must never be shown
+ * to an end user. **`userMessage` is for display**: text that is safe, generic,
+ * and free of internals. It is optional; when a thrower did not supply one,
+ * {@link toUserMessage} returns a generic sentence for the error's code, so a
+ * caller can always render `toUserMessage(error)` without special-casing.
  */
 export class AdapterError extends Error {
   readonly code: ErrorCode;
@@ -48,6 +55,12 @@ export class AdapterError extends Error {
   };
   readonly details?: Record<string, unknown>;
   readonly timestamp: number;
+  /**
+   * End-user-safe text supplied by whoever threw this error, shown verbatim.
+   * Absent unless supplied; use {@link toUserMessage} to get a displayable
+   * string either way.
+   */
+  readonly userMessage?: string;
 
   constructor(options: BaseErrorOptions) {
     super(options.message);
@@ -60,6 +73,7 @@ export class AdapterError extends Error {
     this.irState = options.irState;
     this.details = options.details;
     this.timestamp = Date.now();
+    this.userMessage = options.userMessage;
 
     // Maintains proper stack trace for where error was thrown (V8 only)
     if (Error.captureStackTrace) {
@@ -83,6 +97,7 @@ export class AdapterError extends Error {
       code: this.code,
       category: this.category,
       message: this.message,
+      userMessage: this.userMessage,
       isRetryable: this.isRetryable,
       provenance: this.provenance,
       irState: this.irState,
@@ -143,6 +158,7 @@ export class RateLimitError extends AdapterError {
     super({
       code: ErrorCodeEnum.RATE_LIMIT_EXCEEDED,
       message: options.message,
+      userMessage: options.userMessage,
       isRetryable: true,
       provenance: options.provenance,
       cause: options.cause,
@@ -322,6 +338,7 @@ export class MiddlewareError extends AdapterError {
     super({
       code: ErrorCodeEnum.MIDDLEWARE_ERROR,
       message: options.message,
+      userMessage: options.userMessage,
       isRetryable: causeIsRetryable(options.cause),
       provenance: options.provenance,
       cause: options.cause,
@@ -332,6 +349,8 @@ export class MiddlewareError extends AdapterError {
     this.middlewareName = options.middlewareName;
   }
 }
+
+export { toUserMessage, DEFAULT_USER_MESSAGES, GENERIC_USER_MESSAGE } from './user-messages.js';
 
 // ============================================================================
 // Error Factory Functions

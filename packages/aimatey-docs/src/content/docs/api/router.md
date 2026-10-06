@@ -97,7 +97,7 @@ If the selected backend fails mid-stream, `executeStream()` yields a single
 
 ---
 
-### `register(name, adapter)`
+### `register(name, adapter, options?)`
 
 Register a backend under a name. The name is what you use in fallback chains,
 model mappings, per-request overrides and statistics.
@@ -106,6 +106,8 @@ model mappings, per-request overrides and statistics.
 
 - `name: string` - Backend identifier
 - `adapter: BackendAdapter` - Backend adapter instance
+- `options?: BackendRegistrationOptions` - Per-backend settings (see
+  [Per-backend circuit breaker](#per-backend-circuit-breaker))
 
 **Returns:** `Router` (for chaining)
 
@@ -119,17 +121,56 @@ router.register('groq', new GroqBackendAdapter({ apiKey: process.env.GROQ_API_KE
 
 ---
 
-### `replace(name, adapter)` / `unregister(name)`
+### `replace(name, adapter)` / `unregister(name, options?)`
 
 Swap a registered backend for another instance, or remove one. Both return the
 router for chaining. Unregistering the backend named by `defaultBackend` clears
 `defaultBackend` and emits a `routing-config-changed` warning through
-`config.onWarning`.
+`config.onWarning`. `replace()` keeps the per-backend options given to
+`register()` (they are policy about the name, like latency history) and resets
+the health verdict.
 
 ```typescript
 router.replace('openai', new OpenAIBackendAdapter({ apiKey: rotatedKey }));
 router.unregister('groq');
 ```
+
+#### Unregistering with requests in flight
+
+`unregister()` is **not cancellation**. A call already handed to the backend runs
+to its natural end: an `execute()` resolves and a stream keeps yielding, because
+the call holds the adapter it started on. From the moment `unregister()` returns:
+
+- no new request is routed to the name;
+- the circuit-breaker recovery timer is cancelled;
+- the in-flight call's outcome is **not accounted** - no counters, no stats, no
+  breaker. The backend is gone, so a late failure must not land on an object
+  nobody can read, nor trip the breaker of a different backend registered under
+  the same name afterwards.
+
+To wait for in-flight calls, pass `drain`. The backend is still removed
+synchronously; you get a promise that settles when the calls have finished
+(streams included) or the timeout passed:
+
+```typescript
+router.unregister('desktop');                                  // Router, synchronously
+
+const result = await router.unregister('desktop', { drain: true });
+//    { drained: true, inFlight: 0 }   -- safe to dispose of the adapter now
+
+await router.unregister('desktop', { drain: 5_000 });
+//    { drained: false, inFlight: 1 }  -- gave up after 5 s; the call still finishes
+```
+
+A stream the consumer never finishes or closes keeps its backend "in flight", so
+use a timeout when you cannot guarantee consumers read to the end. The number of
+calls currently running is `getBackendInfo(name).inFlight`.
+
+:::caution[This is not revocation]
+If the answer must not be *delivered* - a revoked device, a rotated credential -
+stop the call with the `AbortSignal` you passed to it. Only the transport can
+make that guarantee. `unregister()` stops *new* work.
+:::
 
 ---
 
@@ -276,11 +317,53 @@ for (const info of router.getBackendInfo()) {
 ### Circuit breaker controls
 
 ```typescript
-router.openCircuitBreaker('openai', 30_000); // force open, optionally with a timeout
+router.openCircuitBreaker('openai', 30_000); // force open; 30 s is the rest period of THIS open
 router.closeCircuitBreaker('openai');
 router.resetCircuitBreaker();                // all backends when name is omitted
 router.isCircuitBreakerOpen('openai');       // boolean
 ```
+
+`openCircuitBreaker(name, timeoutMs)` rests for exactly `timeoutMs`, in either
+direction: a value longer than the configured timeout is honoured, not capped by
+it. It applies only to that open.
+
+#### Per-backend circuit breaker
+
+`enableCircuitBreaker`, `circuitBreakerThreshold` and `circuitBreakerTimeout` on
+`RouterConfig` are **defaults**. One router often fronts backends that fail very
+differently - a cloud API that blips for seconds and a LAN peer that is asleep
+overnight - so `register()` takes per-backend overrides; any field you leave out
+inherits the router-wide value:
+
+```typescript
+const router = new Router({
+  enableCircuitBreaker: true,
+  circuitBreakerThreshold: 5,       // default for every backend
+  circuitBreakerTimeout: 60_000,
+});
+
+router
+  // Cloud API: tolerate a few blips, retry soon.
+  .register('openai', openai, { circuitBreaker: { threshold: 5, timeout: 15_000 } })
+  // LAN peer / docker container: a refused connection means "asleep", not "flaky".
+  // Trip fast, and rest for five minutes before probing it again.
+  .register('desktop', desktopTunnel, { circuitBreaker: { threshold: 2, timeout: 5 * 60_000 } })
+  // A backend that should never be rested.
+  .register('local', localModel, { circuitBreaker: { enabled: false } });
+
+router.getBackendInfo('desktop')?.circuitBreaker;
+// { enabled: true, threshold: 2, timeout: 300000 }   -- the effective policy
+```
+
+`threshold` must be a positive integer and `timeout` a non-negative number of
+milliseconds; anything else throws from `register()` before the backend is added.
+`enabled: true` gives one backend a breaker in a router that has none.
+`getBackendInfo()` reports the effective values, so you can see which layer won.
+The overrides survive `replace()` and `clone()`.
+
+This is a threshold-and-timeout policy only. It does not express "this backend
+legitimately takes 40 s to first token, do not count that as a failure", and it
+counts consecutive failures with no notion of how quickly they arrived.
 
 ---
 
@@ -437,6 +520,8 @@ interface BackendInfo {
   readonly lastHealthCheck?: number;
   readonly circuitBreakerState: 'closed' | 'open' | 'half-open';
   readonly consecutiveFailures: number;
+  readonly circuitBreaker: { enabled: boolean; threshold: number; timeout: number };
+  readonly inFlight: number;
   readonly stats: BackendStats;
 }
 ```
