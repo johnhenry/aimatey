@@ -13,7 +13,7 @@
 import { Bridge } from '@johnhenry/aimatey-core';
 import { createGenericFrontend } from '@johnhenry/aimatey-frontend';
 import { createNeutralOptionKeys, createTemperatureScaling } from '@johnhenry/aimatey-patterns';
-import { nameInvariance as measureNameInvariance } from './testing-decisions.js';
+import { nameInvariance as measureNameInvariance } from '@johnhenry/aimatey-testing/decisions';
 import type { BackendAdapter, IRDecisionAnswer, IRDecisionRequest } from '@johnhenry/aimatey-types';
 import { answerMatchesQuestion, isCorrect, priceFor } from './scoring.js';
 import type { BenchItem, GoldValue, ScoredRow } from './types.js';

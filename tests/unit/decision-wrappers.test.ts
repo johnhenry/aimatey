@@ -127,7 +127,26 @@ describe('createTypeSafeClient', () => {
     });
   }
 
-  it('rejects images on the fallback path rather than dropping them', async () => {
+  it('round-trips images on the fallback path when the backend takes images', async () => {
+    const mock = createMockDecisionBackend({ answers });
+    const backend = {
+      ...mock,
+      metadata: {
+        ...mock.metadata,
+        capabilities: { ...mock.metadata.capabilities, decisionImages: true },
+      },
+    };
+    const client = createTypeSafeClient(new Bridge(new LayaFrontendAdapter(), backend));
+    const result = await client.systemOne({
+      state,
+      questions,
+      images: [{ type: 'image', source: { type: 'base64', mediaType: 'image/png', data: 'AAAA' } }],
+    });
+    expect(result).toBeDefined();
+    expect(mock.calls[0].images).toHaveLength(1);
+  });
+
+  it('rejects images on the fallback path when the backend cannot take them', async () => {
     const client = createTypeSafeClient(
       new Bridge(new LayaFrontendAdapter(), createMockDecisionBackend({ answers }))
     );
@@ -139,7 +158,7 @@ describe('createTypeSafeClient', () => {
           { type: 'image', source: { type: 'base64', mediaType: 'image/png', data: 'AAAA' } },
         ],
       })
-    ).rejects.toMatchObject({ code: 'UNSUPPORTED_FEATURE' });
+    ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
   });
 
   it('forwards images on the decideFrom path', async () => {
