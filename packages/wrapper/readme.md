@@ -26,6 +26,8 @@ This package provides SDK-compatible wrappers that let you use familiar SDK patt
 - **Anthropic SDK Wrapper** - Use Anthropic SDK patterns with any backend
 - **Chrome AI Wrapper** - Simplified Chrome AI interface
 - **AnyMethod Wrapper** - Flexible method-based wrapper
+- **TypeSafe SDK Wrapper** - `createTypeSafeClient(bridge)`, a `@typesafe-ai/sdk`-shaped `systemOne()` client over any decision backend
+- **AI SDK `decide()` Wrapper** - `createDecide(bridge)` / `createDecisionModel(bridge, modelId)` over any decision backend
 
 ### IR Utilities
 - **Chat** - High-level chat interface with conversation management
@@ -75,6 +77,50 @@ for await (const chunk of chat.stream('Tell me a story')) {
   process.stdout.write(chunk.delta);
 }
 ```
+
+### Decision SDK wrappers
+
+Typed-decision models (`choice` / `score` / yes-no questions over a state) get
+the same drop-in treatment. Both wrappers take a `Bridge` whose backend
+supports decisions (`createMockDecisionBackend`, `OllamaBackendAdapter`,
+`TypeSafeBackendAdapter`, ...); the Bridge may use any frontend.
+
+```typescript
+import { Bridge } from '@johnhenry/aimatey-core';
+import { TypeSafeFrontendAdapter, VercelDecideFrontendAdapter } from '@johnhenry/aimatey-frontend';
+import { createTypeSafeClient, createDecide, createDecisionModel } from '@johnhenry/aimatey-wrapper';
+
+// @typesafe-ai/sdk-shaped client
+const client = createTypeSafeClient(new Bridge(new TypeSafeFrontendAdapter(), backend), {
+  defaultModel: 'jev-1.13',
+});
+const { answers, model } = await client.systemOne({
+  state: 'I was billed twice, please refund me.',
+  questions: { refund: { type: 'noul', instructions: 'Wants a refund?' } },
+});
+
+// AI SDK decide()-shaped function
+const decide = createDecide(new Bridge(new VercelDecideFrontendAdapter(), backend));
+const result = await decide({
+  model: 'tev1:0.8b',
+  state: 'I was billed twice, please refund me.',
+  questions: { refund: { type: 'boolean', instructions: 'Wants a refund?' } },
+  abortSignal: AbortSignal.timeout(30_000),
+});
+result.answers.refund; // { type: 'boolean', probability: 0.99 }
+
+// A model id bound to decide(): shape-compatible with gateway.decisionModel(id),
+// NOT an `ai` provider object.
+const model = createDecisionModel(bridge, 'tev1:0.8b');
+await model.decide({ state, questions });
+```
+
+When the Bridge's frontend is already the matching adapter the call goes
+through `bridge.decideFrom()`; with any other frontend the wrapper converts
+with its own adapter and calls `bridge.decide()` (image inputs need the
+matching frontend, since `Bridge.decide()` carries none). Errors are the
+Bridge's: `UNSUPPORTED_FEATURE` for a backend without decisions, provider
+errors unchanged, and aborts rethrown as-is.
 
 ### Stream Utilities
 

@@ -511,6 +511,8 @@ import { OpenAIFrontendAdapter, AnthropicFrontendAdapter } from '@johnhenry/aima
 - Generic (IR passthrough)
 - TypeSafe (Jev) -- `@typesafe-ai/sdk`-shaped calls, translated to the Decision IR; use `Bridge.decideFrom()` (these implement `FrontendAdapter`'s `decisionToIR`/`decisionFromIR`, not the chat hooks)
 - Laya -- `Router.predict()`-shaped calls, translated to the Decision IR; pairs with `LayaBackendAdapter` in [`@johnhenry/aimatey-native-laya`](./packages/native-laya)
+- Vercel AI SDK `decide()` -- `boolean`/`choice`/`score` questions and `{ answers, usage, response, providerMetadata }` results (`VercelDecideFrontendAdapter`)
+- OpenRouter Decisions -- `/api/alpha/decisions` bodies with `provider`/`trace`/`session_id` and the `id`/`provider`/`usage.cost` envelope (`OpenRouterDecisionsFrontendAdapter`)
 
 ### HTTP Integrations
 
@@ -577,6 +579,8 @@ import { OpenAI } from '@johnhenry/aimatey-wrapper';  // OpenAI SDK-compatible
 - Chrome AI API
 - IR-native chat client
 - Dynamic wrapper (anymethod)
+- `@typesafe-ai/sdk` client (`createTypeSafeClient`) -- `systemOne()` over any decision backend
+- AI SDK `decide()` (`createDecide`, `createDecisionModel`) -- over any decision backend
 
 ### Tool Calling (MCP)
 
