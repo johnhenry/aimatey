@@ -14,6 +14,8 @@ import type {
   IRMessage,
   IRTool,
   IRUsage,
+  GateDecision,
+  RunToolsDenial,
   RunToolsOptions,
   RunToolsResult,
   RunToolsStep,
@@ -47,6 +49,8 @@ export function createRunTools(
       parallelToolCalls = true,
       validateArguments = true,
       signal,
+      gate,
+      maxDenials,
     } = options;
 
     if (!options.prompt && (!options.messages || options.messages.length === 0)) {
@@ -71,6 +75,7 @@ export function createRunTools(
       : [{ role: 'user', content: options.prompt as string }];
 
     const steps: RunToolsStep[] = [];
+    const denials: RunToolsDenial[] = [];
     let totalUsage: IRUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
     for (let iteration = 1; iteration <= maxIterations; iteration++) {
@@ -116,11 +121,76 @@ export function createRunTools(
           steps,
           finishReason: response.finishReason,
           totalUsage,
+          status: 'completed',
+          denials,
         };
       }
 
       // Append the assistant's tool-call message before executing
       messages = [...messages, response.message];
+
+      // Ask the gate about one call; returns the tool result to feed back when
+      // the call was stopped, undefined when it may run.
+      const applyGate = async (
+        call: (typeof toolCalls)[number],
+        iterationNumber: number
+      ): Promise<ToolCallResult | undefined> => {
+        const context = {
+          name: call.name,
+          input: call.input,
+          iteration: iterationNumber,
+          toolCallId: call.id,
+          history: messages,
+        };
+
+        let decision: GateDecision;
+        try {
+          decision = await gate!(context);
+        } catch (error) {
+          // A gate that cannot answer must not let the call through
+          signal?.throwIfAborted();
+          decision = {
+            action: 'deny',
+            reason: `gate error: ${error instanceof Error ? error.message : String(error)}`,
+          };
+        }
+
+        if (decision.action === 'review' && options.onReview) {
+          const reviewed = await options.onReview({
+            ...context,
+            reason: decision.reason,
+            decision,
+          });
+          if (reviewed) {
+            decision = reviewed;
+          }
+        }
+
+        if (decision.action === 'allow') {
+          return undefined;
+        }
+
+        const reason = decision.reason;
+        denials.push({
+          iteration: iterationNumber,
+          toolCallId: call.id,
+          name: call.name,
+          input: call.input,
+          action: decision.action,
+          ...(reason !== undefined && { reason }),
+          ...(decision.response && { response: decision.response }),
+        });
+
+        const suffix = reason ? `: ${reason}` : '';
+        return {
+          toolCallId: call.id,
+          result:
+            decision.action === 'review'
+              ? `Tool call requires human review and was not run${suffix}`
+              : `Tool call denied${suffix}`,
+          isError: true,
+        };
+      };
 
       // Execute the requested tools
       const executeOne = async (call: (typeof toolCalls)[number]): Promise<ToolCallResult> => {
@@ -151,6 +221,13 @@ export function createRunTools(
                 .join('; ')}`,
               isError: true,
             };
+          }
+        }
+
+        if (gate) {
+          const denied = await applyGate(call, iteration);
+          if (denied) {
+            return denied;
           }
         }
 
@@ -194,6 +271,19 @@ export function createRunTools(
       };
       steps.push(step);
       await options.onStepFinish?.(step);
+
+      if (maxDenials !== undefined && denials.length >= maxDenials) {
+        return {
+          text: '',
+          response,
+          messages,
+          steps,
+          finishReason: response.finishReason,
+          totalUsage,
+          status: 'max-denials',
+          denials,
+        };
+      }
     }
 
     throw new AdapterError({

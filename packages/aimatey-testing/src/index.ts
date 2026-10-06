@@ -52,6 +52,28 @@ export {
 export type { MockDecisionBackendConfig, MockDecisionBackend } from './decision-mocks.js';
 export { createMockDecisionBackend } from './decision-mocks.js';
 
+// Decision dataset capture
+export type {
+  DecisionOutcome,
+  DecisionLogLine,
+  OutcomeLogLine,
+  DecisionCaptureLine,
+  DecisionRecord,
+  DecisionCaptureSink,
+  MemoryDecisionSink,
+  DecisionCaptureConfig,
+  DecisionCapture,
+  CalibrationRun,
+} from './decisions/capture.js';
+export {
+  createDecisionCapture,
+  createMemoryDecisionSink,
+  createFileDecisionSink,
+  joinDecisionLines,
+  loadDecisionDataset,
+  toCalibrationRuns,
+} from './decisions/capture.js';
+
 // Test helpers and assertions
 export {
   assertValidChatResponse,

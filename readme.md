@@ -96,6 +96,12 @@ for await (const chunk of stream) {
 }
 ```
 
+### Decisions
+
+Typed-decision models answer typed questions with calibrated probabilities in one forward pass:
+`bridge.decide(state, questions)`, plus tool-call gating, a React hook and dataset capture. See
+[docs/plans/decision-models.md](./docs/plans/decision-models.md).
+
 ### Router with Fallback
 
 Route requests to multiple backends with automatic fallback:
@@ -252,6 +258,10 @@ function ChatComponent() {
 }
 ```
 
+For typed-decision models, `useDecision` / `useDecisionBatch` in
+[`react-hooks`](./packages/react-hooks) ask typed questions of a `Bridge` with loading, abort and
+stale-response handling.
+
 ### React Hooks - Direct Mode
 
 Use backend adapters directly without HTTP (great for Electron, browser extensions, testing):
@@ -343,6 +353,10 @@ const result = await bridge.runTools({
 
 console.log(result.text); // final answer after tool round-trips
 ```
+
+Gate tool calls before they run with `runTools({ gate })`; `createDecisionGate(backend)` lets a
+typed-decision model approve, deny or flag each call for human review, and `createDecisionTool`
+exposes a decision model to the agent as a tool (see [`core`](./packages/aimatey-core)).
 
 Tool calls stream too: both OpenAI and Anthropic backends emit `tool_use` chunks with incremental
 arguments, and frontend adapters re-emit them in their native streaming formats.

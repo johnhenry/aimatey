@@ -15,3 +15,12 @@ export * from './capability-inference.js';
 export * from './model-translation.js';
 
 export { createRunTools, type RunToolsBridge } from './run-tools.js';
+export {
+  createDecisionGate,
+  createDecisionTool,
+  DEFAULT_GATE_QUESTIONS,
+  type DecisionGateConfig,
+  type DecisionGatePolicy,
+  type DecisionTool,
+  type DecisionToolOptions,
+} from './decision-gate.js';
