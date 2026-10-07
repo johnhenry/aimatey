@@ -297,6 +297,7 @@ export class TogetherAIBackendAdapter implements BackendAdapter<
         provenance: {
           ...originalRequest.metadata.provenance,
           backend: this.metadata.name,
+          locality: 'external',
           servedModel: response.model,
         },
         custom: {
@@ -393,7 +394,11 @@ export class TogetherAIBackendAdapter implements BackendAdapter<
       usage: sawUsage ? { inputTokens, outputTokens } : undefined,
       metadata: {
         ...request.metadata,
-        provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+        provenance: {
+          ...request.metadata.provenance,
+          backend: this.metadata.name,
+          locality: 'external',
+        },
         ...(warnings.length > 0 && {
           warnings: [...(request.metadata.warnings ?? []), ...warnings],
         }),
@@ -572,6 +577,7 @@ export class TogetherAIBackendAdapter implements BackendAdapter<
           provenance: {
             ...request.metadata.provenance,
             backend: this.metadata.name,
+            locality: 'external',
           },
         },
       } as IRStreamChunk;

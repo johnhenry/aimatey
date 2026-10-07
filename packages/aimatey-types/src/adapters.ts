@@ -17,6 +17,7 @@ import type { IREmbedRequest, IREmbedResponse } from './embeddings.js';
 import type { IRDecisionRequest, IRDecisionResponse } from './decisions.js';
 import type { AIModel, ListModelsOptions, ListModelsResult } from './models.js';
 import type { StreamingConfig, StreamConversionOptions } from './streaming.js';
+import type { AdapterCircuitBreakerPolicy } from './router.js';
 
 // ============================================================================
 // Adapter Metadata
@@ -77,6 +78,23 @@ export interface AdapterMetadata {
    * do not implement `discoverCapabilities` can ignore this field entirely.
    */
   readonly capabilitiesResolved?: boolean;
+
+  /**
+   * Circuit-breaker policy this adapter recommends for itself (#173).
+   *
+   * An adapter distributed as a package knows things the application does not:
+   * a local model server that legitimately goes quiet while it loads a model, a
+   * LAN peer that sleeps at night. This is where it says so. A `Router` reads it
+   * when the backend is registered (and again after `replace()`) as the default
+   * **beneath** the `register(name, adapter, { circuitBreaker })` option and
+   * **above** `RouterConfig`, field by field, and reports the winner per field in
+   * `BackendInfo.circuitBreaker.source`.
+   *
+   * Whether the router runs breakers at all (`enabled`) stays the application's
+   * decision, so it is not part of this recommendation. Every field is
+   * optional; an adapter with no opinion omits the object.
+   */
+  readonly circuitBreaker?: AdapterCircuitBreakerPolicy;
 
   /**
    * Optional adapter-specific configuration.

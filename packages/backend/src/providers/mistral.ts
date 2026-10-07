@@ -219,7 +219,11 @@ export class MistralBackendAdapter implements BackendAdapter<MistralRequest, Mis
         sequence: sequence++,
         metadata: {
           ...request.metadata,
-          provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+          provenance: {
+            ...request.metadata.provenance,
+            backend: this.metadata.name,
+            locality: 'external',
+          },
         },
       } as IRStreamChunk;
 
@@ -484,6 +488,7 @@ export class MistralBackendAdapter implements BackendAdapter<MistralRequest, Mis
         provenance: {
           ...originalRequest.metadata.provenance,
           backend: this.metadata.name,
+          locality: 'external',
           servedModel: response.model,
         },
         custom: {

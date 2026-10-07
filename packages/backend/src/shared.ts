@@ -7,6 +7,7 @@
  * @module
  */
 
+import { localityForBaseURL, servedByForBaseURL } from '@johnhenry/aimatey-utils';
 import type {
   IRChatRequest,
   IRMessage,
@@ -359,6 +360,8 @@ export async function executeOpenAICompatibleEmbed(options: {
       provenance: {
         ...request.metadata.provenance,
         backend: backendName,
+        locality: localityForBaseURL(baseURL),
+        servedBy: servedByForBaseURL(baseURL),
       },
     },
     raw: json as unknown as Record<string, unknown>,

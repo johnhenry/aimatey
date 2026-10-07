@@ -7,7 +7,12 @@
  * @module
  */
 
-import type { BackendAdapter, AdapterMetadata, IRCapabilities } from '@johnhenry/aimatey-types';
+import type {
+  BackendAdapter,
+  AdapterMetadata,
+  IRCapabilities,
+  ProvenanceLocality,
+} from '@johnhenry/aimatey-types';
 import type {
   IRChatRequest,
   IRChatResponse,
@@ -105,6 +110,16 @@ export interface FunctionBackendConfig<TRequest = IRChatRequest, TResponse = IRC
   metadata?: FunctionBackendMetadata;
 
   /**
+   * What the function does with a request, for `IRProvenance.locality`:
+   * `'in-process'` for a function that computes locally, `'same-host'` for one
+   * that calls a daemon on this machine, `'external'` for one that calls out.
+   *
+   * Only the author of the function knows, so the adapter does not guess: left
+   * unset, no `locality` is declared and consumers fail closed to `'external'`.
+   */
+  locality?: ProvenanceLocality;
+
+  /**
    * Custom fromIR conversion function.
    * Default: returns request unchanged.
    */
@@ -183,6 +198,7 @@ export class FunctionBackendAdapter<
   private readonly healthCheckFn: HealthCheckFunction;
   private readonly estimateCostFn: EstimateCostFunction;
   private readonly listModelsFn: ListModelsFunction;
+  private readonly locality: ProvenanceLocality | undefined;
 
   /**
    * Create a new function-based backend adapter.
@@ -192,6 +208,7 @@ export class FunctionBackendAdapter<
   constructor(config: FunctionBackendConfig<TRequest, TResponse>) {
     // Store functions
     this.executeFn = config.execute;
+    this.locality = config.locality;
     this.executeStreamFn = config.executeStream;
 
     // Set up conversion functions with defaults
@@ -264,6 +281,7 @@ export class FunctionBackendAdapter<
         provenance: {
           ...irResponse.metadata.provenance,
           backend: this.metadata.name,
+          ...(this.locality !== undefined && { locality: this.locality }),
         },
       },
     };
@@ -285,6 +303,7 @@ export class FunctionBackendAdapter<
         provenance: {
           ...response.metadata.provenance,
           backend: this.metadata.name,
+          ...(this.locality !== undefined && { locality: this.locality }),
         },
         custom: {
           ...response.metadata.custom,

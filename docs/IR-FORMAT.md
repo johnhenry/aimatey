@@ -792,6 +792,7 @@ interface IRProvenance {
   readonly router?: string;
   readonly upstream?: IRProvenance;
   readonly locality?: 'in-process' | 'same-host' | 'external';
+  readonly servedBy?: string;
 }
 ```
 
@@ -868,6 +869,23 @@ The rules:
    a property of the link. The IR does not carry trust assertions its adapters cannot
    originate. An application that wants to render "your own desktop" keeps its own
    allow-list of hops and uses `locality` only for the part an adapter can know.
+
+**What the shipped adapters declare.** Every HTTP provider declares `'external'`; an
+OpenAI-compatible or Ollama / LM Studio / OmniRoute / System One adapter declares
+`'same-host'` when its resolved base URL is loopback (`localhost`, `127.0.0.0/8`, `::1`, a
+unix socket) and `'external'` otherwise, using the shared `localityForBaseURL(url)` from
+`@johnhenry/aimatey-utils` (unparseable or unknown is `'external'`); the `native-*` adapters
+declare `'in-process'`, except `native-model-runner`, whose runner is a child process
+(`'same-host'`); a proxy built on `prepareForwardedResponse()` gets `'external'` on its own
+hop unless it passes `locality`. A new adapter that adds a provenance hop should declare it
+too (a test greps for it).
+
+**`servedBy`** is the optional companion: the `host[:port]` the adapter actually called
+(`localhost:11434`, `desktop.lan:11434`, a System One server's host), set by adapters that
+know it, via `servedByForBaseURL(url)`. It is **informational, never a trust signal**: it
+is what the adapter was configured with, unverifiable, and carries no credentials, path or
+query. It is not `principal` (who the caller is, which never crosses a hop); it is per-hop
+like `servedModel`. Decide trust on `locality`, not on a host name.
 
 It is per-hop, like `servedModel`: on the phone, the tunnel hop is `'external'` and the
 desktop's own hop, under `upstream`, is `'in-process'`. Reading only the near hop would say

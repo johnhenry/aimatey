@@ -868,6 +868,7 @@ maps every code to its category.
 | `PROVIDER_UNAVAILABLE` | `provider` | `ProviderError` |
 | `PROVIDER_TIMEOUT` | `provider` | `ProviderError` |
 | `PROVIDER_OVERLOADED` | `provider` | `ProviderError` |
+| `MODEL_LOADING` | `provider` | `ProviderError` (retryable; not counted by the default circuit-breaker predicate) |
 | `ADAPTER_CONVERSION_ERROR` | `adapter` | `AdapterConversionError` |
 | `ADAPTER_VALIDATION_ERROR` | `adapter` | `AdapterConversionError` |
 | `UNSUPPORTED_CONVERSION` | `adapter` | `AdapterConversionError` |

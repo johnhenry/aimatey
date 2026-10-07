@@ -33,6 +33,7 @@ import {
 import { normalizeSystemMessages, requireResolvedContent } from '@johnhenry/aimatey-utils';
 import { getModelCache } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
+import { localityForBaseURL, servedByForBaseURL } from '@johnhenry/aimatey-utils';
 import { getModelPricingInfo } from '@johnhenry/aimatey-utils';
 import {
   estimateTokens,
@@ -381,6 +382,8 @@ export class OpenAIBackendAdapter implements BackendAdapter<OpenAIRequest, OpenA
           provenance: {
             ...request.metadata.provenance,
             backend: this.metadata.name,
+            locality: localityForBaseURL(this.baseURL),
+            servedBy: servedByForBaseURL(this.baseURL),
           },
         },
       } as IRStreamChunk;
@@ -836,6 +839,8 @@ export class OpenAIBackendAdapter implements BackendAdapter<OpenAIRequest, OpenA
           provenance: {
             ...originalRequest.metadata.provenance,
             backend: this.metadata.name,
+            locality: localityForBaseURL(this.baseURL),
+            servedBy: servedByForBaseURL(this.baseURL),
             servedModel: response.model,
           },
           custom: {

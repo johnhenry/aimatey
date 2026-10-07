@@ -255,6 +255,7 @@ export class XAIBackendAdapter implements BackendAdapter<XAIRequest, XAIResponse
         provenance: {
           ...originalRequest.metadata.provenance,
           backend: this.metadata.name,
+          locality: 'external',
           servedModel: response.model,
         },
         custom: {
@@ -358,6 +359,7 @@ export class XAIBackendAdapter implements BackendAdapter<XAIRequest, XAIResponse
           provenance: {
             ...request.metadata.provenance,
             backend: this.metadata.name,
+            locality: 'external',
           },
         },
       } as IRStreamChunk;

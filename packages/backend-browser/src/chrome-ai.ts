@@ -289,7 +289,11 @@ export class ChromeAIBackendAdapter implements BackendAdapter {
           warnings: built.warnings.length
             ? [...(request.metadata.warnings ?? []), ...built.warnings]
             : request.metadata.warnings,
-          provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+          provenance: {
+            ...request.metadata.provenance,
+            backend: this.metadata.name,
+            locality: 'in-process',
+          },
         },
       } as IRStreamChunk;
 
@@ -467,7 +471,11 @@ export class ChromeAIBackendAdapter implements BackendAdapter {
   ): IRChatResponse['metadata'] {
     return {
       ...request.metadata,
-      provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+      provenance: {
+        ...request.metadata.provenance,
+        backend: this.metadata.name,
+        locality: 'in-process',
+      },
       warnings: warnings.length
         ? [...(request.metadata.warnings ?? []), ...warnings]
         : request.metadata.warnings,

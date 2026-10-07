@@ -180,7 +180,11 @@ export class GeminiBackendAdapter implements BackendAdapter<GeminiRequest, Gemin
       dimensions: embeddings[0]?.vector.length ?? 0,
       metadata: {
         ...request.metadata,
-        provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+        provenance: {
+          ...request.metadata.provenance,
+          backend: this.metadata.name,
+          locality: 'external',
+        },
       },
       raw: json as unknown as Record<string, unknown>,
     };
@@ -262,7 +266,11 @@ export class GeminiBackendAdapter implements BackendAdapter<GeminiRequest, Gemin
         sequence: sequence++,
         metadata: {
           ...request.metadata,
-          provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+          provenance: {
+            ...request.metadata.provenance,
+            backend: this.metadata.name,
+            locality: 'external',
+          },
         },
       } as IRStreamChunk;
 
@@ -608,6 +616,7 @@ export class GeminiBackendAdapter implements BackendAdapter<GeminiRequest, Gemin
         provenance: {
           ...originalRequest.metadata.provenance,
           backend: this.metadata.name,
+          locality: 'external',
           // Gemini reports the served model as `modelVersion`, not `model`.
           servedModel: response.modelVersion,
         },
