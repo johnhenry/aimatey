@@ -132,6 +132,8 @@ describe('prepareForwardedResponse', () => {
 
     expect(out.metadata.provenance).toEqual({
       backend: 'tunnel',
+      // The proxy's own hop declares its link (#174); a proxy fails closed.
+      locality: 'external',
       upstream: { frontend: 'openai', backend: 'llama-cpp', servedModel: 'qwen' },
     });
   });
@@ -145,7 +147,7 @@ describe('prepareForwardedResponse', () => {
       expectProvenance: true,
     });
     expect(expected.metadata.warnings?.some((w) => w.category === 'provenance-lost')).toBe(true);
-    expect(expected.metadata.provenance).toEqual({ backend: 'tunnel' });
+    expect(expected.metadata.provenance).toEqual({ backend: 'tunnel', locality: 'external' });
 
     const notExpected = prepareForwardedResponse(bare, { proxyName: 'tunnel' });
     expect(

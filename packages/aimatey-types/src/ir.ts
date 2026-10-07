@@ -1135,6 +1135,29 @@ export interface IRProvenance {
    * ```
    */
   readonly locality?: ProvenanceLocality;
+
+  /**
+   * Which host or system actually served this hop, as the adapter that performed
+   * it knows it: `localhost:11434` for an Ollama on this machine,
+   * `desktop.lan:11434` for one on the LAN, a System One server's host.
+   *
+   * **Informational, never a trust signal.** It is whatever endpoint the adapter
+   * was configured with, reported verbatim as `host[:port]` -- no credentials,
+   * path or query string -- and it cannot be verified: a gateway answers for the
+   * machine behind it, and DNS can point anywhere. Do not authorise, redact or
+   * route on it; the question trust cares about ("did this leave the device?")
+   * is {@link IRProvenance.locality}'s, and it is deliberately a separate field.
+   *
+   * It is also not {@link IRMetadata.principal}. `principal` is *who the caller
+   * is*, as seen by the process that set it, and never crosses a hop; `servedBy`
+   * is *what answered*, and is per-hop like `servedModel`: on
+   * `phone -> desktop -> llama-cpp` the phone's hop names the desktop and the
+   * desktop's own hop, in `upstream`, names what it ran on.
+   *
+   * Optional: set only by adapters that know it. Absence means "not reported",
+   * not "unknown host is safe".
+   */
+  readonly servedBy?: string;
 }
 
 /**
