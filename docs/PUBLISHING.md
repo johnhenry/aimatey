@@ -32,8 +32,13 @@ nothing: every package is reported as already published and the run is green.
 `release.yml` runs on Node 26 (matching `engines.node >=26`): install, build,
 lint, typecheck, tests, then `changesets/action` with
 `version: npm run version-packages` and `publish: ./scripts/staggered-publish.sh`.
-npm auth uses the `NPM_TOKEN` secret and `id-token: write` (provenance). Runs
-queue and never cancel (`concurrency` with `cancel-in-progress: false`).
+npm auth prefers trusted publishing (OIDC via `id-token: write`, which also
+signs provenance); the `NPM_TOKEN` secret remains as a fallback. Trusted
+publishing trusts one repo and one workflow filename per package, so the file
+must stay named `release.yml`: do not rename it or add a second publish
+workflow. Runs
+queue and never cancel (`concurrency` group `publish-${{ github.ref }}` with
+`cancel-in-progress: false`).
 
 `ci.yml` has a `workflow-lint` job that fails if any publish workflow drifts
 from the model (release/tag triggers, missing `workflow_dispatch`, missing
