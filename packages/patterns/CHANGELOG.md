@@ -1,5 +1,47 @@
 # @johnhenry/aimatey-patterns
 
+## 0.2.0
+
+### Minor Changes
+
+- 3a3c98b: `createEmulatedDecisionBackend` now coerces near-miss chat-model answers instead of rejecting them: `"true"`/`"false"` (any case) or `1`/`0` for `noul`, numeric strings for `score` indices, and a trimmed, case-insensitive match for `choice` keys and score labels (exact matches win). Each coercion adds a `response-malformed` warning. `createDecisionEscalation` gains `onUnmatchable?: 'throw' | 'skip'` (default `'throw'`); `'skip'` treats a leaf that cannot apply to the request's question types as not matched instead of throwing, and `validateDecisionCondition` takes the same option. Temperature scaling, ensembles, neutral option keys and `decisionBands` now compute `confidence` with the shared `decisionConfidence` / `noulConfidence`, so a computed `noul` confidence is the concentration of `[p, 1 - p]` rather than `max(p, 1 - p)`.
+- 5936850: Add `createEmulatedDecisionBackend(chatBackend, opts?)`: wraps any chat backend as a decision backend that answers `choice` / `score` / `noul` questions in one structured-output chat call (schema generated from the questions; `includeReasoning` populates `answer.reasoning`). It is opt-in, never applied by `Bridge` or `Router`, and returns **no** `probabilities` or `confidence`: it does not fake a distribution. Every response carries a `capability-emulated` warning and the adapter declares `decisionsEmulated: true`. An answer outside its enum rejects with a `ProviderError` naming the question.
+- af22382: Decision patterns (#147), each a default-off factory: `createDecisionEscalation` (Vercel's `when` contract; reruns the whole request on a fallback, sums both stages' usage, records `metadata.custom.escalation`) with `evaluateDecisionCondition`, `validateDecisionCondition` and `decisionBands`; `createNeutralOptionKeys` (opt_1..n keys with the name folded into the description, optional seeded shuffle and `noulAsChoice`); `createDecisionEnsemble` (parallel members, mean/median/custom aggregation, agreement-aware confidence, intersected capabilities); `createStateScreening` (delimits untrusted state and optionally screens it with a noul question before the model); and `createTemperatureScaling` (per-type / per-option-count temperature). `createEmulatedDecisionBackend` now warns with the new `capability-emulated` category instead of `capability-unsupported`.
+
+### Patch Changes
+
+- 88df633: Declare the `@johnhenry/aimatey-utils` dependency both packages already import. It resolved only through workspace hoisting, so a published install could fail.
+- Updated dependencies [291c3a5]
+- Updated dependencies [291c3a5]
+- Updated dependencies [291c3a5]
+- Updated dependencies [f787563]
+- Updated dependencies [bb94242]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [ce029c0]
+- Updated dependencies [ce029c0]
+- Updated dependencies [b74fe24]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [5936850]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [af22382]
+- Updated dependencies [cee0de7]
+- Updated dependencies [cee0de7]
+- Updated dependencies [c115285]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [59f7fbe]
+- Updated dependencies [d28c9a8]
+- Updated dependencies [e501444]
+  - @johnhenry/aimatey-core@0.6.0
+  - @johnhenry/aimatey-types@0.7.0
+  - @johnhenry/aimatey-utils@0.6.0
+  - @johnhenry/aimatey-errors@0.3.0
+
 ## 0.1.5
 
 ### Patch Changes

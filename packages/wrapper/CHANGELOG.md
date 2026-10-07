@@ -1,5 +1,44 @@
 # @johnhenry/aimatey-wrapper
 
+## 0.2.0
+
+### Minor Changes
+
+- 12505e8: Add decision SDK wrappers: `createTypeSafeClient(bridge)` (a `@typesafe-ai/sdk`-shaped `systemOne()`/`decide()` client) and `createDecide(bridge)` / `createDecisionModel(bridge, modelId)` (the AI SDK `decide()` signature), each over any Bridge with a decision-capable backend.
+
+### Patch Changes
+
+- ce029c0: `Bridge.decide()` and `decideBatch()` accept `options.images` and put them on the `IRDecisionRequest`; a backend without `decisionImages` still rejects them at validation. The decision wrappers (`createTypeSafeClient`, `createDecide`, `createDecisionModel`) no longer refuse image requests when the Bridge's frontend differs from the wrapper's, and the `decide` CLI passes `--image` through the option instead of a middleware.
+- Updated dependencies [291c3a5]
+- Updated dependencies [291c3a5]
+- Updated dependencies [f787563]
+- Updated dependencies [bb94242]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [ce029c0]
+- Updated dependencies [b74fe24]
+- Updated dependencies [b74fe24]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [5936850]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [af22382]
+- Updated dependencies [12505e8]
+- Updated dependencies [cee0de7]
+- Updated dependencies [c115285]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [59f7fbe]
+- Updated dependencies [59f7fbe]
+- Updated dependencies [d28c9a8]
+- Updated dependencies [e501444]
+  - @johnhenry/aimatey-types@0.7.0
+  - @johnhenry/aimatey-utils@0.6.0
+  - @johnhenry/aimatey-errors@0.3.0
+  - @johnhenry/aimatey-frontend@0.4.0
+
 ## 0.1.5
 
 ### Patch Changes

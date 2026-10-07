@@ -1,5 +1,60 @@
 # @johnhenry/aimatey-cli
 
+## 0.2.0
+
+### Minor Changes
+
+- 5958026: Typed decisions in the CLI. New `ai-matey decide` command asks choice / score / noul questions about a state (`--question name:type:"instructions":options`, `--questions @file.json`, `--state`, `--image`, `--batch @file.jsonl`, table or `--json` output, exit code 2 on a `ValidationError`). The proxy now routes by path: POSTs to `/v1/systemone`, `/v1/decisions` and `/v1/evaluate` go to `backend.decide()` in the TypeSafe, OpenRouter and Vercel dialects (reusing the client dialect table), and it accepts decision-only backends, answering chat paths with a 404 instead of refusing to start. `ai-matey emulate-ollama run` asks a decision model "Is the following true?" as a single noul question. The wire codec (`wireToDecisionRequest`, `decisionResponseToWire`, `decisionErrorToWire`, `decisionEscalationHeaders`) is exported.
+
+### Patch Changes
+
+- ce029c0: `Bridge.decide()` and `decideBatch()` accept `options.images` and put them on the `IRDecisionRequest`; a backend without `decisionImages` still rejects them at validation. The decision wrappers (`createTypeSafeClient`, `createDecide`, `createDecisionModel`) no longer refuse image requests when the Bridge's frontend differs from the wrapper's, and the `decide` CLI passes `--image` through the option instead of a middleware.
+- Updated dependencies [291c3a5]
+- Updated dependencies [291c3a5]
+- Updated dependencies [291c3a5]
+- Updated dependencies [a75dfb1]
+- Updated dependencies [f787563]
+- Updated dependencies [bb94242]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [ce029c0]
+- Updated dependencies [ce029c0]
+- Updated dependencies [b74fe24]
+- Updated dependencies [b74fe24]
+- Updated dependencies [b74fe24]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [ed1278a]
+- Updated dependencies [902e408]
+- Updated dependencies [5936850]
+- Updated dependencies [5936850]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [af22382]
+- Updated dependencies [12505e8]
+- Updated dependencies [cee0de7]
+- Updated dependencies [cee0de7]
+- Updated dependencies [c115285]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [63bf805]
+- Updated dependencies [59f7fbe]
+- Updated dependencies [59f7fbe]
+- Updated dependencies [59f7fbe]
+- Updated dependencies [d28c9a8]
+- Updated dependencies [e501444]
+  - @johnhenry/aimatey-core@0.6.0
+  - @johnhenry/aimatey-types@0.7.0
+  - @johnhenry/aimatey-utils@0.6.0
+  - @johnhenry/aimatey-backend@0.5.0
+  - @johnhenry/aimatey-errors@0.3.0
+  - @johnhenry/aimatey-frontend@0.4.0
+
 ## 0.1.5
 
 ### Patch Changes

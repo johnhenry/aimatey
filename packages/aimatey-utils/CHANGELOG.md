@@ -1,5 +1,64 @@
 # @johnhenry/aimatey-utils
 
+## 0.6.0
+
+### Minor Changes
+
+- 291c3a5: Add the helpers behind the proxying-adapter contracts (#121, #124, #127).
+  - `prepareForwardedRequest(request, { proxyName })` / `prepareForwardedResponse(response, { proxyName, expectProvenance? })`: strip `raw` and `metadata.principal` always, forward only `metadata.custom` keys prefixed `FORWARDED_CUSTOM_PREFIX` (`'e2e:'`), append the proxy to the request's provenance middleware chain, nest the far side's provenance under the proxy via `withUpstreamProvenance`, merge far-side warnings with `source` rewritten to `<proxyName>/<source>`, and add `provenance-lost` when provenance was expected and missing. Pure.
+  - `withCancellation()` / `withStreamCancellation()`: call `adapter.cancel(requestId)` once when a signal aborts mid-call.
+  - `createCancellationRegistry({ tombstoneMs? })`: the far side's map from an incoming cancel's `requestId` to the in-flight `AbortController`.
+  - `resolveCapabilities(adapter, signal?)`: the discovered capabilities, or the static ones for an adapter that cannot discover.
+  - `supportsEmbeddings(adapter, capabilities?)` and `supportsDecisions(adapter, capabilities?)` take an optional second argument (default: static metadata, unchanged behaviour).
+
+- f787563: Adapters can declare where a hop went (#174, follow-up to #130). `localityForBaseURL(url)` (`'same-host'` for loopback, `localhost`, `*.localhost`, `127.0.0.0/8`, `::1` and unix sockets; `'external'` for everything else, including anything unparseable) and `servedByForBaseURL(url)` (`host[:port]` only; never credentials, path or query) are new in `@johnhenry/aimatey-utils`. New optional `IRProvenance.servedBy`: the host the adapter actually called, informational and never a trust signal, separate from `locality` and from `IRMetadata.principal`. `prepareForwardedResponse()` now marks the proxy's own hop `locality: 'external'` (override with the new `ForwardingOptions.locality`).
+
+  Breaking change: the provenance `prepareForwardedResponse()` returns now carries `locality: 'external'` on the proxy hop; a test that compares it with an exact object needs the extra field.
+
+- 3a3c98b: Add `decisionConfidence(probabilities)` and `noulConfidence(p)`: the single definition of decision `confidence` (`1 - H(p) / ln(n)`, the distribution-concentration measure Jev and Ollama report), replacing the local copies in the patterns and Together code.
+- b74fe24: Add `validateDecisionResponse(request, response)`. It checks that a typed-decision response actually answers its request and **throws** a `ValidationError` for hard failures: an unanswered question, an answer whose `type` differs from its question's, a `choice` value that is not a `criteria` key, a `score` outside `[0, levels - 1]` or a `noul` outside `[0, 1]`, or any non-finite number. It **returns** `IRWarning`s (category `response-malformed`) for soft ones: probabilities that sum to 1 +/- 0.02 fails, or probability keys or length that do not match the question's `criteria`.
+- e853983: - Add `supportsChatFrontend()` and `supportsDecisionFrontend()`, the frontend-side mirrors of `supportsChat()` / `supportsDecisions()`.
+  - The model registry seed gains `kind: 'decision'` entries: `jev-1.13.0` (aliases `jev-latest`, `~typesafe/jev-latest`, `typesafe/jev-1.13`), `clef`, `clef-flash`, `pplx-decider-v1-27b`, `nimble`, `tev1`, `kev-4b` and `mercury-decide`, with input pricing (output is free). Their prices come from provider announcements and were not re-verified against first-party pricing pages.
+- 07d9bc7: Add `validateDecisionRequest(request, capabilities?)`. It throws `ValidationError` for empty questions or instructions, choices/scores with fewer than 2 options, question types the backend's `decisionTypes` excludes, counts over `decisionLimits` (`maxQuestions`, `maxChoiceOptions`, `maxScoreLevels`, `maxImages`) and images sent to a backend without `decisionImages`; it returns `IRWarning`s for instructions over 2000 characters, polar-word choice keys (option-name bias) and mostly non-Latin state for an English-only model. Without `capabilities`, only the shape checks run.
+- 88ce5c7: The IR is documented as JSON, and media content can name a payload by a transport-resolved reference.
+
+  **JSON (#118).** New `JsonValue`, `JsonObject` and `JsonPrimitive` types, and the contract that the IR's free-form bags (`metadata.custom`, `parameters.custom`, tool `input`, warning `details`, `raw`) are JSON-valued, with `undefined` meaning absent everywhere. The bags stay typed `unknown` in this release: tightening them would reject every caller that stores a class instance or an optional `undefined` property. `findNonJsonValues()`, `isJsonSerializable()` and `assertJsonSerializable()` (utils) give a transport one shared answer, with the path of each offender, and are the migration path to typing the bags `JsonValue` at the next major.
+
+  **Blob references (#122) -- breaking for exhaustive consumers.** `ImageContent`, `AudioContent`, `DocumentContent` and `VideoContent` `source` gains a third member, `BlobRefSource` (`{ type: 'ref'; ref: string; mediaType?: string; bytes?: number }`). Code that narrows `source` with `type === 'url' ? ... : source.data` no longer type-checks; handle or reject the `ref` case (`requireResolvedContent()` / `mediaSourceToUrl()` in utils do this in one call). The contract: the transport that minted a handle resolves it before the request reaches a backend; anything that cannot resolve one refuses it with `UNSUPPORTED_FEATURE` -- never drops it, never sends it to a provider, never fetches it. `Bridge` and `Router` enforce it after request middleware (`assertNoUnresolvedBlobRefs()`), `Router` skips a backend that cannot resolve a reference for one that can without counting a failure, the shipped provider adapters refuse a reference handed to them directly, `validateDecisionRequest()` and the System One client reject one in `images`, and a backend that resolves handles itself declares the new `IRCapabilities.blobRefs`.
+
+- 88ce5c7: The `IRChatStream` contract is now written down and enforced: a stream ends with exactly one terminal chunk, the deltas are the text, and a resumed stream continues its numbering.
+
+  **Termination.** An iterator that completed without a `done` or `error` chunk used to look like a finished reply, and `Router` credited it as a success, so the circuit breaker could not open on the failure that most resembles a healthy one. `Bridge` and `Router` now run every backend stream through the new `withTerminationGuard()` (utils), which closes a silent end with an `error` chunk (`code: 'stream-truncated'`, numbered as the next sequence), drops anything after a terminal chunk, and leaves a cancelled request alone.
+
+  **Behaviour change (core).** `Router` now counts a stream that ends without a terminal chunk as a backend failure (it may open the breaker, and a truncation before anything was delivered fails over). A third-party adapter that legitimately ended without `done` must now emit one. `tests/unit/router-streaming-fallback.test.ts` asserted the old behaviour and was updated.
+
+  **Authoritative text.** `StreamContentChunk.accumulated`, when present, MUST equal the running sum of `delta`; `StreamDoneChunk.message`, when present, is authoritative and MUST equal the delta sum (a mismatch is a transport fault, not a model fault); a proxy may drop `accumulated` only from every chunk of a stream. Every shipped backend already satisfied this; `convertChunkMode`'s `transform` option does not, and is documented as such. New in utils: `validateStreamContract()`, `monitorStreamContract()`, `createStreamContractMonitor()`, `getMessageText()`. New in types: `StreamContractViolation`, `StreamContractViolationCode`, and `BridgeConfig.onContractViolation` (opt-in dev/test check; costs nothing when unset).
+
+  **Resumption.** New optional `BaseStreamChunk.resumedFrom?: { sequence: number }` marks the first chunk after an interrupted stream was resumed; its `sequence` must be `resumedFrom.sequence + 1`. Additive. It is not a resume key (a per-stream id is a separate design, shared with cancellation, and is not decided here).
+
+  Documented in `docs/IR-FORMAT.md` and the docs-site IR page.
+
+### Patch Changes
+
+- 59f7fbe: Seed the model registry with the OpenAI Decisions model (`kind: 'decision'`, provider `openai`), with no pricing since OpenAI has published none.
+- Updated dependencies [291c3a5]
+- Updated dependencies [f787563]
+- Updated dependencies [bb94242]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [ce029c0]
+- Updated dependencies [e853983]
+- Updated dependencies [5936850]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [af22382]
+- Updated dependencies [cee0de7]
+- Updated dependencies [c115285]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [d28c9a8]
+- Updated dependencies [e501444]
+  - @johnhenry/aimatey-types@0.7.0
+  - @johnhenry/aimatey-errors@0.3.0
+
 ## 0.5.0
 
 ### Minor Changes

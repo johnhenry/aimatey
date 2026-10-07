@@ -1,5 +1,41 @@
 # @johnhenry/aimatey-testing
 
+## 0.2.0
+
+### Minor Changes
+
+- b74fe24: Add `createMockDecisionBackend(config)`: a decision-only mock backend taking `{ answers?, handler?, latencyMs?, error?, name?, model? }` and exposing a `calls` log of every `IRDecisionRequest` it received. Exports the `MockDecisionBackend` and `MockDecisionBackendConfig` types.
+- af22382: Decision calibration and bias checks (#147): `calibrationReport` (Brier, ECE, ten reliability buckets), `fitTemperature` (the temperature to give `createTemperatureScaling`), and `nameInvariance` (runs a request as written, with neutral keys, and with names reassigned to other definitions, and reports how often the answer followed the name).
+- cee0de7: Decision dataset capture: `createDecisionCapture({ sink, includeState?, redact? })` records every `Bridge.decide()` as JSONL (state, questions, answers, model, usage, warnings) and `recordOutcome(requestId, truth)` appends ground truth, joined on read. Also `loadDecisionDataset(path)`, `toCalibrationRuns(records)`, and memory/file sinks. This is the capture half of a fine-tuning loop; nothing here trains.
+- ce029c0: New Vitest-free `@johnhenry/aimatey-testing/decisions` subpath export (`calibrationReport`, `fitTemperature`, `nameInvariance`, and the decision dataset capture helpers) so CLIs can import them outside a test run. The root export still re-exports them.
+
+### Patch Changes
+
+- 88df633: `calibrationReport` now takes the predicted probability of being right from `probabilities` (the mass on the answer's own label for `choice`, on the rounded level for `score`, `max(value, 1 - value)` for `noul`) instead of `answer.confidence`, which is a concentration measure rather than P(correct). `confidence` is used only when a `choice` / `score` answer has no `probabilities`. Bucket `meanConfidence` and ECE change accordingly.
+- Updated dependencies [291c3a5]
+- Updated dependencies [291c3a5]
+- Updated dependencies [f787563]
+- Updated dependencies [bb94242]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [ce029c0]
+- Updated dependencies [b74fe24]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [5936850]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [af22382]
+- Updated dependencies [cee0de7]
+- Updated dependencies [c115285]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [59f7fbe]
+- Updated dependencies [d28c9a8]
+- Updated dependencies [e501444]
+  - @johnhenry/aimatey-types@0.7.0
+  - @johnhenry/aimatey-utils@0.6.0
+
 ## 0.1.5
 
 ### Patch Changes

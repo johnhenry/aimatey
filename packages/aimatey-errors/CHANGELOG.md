@@ -1,5 +1,49 @@
 # @johnhenry/aimatey-errors
 
+## 0.3.0
+
+### Minor Changes
+
+- c115285: `message` is for developers; `userMessage` is for display (#129).
+  - Every error class accepts an optional `userMessage` (end-user-safe text, shown verbatim) and exposes it as `error.userMessage`; `toJSON()` includes it. It is absent unless the thrower supplies one.
+  - New `toUserMessage(error)` in `@johnhenry/aimatey-errors`: the error's own `userMessage`, else a fixed default sentence for its `code` (`DEFAULT_USER_MESSAGES`, typed `Record<ErrorCode, string>` so a new code cannot ship without one), else its category's, else `GENERIC_USER_MESSAGE`. Total (accepts anything caught, never throws) and it never returns `error.message`; nothing from the error (message, `details`, `cause`, `provenance`, provider bodies) is interpolated into the defaults.
+  - `@johnhenry/aimatey-http-core` error bodies (generic, OpenAI and Anthropic shapes) now carry `userMessage`. `message` is unchanged: the existing 5xx/4xx sanitisation stays, so clients that read it keep working. There is no debug flag to gate it behind, so none was added.
+
+  Breaking changes: none for callers. `BaseErrorOptions` and the `*ErrorOptions` types gain an optional field; a class that implements the `AdapterError` interface from `@johnhenry/aimatey-types` is unaffected because the new member is optional. Adding an `ErrorCode` remains a compile-time change for anyone who switches on it exhaustively; use `toUserMessage` or `error.category` to be insulated.
+
+### Patch Changes
+
+- bb94242: Circuit breaker shape (#173, follow-up to #128).
+
+  **Failure window.** `circuitBreaker.window` (ms; per backend via `register()`, or `RouterConfig.circuitBreakerWindow`) makes the breaker open when `threshold` failures occur _within_ the window, whatever succeeded in between. Left unset it is exactly the old behaviour: `threshold` consecutive failures with no notion of time. A failed half-open probe reopens a windowed breaker immediately.
+
+  **Warm-up tolerance.** New `ErrorCode.MODEL_LOADING` (provider category, retryable): "this backend is warming up". The default `countAsFailure` predicate does not count it toward the breaker (it still shows in `failedRequests`). `circuitBreaker.countAsFailure?: (error) => boolean` replaces the default per backend; it receives the thrown value, or the `{ code, message }` of an in-band stream error chunk, and a throwing predicate counts the failure.
+
+  **Adapter-declared policy.** `AdapterMetadata.circuitBreaker?: { threshold?, timeout?, window?, countAsFailure? }` is the adapter's recommendation, resolved per field as `register()` option > adapter metadata > `RouterConfig`, and reported in `BackendInfo.circuitBreaker.source`. `enabled` is deliberately not adapter-settable. Invalid values throw `INVALID_PARAMETERS` from `register()`/`replace()`/the constructor.
+
+  Breaking changes:
+  - `BackendInfo.circuitBreaker` (`EffectiveCircuitBreakerPolicy`) gains `window`, `countAsFailure` and `source`; code that builds one by hand must add them.
+  - A backend reporting `MODEL_LOADING` no longer counts toward the breaker. Nothing in the library reported it before, so only adapters that opt in are affected.
+
+  **`unregister(name, { abort: true })`** (#174, option 3 of #117). The router now gives each call its own `AbortController`, linked to the caller's signal (so adapters receive a derived signal rather than the caller's own), and `abort: true` aborts every call in flight on that backend (chat, stream, embed, decide), calls `adapter.cancel?.(requestId, reason)` once for each, and hands the caller an `AbortError` without failing over. Can be combined with `drain`. Without `abort` nothing changes. `cancel()` is sent for revocation only, not for a caller's own abort.
+
+- Updated dependencies [291c3a5]
+- Updated dependencies [f787563]
+- Updated dependencies [bb94242]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [ce029c0]
+- Updated dependencies [e853983]
+- Updated dependencies [5936850]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [af22382]
+- Updated dependencies [cee0de7]
+- Updated dependencies [c115285]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [d28c9a8]
+- Updated dependencies [e501444]
+  - @johnhenry/aimatey-types@0.7.0
+
 ## 0.2.3
 
 ### Patch Changes
