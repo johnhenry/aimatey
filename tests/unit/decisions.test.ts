@@ -790,6 +790,14 @@ describe('decision model registry seeds', () => {
     expect(entry?.pricing).toEqual({ inputPer1M: input, outputPer1M: 0 });
   });
 
+  it('seeds gpt-6-luna as an OpenAI decision model with no invented pricing', () => {
+    const entry = getModelEntry('gpt-6-luna');
+    expect(entry?.id).toBe('gpt-6-luna');
+    expect(entry?.kind).toBe('decision');
+    expect(entry?.provider).toBe('openai');
+    expect(entry?.pricing).toBeUndefined();
+  });
+
   it('gives the Clef models their 64k context window', () => {
     expect(getModelEntry('clef')?.contextWindow).toBe(65536);
     expect(getModelEntry('clef-flash')?.contextWindow).toBe(65536);

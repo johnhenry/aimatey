@@ -35,11 +35,7 @@ import {
 // Dialects
 // ============================================================================
 
-export type SystemOneDialect =
-  | 'systemone'
-  | 'openrouter'
-  | 'vercel-evaluate'
-  | 'cloudflare';
+export type SystemOneDialect = 'systemone' | 'openrouter' | 'vercel-evaluate' | 'cloudflare';
 
 type QuestionType = IRDecisionQuestion['type'];
 

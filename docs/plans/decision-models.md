@@ -21,7 +21,7 @@ became a de-facto standard:
 | **OpenRouter** | `/api/alpha/decisions` and `/api/v1/systemone` | systemone + envelope (`id`, `provider`, `usage.cost`), `provider` routing prefs, `trace`, `session_id`; noul `criteria {true,false}`; `probabilities`/`confidence` **optional** on answers | c/s/n | serves Jev, Kev, Mercury Decide (Inception, free), … |
 | **Vercel AI Gateway** | `/v1/evaluate` (own dialect) and `/typesafe/v1/systemone` | own: `boolean` instead of `noul`, answer `{type:'boolean', probability}`, camelCase usage, `providerMetadata.gateway` | c/s/b | **decision fallbacks**: `when: {question?, confidenceBelow | probabilityBetween, any/all/atLeast}` re-runs on another model, incl. an LLM via structured output (then `confidence:0, probabilities:{}` sentinel); `triggeredBy` reasons; two-stage billing |
 | **Tev1-4B** (Together) | chat-completions | **not** systemone: system prompt + JSON user message → one letter A–X | choice only, 2–24 | probabilities need logprobs |
-| **OpenAI Decisions API** | `/v1/decisions`, invite-only (DevDay 2026-09-29) | own: `predicate` / `choice` / `rubric`; choice 2–8 snake_case ids; 60k-char state; images | c/s/n | no public schema yet |
+| **OpenAI Decisions API** | `/v1/decisions`, preview (announced DevDay 2026-09-29); model `gpt-6-luna` | own, verified live 2026-10-06: `input` (string, or `user` `message` items with `input_text` / `input_image`) + `questions[]` of `{name, type: choice\|predicate\|score}` with `choices[{value, description}]` / `levels[{label, description}]`; answers an array matched by `name`; probabilities `[{value, probability}]` (rounded to 2 dp); `confidence` provider-defined; usage with `*_tokens_details`, `output_tokens` 0 | c/s/n | **2–255 choices** (not 2–8), **2–10 levels**, ≤ 200 questions; images only as `data:` URLs; object `input` rejected (send JSON text); `system` role rejected; no published price; fixtures in `fixtures/decisions-openai/` |
 | GLiDE (Fastino), Solar Decide (Upstage), d1 (Liquid), Decider 1 (meraGPT), Span-01 (Respan, noul-only), GLiNER2.5-Decide, CLM | hosted / HF | systemone | mostly c/s/n | GLiDE tops Decision Index (64.81 vs Jev 57.91) with "adaptive thinking" |
 
 Two architectures: *encoder + decision head* (Laya, GLiNER, Strands' 1M-param
@@ -143,7 +143,7 @@ session, L ≈ several).
 | choice/score answers: `probabilities?` and `confidence?` become **optional** (**breaking for consumers**) | OpenRouter's schema marks them optional; LLM-emulated answers have none; avoids Vercel's `confidence: 0` sentinel |
 | `IRDecisionAnswer.reasoning?: string` | LLM emulation / "thinking" decision models can return it; never required |
 | `IRDecisionUsage.outputTokens?`, `cost?` (promote from `details`) | every provider reports both |
-| `IRCapabilities.decisionTypes?: readonly ('choice'\|'score'\|'noul')[]` and `decisionLimits?: { maxQuestions?, maxChoiceOptions?, maxScoreLevels?, maxStateTokens?, maxImages? }` | Tev1 is choice-only; Span-01 noul-only; limits differ (Jev 255/10, Ollama 64q/255/26, OpenAI 8 options, Laya ~20). Router and validation need these to pre-flight |
+| `IRCapabilities.decisionTypes?: readonly ('choice'\|'score'\|'noul')[]` and `decisionLimits?: { maxQuestions?, maxChoiceOptions?, maxScoreLevels?, maxStateTokens?, maxImages? }` | Tev1 is choice-only; Span-01 noul-only; limits differ (Jev 255/10, Ollama 64q/255/26, OpenAI 200q/255/10, Laya ~20). Router and validation need these to pre-flight |
 | `IRDecisionResponse.id?`, `provider?` | OpenRouter / Vercel envelope fields |
 | `FrontendAdapter` gains optional `decisionToIR?` / `decisionFromIR?` | lets decision frontends be real frontends and lets `Bridge.decide` use them |
 | `ModelRegistryEntry` seeds with `kind: 'decision'` for jev, clef, clef-flash, pplx-decider, nimble, tev1, kev, mercury-decide (pricing + limits) | cost tracking and `decisionModels` discovery |
@@ -168,7 +168,7 @@ Build `packages/backend/src/decisions/systemone-client.ts`: request builder,
 | `PerplexityBackendAdapter` | `/v1/decisions` | images; `pplx-decider-v1-27b` |
 | `InceptionBackendAdapter` | Mercury Decide (verify native endpoint; works via OpenRouter today) | |
 | `TogetherAIBackendAdapter` | chat-completions letter protocol | `decisionTypes: ['choice']`; probabilities from `logprobs`; noul/score emulated as 2-/N-option choice with neutral letter keys |
-| **new `SystemOneBackendAdapter`** (`baseURL`, optional `apiKey`, `dialect: 'systemone' \| 'openrouter' \| 'vercel-evaluate' \| 'openai-decisions'`) | any self-hosted server: Kev, Strands Decider, `laya[serve]`, Nimble, Vercel `/typesafe`, OpenAI when public | the pydantic-ai `SystemOneModel` equivalent |
+| **new `SystemOneBackendAdapter`** (`baseURL`, optional `apiKey`, `dialect: 'systemone' \| 'openrouter' \| 'vercel-evaluate' \| 'cloudflare'`) | any self-hosted server: Kev, Strands Decider, `laya[serve]`, Nimble, Vercel `/typesafe` | the pydantic-ai `SystemOneModel` equivalent |
 | **new `createEmulatedDecisionBackend(chatBackend, opts)`** in `aimatey-patterns` | any chat backend | one structured-output call → `{answers}`; `decisionsEmulated: true` capability + warning; `reasoning` populated; optional logprob-derived probabilities for OpenAI-compatible backends |
 
 `native-onnx`: leave as-is; Strands and Nimble have no ONNX exports, so the
@@ -214,8 +214,7 @@ Re-evaluate GLiNER2.5-Decide later (GLiNER usually ships ONNX).
 ### Phase 4 — Frontends, surfaces, feedback loop (M–L)
 
 - **Frontends**: `VercelDecideFrontendAdapter` (AI SDK `decide()` shape),
-  `OpenRouterDecisionsFrontendAdapter`, `OpenAIDecisionsFrontendAdapter`
-  (when public); `TypeSafeFrontendAdapter` doubles as the Ollama shape.
+  `OpenRouterDecisionsFrontendAdapter`, `OpenAIDecisionsFrontendAdapter`; `TypeSafeFrontendAdapter` doubles as the Ollama shape.
 - **Wrappers**: `createTypeSafeClient(bridge)` (drop-in for
   `@typesafe-ai/sdk`'s `systemOne()`) and `createDecide(bridge)` (drop-in for
   `ai`'s `decide()`).
@@ -271,7 +270,6 @@ OpenRouter covers Jev / Kev / Mercury Decide.
 - Training or RL fine-tuning in-repo (capture datasets instead).
 - A multi-label question type or a streaming decision IR.
 - Porting Strands / Nimble / Kev to `native-onnx` (no ONNX exports exist).
-- OpenAI Decisions beyond a dialect slot until the schema is public.
 - A decision *server* in `aimatey-mcp` (that package is an MCP client).
 
 ## 7. Decisions taken (2026-10-06)
@@ -311,15 +309,15 @@ Everything in the plan below had shipped on `main` by 2026-10-06 except the item
 | 4a | Vercel and OpenRouter decision frontends; `createTypeSafeClient`, `createDecide` / `createDecisionModel` wrappers | #156 |
 | 4b | Demo gateway (`examples/decisions/gateway`), `ai-matey decide`, decision routes on the CLI proxy | #158 |
 | 4c | `useDecision` / `useDecisionBatch`, `runTools` `gate`, `createDecisionGate`, `createDecisionTool`, decision dataset capture | #157 |
+| 5 | OpenAI Decisions: `OpenAIBackendAdapter.decide()` (own wire shape; the unverified `openai-decisions` System One dialect stub was removed), `OpenAIDecisionsFrontendAdapter`, `gpt-6-luna` registry seed, live test `OPENAI_LIVE=1` | #180 |
 | 4d | Benchmark harness (`examples/decisions/bench`), Decisions guide, IR / patterns / benchmarks docs, readme | #159 |
 
 Decisions 1 to 3 in section 7 held: probabilities are optional, emulation is opt-in in `aimatey-patterns`, and the gateway is a demo.
 
 ### Deferred
 
-- **OpenAI Decisions frontend and adapter.** Only a dialect slot (`'openai-decisions'`, unverified) exists; build the real thing when the schema is public.
 - **Strands and Nimble ONNX ports.** No ONNX exports exist; the local story is Ollama plus self-hosted System One servers. Re-evaluate GLiNER2.5-Decide if it ships ONNX.
-- **Live verification of the hosted providers.** Cloudflare, OpenRouter, Perplexity, Inception, Together and TypeSafe are covered by unit tests against stubbed HTTP, but have not been run against the real services (no API keys on the build machine). Only Ollama (0.35.1, `tev1:0.8b`) has been exercised live; the `OLLAMA_LIVE=1` bench run is the first end-to-end measurement. Perplexity's image encoding and Inception's endpoint remain unverified.
+- **Live verification of the hosted providers.** Cloudflare, OpenRouter, Perplexity, Inception, Together and TypeSafe are covered by unit tests against stubbed HTTP, but have not been run against the real services (no API keys on the build machine). Only Ollama (0.35.1, `tev1:0.8b`) and OpenAI (`gpt-6-luna`, 2026-10-06, `OPENAI_LIVE=1`) have been exercised live; the `OLLAMA_LIVE=1` bench run is the first end-to-end measurement. Perplexity's image encoding and Inception's endpoint remain unverified.
 - **`anymethod` sugar** (`ai.decide.isSpam(text)`, `classifyX`, `rateX`): not built.
 - **Typed Decisions and Decision Index runs.** The bench loader accepts both formats, but no public-dataset result is committed (nothing is downloaded at build time); see `examples/decisions/bench/fetch-datasets.md`.
 - **Hook DOM tests in CI.** `jsdom` and `@testing-library/react` are not root devDependencies, so the `useDecision` tests that need a DOM skip in CI. Recommendation: add both to the root `devDependencies` so they run.

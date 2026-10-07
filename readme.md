@@ -515,6 +515,7 @@ import { OpenAIBackendAdapter } from '@johnhenry/aimatey-backend/openai';
 - Ollama -- `decide()` on the Ollama backend via `/v1/systemone` (`nimble`, `tev1`, ...), with image support; the same adapter still chats
 - Cloudflare -- `decide()` with Clef / Clef-flash via Workers AI `/ai/run/@cf/cloudflare/...`, with image support; the same adapter still chats
 - OpenRouter -- `decide()` via `/api/alpha/decisions` (Jev, Kev, Mercury Decide), with `provider` routing, `trace` and `usage.cost`
+- OpenAI -- `decide()` via the Decisions API (`/v1/decisions`, `gpt-6-luna`, preview), with images as `data:` URLs
 - Perplexity -- `decide()` with `pplx-decider-v1-27b` via `/v1/decisions`
 - Inception -- `decide()` for Mercury Decide (native endpoint unverified; works through OpenRouter today)
 - Together AI (Tev1) -- `decide()` over chat-completions with a one-letter answer protocol (choice native, 2 to 24 options; `noul`/`score` emulated with a warning); probabilities from logprobs
@@ -553,6 +554,7 @@ import { OpenAIFrontendAdapter, AnthropicFrontendAdapter } from '@johnhenry/aima
 - Laya -- `Router.predict()`-shaped calls, translated to the Decision IR; pairs with `LayaBackendAdapter` in [`@johnhenry/aimatey-native-laya`](./packages/native-laya)
 - Vercel AI SDK `decide()` -- `boolean`/`choice`/`score` questions and `{ answers, usage, response, providerMetadata }` results (`VercelDecideFrontendAdapter`)
 - OpenRouter Decisions -- `/api/alpha/decisions` bodies with `provider`/`trace`/`session_id` and the `id`/`provider`/`usage.cost` envelope (`OpenRouterDecisionsFrontendAdapter`)
+- OpenAI Decisions -- `/v1/decisions` bodies (`input`, `questions[]`, `answers[]`, `input_image` parts) (`OpenAIDecisionsFrontendAdapter`)
 
 ### HTTP Integrations
 

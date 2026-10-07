@@ -1,7 +1,6 @@
 /**
  * SystemOne client tests: request building and response parsing for every
- * dialect (systemone, openrouter, vercel-evaluate,
- * cloudflare), and the shared POST helper's error mapping.
+ * dialect (systemone, openrouter, vercel-evaluate, cloudflare), and the shared POST helper's error mapping.
  *
  * Fixtures are hand-written from the wire shapes documented in
  * docs/plans/decision-models.md; the real Ollama replay lives in

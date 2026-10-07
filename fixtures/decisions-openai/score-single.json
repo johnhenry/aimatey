@@ -33,6 +33,31 @@
       "timestamp": 0
     }
   },
+  "providerRequest": {
+    "model": "gpt-6-luna",
+    "input": "Subject: Duplicate charge. Body: I was billed twice this month, please refund me today.",
+    "questions": [
+      {
+        "name": "urgency",
+        "type": "score",
+        "instructions": "How urgent is this?",
+        "levels": [
+          {
+            "label": "routine",
+            "description": "routine"
+          },
+          {
+            "label": "soon",
+            "description": "soon"
+          },
+          {
+            "label": "urgent",
+            "description": "urgent"
+          }
+        ]
+      }
+    ]
+  },
   "providerResponse": {
     "model": "gpt-6-luna",
     "answers": [

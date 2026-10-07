@@ -33,11 +33,13 @@ Frontend adapters convert provider-specific request formats to the Universal IR 
 - **Vercel AI SDK `decide()`** - `decide({ model, state, questions, providerOptions })`-shaped calls (`boolean`/`choice`/`score` questions) and `{ answers, usage, response, providerMetadata }` results, translated to the Decision IR (`VercelDecideFrontendAdapter`)
 - **OpenRouter Decisions** - `/api/alpha/decisions` bodies (`provider`/`trace`/`session_id`/`user` extras travel in `parameters.custom`) and the `id`/`provider`/`usage.cost` response envelope (`OpenRouterDecisionsFrontendAdapter`)
 
+- **OpenAI Decisions** - `/v1/decisions` bodies (`input` string or `message` items with `input_text`/`input_image` parts, a `questions` array of `choice`/`predicate`/`score`) and the `answers[]` response with `{ value, probability }` arrays and `usage` details (`OpenAIDecisionsFrontendAdapter`)
+
 The TypeSafe adapter doubles as the shape of Ollama's `/v1/systemone` endpoint
 (the same `{ state, questions }` / `{ answers, model }` bodies), so use it to
 front an Ollama decision model too.
 
-The decision adapters (TypeSafe, Laya, Vercel, OpenRouter) implement `FrontendAdapter` through its
+The decision adapters (TypeSafe, Laya, Vercel, OpenRouter, OpenAI) implement `FrontendAdapter` through its
 `decisionToIR`/`decisionFromIR` hooks rather than the chat ones (`toIR`/
 `fromIR`/`fromIRStream` are optional on `FrontendAdapter`). Drive them with
 `Bridge.decideFrom(request)`: it converts the request, runs the decision

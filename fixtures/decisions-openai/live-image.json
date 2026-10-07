@@ -1,0 +1,137 @@
+{
+  "metadata": {
+    "provider": "decisions-openai",
+    "scenario": "live-image",
+    "model": "gpt-6-luna",
+    "apiVersion": "openai /v1/decisions (preview)",
+    "capturedAt": "2026-10-07T03:00:35.195Z",
+    "description": "Live POST /v1/decisions with one base64 image sent as an input_image data URL.",
+    "tags": [
+      "decision",
+      "openai-decisions",
+      "live-capture"
+    ]
+  },
+  "request": {
+    "state": "Describe the attached image.",
+    "questions": {
+      "red": {
+        "type": "noul",
+        "instructions": "Is the image predominantly red?"
+      },
+      "colour": {
+        "type": "choice",
+        "instructions": "What is the dominant colour of the image?",
+        "criteria": {
+          "red": "red",
+          "green": "green",
+          "blue": "blue"
+        }
+      }
+    },
+    "images": [
+      {
+        "type": "image",
+        "source": {
+          "type": "base64",
+          "mediaType": "image/png",
+          "data": "<png>"
+        }
+      }
+    ],
+    "parameters": {
+      "model": "gpt-6-luna"
+    },
+    "metadata": {
+      "requestId": "fixture-live-image",
+      "timestamp": 0
+    }
+  },
+  "providerRequest": {
+    "model": "gpt-6-luna",
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Describe the attached image."
+          },
+          {
+            "type": "input_image",
+            "image_url": "data:image/png;base64,<png>"
+          }
+        ]
+      }
+    ],
+    "questions": [
+      {
+        "name": "red",
+        "type": "predicate",
+        "instructions": "Is the image predominantly red?"
+      },
+      {
+        "name": "colour",
+        "type": "choice",
+        "instructions": "What is the dominant colour of the image?",
+        "choices": [
+          {
+            "value": "red",
+            "description": "red"
+          },
+          {
+            "value": "green",
+            "description": "green"
+          },
+          {
+            "value": "blue",
+            "description": "blue"
+          }
+        ]
+      }
+    ]
+  },
+  "providerResponse": {
+    "model": "gpt-6-luna",
+    "answers": [
+      {
+        "type": "predicate",
+        "name": "red",
+        "probability": 1
+      },
+      {
+        "type": "choice",
+        "name": "colour",
+        "choice": "red",
+        "probabilities": [
+          {
+            "value": "red",
+            "probability": 1
+          },
+          {
+            "value": "green",
+            "probability": 0
+          },
+          {
+            "value": "blue",
+            "probability": 0
+          }
+        ],
+        "confidence": 1
+      }
+    ],
+    "usage": {
+      "input_tokens": 280,
+      "input_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "output_tokens": 0,
+      "output_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "total_tokens": 280
+    }
+  }
+}

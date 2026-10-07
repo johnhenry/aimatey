@@ -28,6 +28,17 @@
       "timestamp": 0
     }
   },
+  "providerRequest": {
+    "model": "gpt-6-luna",
+    "input": "",
+    "questions": [
+      {
+        "name": "blank",
+        "type": "predicate",
+        "instructions": "Is the input blank?"
+      }
+    ]
+  },
   "providerResponse": {
     "model": "gpt-6-luna",
     "answers": [

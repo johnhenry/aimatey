@@ -1415,6 +1415,14 @@ export const MODEL_REGISTRY_SEED: readonly ModelRegistryEntry[] = [
     pricing: { inputPer1M: 0.042, outputPer1M: 0 },
   },
   {
+    id: 'gpt-6-luna',
+    provider: 'openai',
+    family: 'gpt-6',
+    kind: 'decision',
+    // No pricing: OpenAI has published none for the Decisions API (preview,
+    // verified live 2026-10-06). Cost estimates return null until it does.
+  },
+  {
     id: 'mercury-decide',
     provider: 'inception',
     family: 'mercury',
