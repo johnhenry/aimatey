@@ -240,6 +240,12 @@ describe('failure window (#173 part 1)', () => {
     expect(router.isCircuitBreakerOpen('b')).toBe(true);
   });
 
+  it('rejects an invalid router-wide window at construction', () => {
+    for (const circuitBreakerWindow of [0, -5, Number.NaN]) {
+      expect(() => new Router({ circuitBreakerWindow })).toThrow(/circuitBreakerWindow/);
+    }
+  });
+
   it('counts a failed stream in the window like a failed call', async () => {
     const router = routerWith({ fallbackStrategy: 'none' });
     router.register('a', new ScriptedAdapter('a'), { circuitBreaker: { window: 10_000 } });
