@@ -1,0 +1,113 @@
+{
+  "metadata": {
+    "provider": "decisions-openai",
+    "scenario": "limit-probes",
+    "model": "gpt-6-luna",
+    "apiVersion": "openai /v1/decisions (preview)",
+    "capturedAt": "2026-10-06T00:00:00.000Z",
+    "description": "What POST /v1/decisions enforced when probed at the edges (issue #180). Status and error message only.",
+    "tags": [
+      "decision",
+      "openai-decisions",
+      "live-capture"
+    ]
+  },
+  "request": {
+    "state": "My card was charged twice",
+    "questions": {
+      "q": {
+        "type": "choice",
+        "instructions": "pick one",
+        "criteria": {
+          "a": "a",
+          "b": "b"
+        }
+      }
+    },
+    "parameters": {
+      "model": "gpt-6-luna"
+    },
+    "metadata": {
+      "requestId": "fixture-limit-probes",
+      "timestamp": 0
+    }
+  },
+  "limitProbes": [
+    {
+      "what": "choices=1",
+      "status": 400,
+      "message": "Invalid 'questions[0].choices': array too short. Expected an array with minimum length 2, but got an array with length 1 instead."
+    },
+    {
+      "what": "choices=2",
+      "status": 200
+    },
+    {
+      "what": "choices=8",
+      "status": 200
+    },
+    {
+      "what": "choices=9",
+      "status": 200
+    },
+    {
+      "what": "choices=255",
+      "status": 200
+    },
+    {
+      "what": "choices=256",
+      "status": 400,
+      "message": "Invalid 'questions[0].choices': array too long. Expected an array with maximum length 255, but got an array with length 256 instead."
+    },
+    {
+      "what": "levels=1",
+      "status": 400,
+      "message": "Invalid 'questions[0].levels': array too short. Expected an array with minimum length 2, but got an array with length 1 instead."
+    },
+    {
+      "what": "levels=2",
+      "status": 200
+    },
+    {
+      "what": "levels=10",
+      "status": 200
+    },
+    {
+      "what": "levels=11",
+      "status": 400,
+      "message": "Invalid 'questions[0].levels': array too long. Expected an array with maximum length 10, but got an array with length 11 instead."
+    },
+    {
+      "what": "questions=200",
+      "status": 200
+    },
+    {
+      "what": "questions=201",
+      "status": 400,
+      "message": "Invalid 'questions': array too long. Expected an array with maximum length 200, but got an array with length 201 instead."
+    },
+    {
+      "what": "image=https-url",
+      "status": 400,
+      "message": "Invalid 'input[0].content[1].image_url': string does not match pattern. Expected a string that matches the pattern '^data:'."
+    },
+    {
+      "what": "input=object",
+      "status": 400,
+      "message": "Invalid type for 'input': expected one of a string or array of objects, but got an object instead."
+    },
+    {
+      "what": "input=json-text",
+      "status": 200
+    },
+    {
+      "what": "role=system",
+      "status": 400,
+      "message": "Invalid value: 'system'. Value must be 'user'."
+    },
+    {
+      "what": "message-content=string",
+      "status": 200
+    }
+  ]
+}

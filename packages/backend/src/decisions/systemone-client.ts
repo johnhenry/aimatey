@@ -35,12 +35,7 @@ import {
 // Dialects
 // ============================================================================
 
-export type SystemOneDialect =
-  | 'systemone'
-  | 'openrouter'
-  | 'vercel-evaluate'
-  | 'openai-decisions'
-  | 'cloudflare';
+export type SystemOneDialect = 'systemone' | 'openrouter' | 'vercel-evaluate' | 'cloudflare';
 
 type QuestionType = IRDecisionQuestion['type'];
 
@@ -92,17 +87,6 @@ export const SYSTEMONE_DIALECTS: Readonly<Record<SystemOneDialect, SystemOneDial
     routingExtras: false,
     wireTypes: { ...CANONICAL_TYPES, noul: 'boolean' },
   },
-  // UNVERIFIED: OpenAI's Decisions API is invite-only (announced 2026-09-29)
-  // and has no public schema yet. `predicate` / `rubric` are the names from the
-  // announcement; the rest of the wire format is assumed to match System One.
-  // Treat this entry as a placeholder to be corrected against the real docs.
-  'openai-decisions': {
-    defaultPath: '/decisions',
-    modelInBody: true,
-    resultWrapper: false,
-    routingExtras: false,
-    wireTypes: { ...CANONICAL_TYPES, noul: 'predicate', score: 'rubric' },
-  },
   // Workers AI: `/ai/run/@cf/cloudflare/clef[-flash]`. The model is in the URL
   // and the Clef schema also takes the short name (`clef`/`clef-flash`) in the body.
   cloudflare: {
@@ -118,10 +102,8 @@ export const SYSTEMONE_DIALECTS: Readonly<Record<SystemOneDialect, SystemOneDial
 const WIRE_TYPE_ALIASES: Readonly<Record<string, QuestionType>> = {
   choice: 'choice',
   score: 'score',
-  rubric: 'score',
   noul: 'noul',
   boolean: 'noul',
-  predicate: 'noul',
 };
 
 // ============================================================================

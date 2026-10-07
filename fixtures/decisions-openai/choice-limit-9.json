@@ -1,0 +1,152 @@
+{
+  "metadata": {
+    "provider": "decisions-openai",
+    "scenario": "choice-limit-9",
+    "model": "gpt-6-luna",
+    "apiVersion": "openai /v1/decisions (preview)",
+    "capturedAt": "2026-10-06T00:00:00.000Z",
+    "description": "Live POST /v1/decisions with nine choices: accepted, so the 2-8 limit in secondary sources is wrong (issue #180).",
+    "tags": [
+      "decision",
+      "openai-decisions",
+      "live-capture"
+    ]
+  },
+  "request": {
+    "state": "My card was charged twice",
+    "questions": {
+      "q": {
+        "type": "choice",
+        "instructions": "pick one",
+        "criteria": {
+          "opt0": "option number 0",
+          "opt1": "option number 1",
+          "opt2": "option number 2",
+          "opt3": "option number 3",
+          "opt4": "option number 4",
+          "opt5": "option number 5",
+          "opt6": "option number 6",
+          "opt7": "option number 7",
+          "opt8": "option number 8"
+        }
+      }
+    },
+    "parameters": {
+      "model": "gpt-6-luna"
+    },
+    "metadata": {
+      "requestId": "fixture-choice-limit-9",
+      "timestamp": 0
+    }
+  },
+  "providerRequest": {
+    "model": "gpt-6-luna",
+    "input": "My card was charged twice",
+    "questions": [
+      {
+        "name": "q",
+        "type": "choice",
+        "instructions": "pick one",
+        "choices": [
+          {
+            "value": "opt0",
+            "description": "option number 0"
+          },
+          {
+            "value": "opt1",
+            "description": "option number 1"
+          },
+          {
+            "value": "opt2",
+            "description": "option number 2"
+          },
+          {
+            "value": "opt3",
+            "description": "option number 3"
+          },
+          {
+            "value": "opt4",
+            "description": "option number 4"
+          },
+          {
+            "value": "opt5",
+            "description": "option number 5"
+          },
+          {
+            "value": "opt6",
+            "description": "option number 6"
+          },
+          {
+            "value": "opt7",
+            "description": "option number 7"
+          },
+          {
+            "value": "opt8",
+            "description": "option number 8"
+          }
+        ]
+      }
+    ]
+  },
+  "providerResponse": {
+    "model": "gpt-6-luna",
+    "answers": [
+      {
+        "type": "choice",
+        "name": "q",
+        "choice": "opt0",
+        "probabilities": [
+          {
+            "value": "opt0",
+            "probability": 0.56
+          },
+          {
+            "value": "opt1",
+            "probability": 0.23
+          },
+          {
+            "value": "opt2",
+            "probability": 0.11
+          },
+          {
+            "value": "opt3",
+            "probability": 0.04
+          },
+          {
+            "value": "opt4",
+            "probability": 0.04
+          },
+          {
+            "value": "opt5",
+            "probability": 0.01
+          },
+          {
+            "value": "opt6",
+            "probability": 0.01
+          },
+          {
+            "value": "opt7",
+            "probability": 0.0
+          },
+          {
+            "value": "opt8",
+            "probability": 0.0
+          }
+        ],
+        "confidence": 0.51
+      }
+    ],
+    "usage": {
+      "input_tokens": 191,
+      "input_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "output_tokens": 0,
+      "output_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "total_tokens": 191
+    }
+  }
+}

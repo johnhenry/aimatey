@@ -1,0 +1,163 @@
+{
+  "metadata": {
+    "provider": "decisions-openai",
+    "scenario": "live-triage",
+    "model": "gpt-6-luna",
+    "apiVersion": "openai /v1/decisions (preview)",
+    "capturedAt": "2026-10-07T03:00:35.074Z",
+    "description": "Live POST /v1/decisions through Bridge.decide(): choice + predicate + score.",
+    "tags": [
+      "decision",
+      "openai-decisions",
+      "live-capture"
+    ]
+  },
+  "request": {
+    "state": "Subject: Duplicate charge. Body: I was billed twice this month, please refund me today.",
+    "questions": {
+      "team": {
+        "type": "choice",
+        "instructions": "Which team should handle this?",
+        "criteria": {
+          "billing": "invoices, refunds, charges",
+          "technical": "bugs, outages",
+          "account": "logins, profile changes"
+        }
+      },
+      "refund": {
+        "type": "noul",
+        "instructions": "Does the customer ask for a refund?"
+      },
+      "urgency": {
+        "type": "score",
+        "instructions": "How urgent is this?",
+        "criteria": [
+          "routine",
+          "soon",
+          "urgent"
+        ]
+      }
+    },
+    "parameters": {
+      "model": "gpt-6-luna"
+    },
+    "metadata": {
+      "requestId": "fixture-live-triage",
+      "timestamp": 0
+    }
+  },
+  "providerRequest": {
+    "model": "gpt-6-luna",
+    "input": "Subject: Duplicate charge. Body: I was billed twice this month, please refund me today.",
+    "questions": [
+      {
+        "name": "team",
+        "type": "choice",
+        "instructions": "Which team should handle this?",
+        "choices": [
+          {
+            "value": "billing",
+            "description": "invoices, refunds, charges"
+          },
+          {
+            "value": "technical",
+            "description": "bugs, outages"
+          },
+          {
+            "value": "account",
+            "description": "logins, profile changes"
+          }
+        ]
+      },
+      {
+        "name": "refund",
+        "type": "predicate",
+        "instructions": "Does the customer ask for a refund?"
+      },
+      {
+        "name": "urgency",
+        "type": "score",
+        "instructions": "How urgent is this?",
+        "levels": [
+          {
+            "label": "routine",
+            "description": "routine"
+          },
+          {
+            "label": "soon",
+            "description": "soon"
+          },
+          {
+            "label": "urgent",
+            "description": "urgent"
+          }
+        ]
+      }
+    ]
+  },
+  "providerResponse": {
+    "model": "gpt-6-luna",
+    "answers": [
+      {
+        "type": "choice",
+        "name": "team",
+        "choice": "billing",
+        "probabilities": [
+          {
+            "value": "billing",
+            "probability": 1
+          },
+          {
+            "value": "technical",
+            "probability": 0
+          },
+          {
+            "value": "account",
+            "probability": 0
+          }
+        ],
+        "confidence": 1
+      },
+      {
+        "type": "predicate",
+        "name": "refund",
+        "probability": 1
+      },
+      {
+        "type": "score",
+        "name": "urgency",
+        "score": 1.53,
+        "probabilities": [
+          {
+            "value": 0,
+            "label": "routine",
+            "probability": 0
+          },
+          {
+            "value": 1,
+            "label": "soon",
+            "probability": 0.47
+          },
+          {
+            "value": 2,
+            "label": "urgent",
+            "probability": 0.53
+          }
+        ],
+        "confidence": 0.3
+      }
+    ],
+    "usage": {
+      "input_tokens": 410,
+      "input_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "output_tokens": 0,
+      "output_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "total_tokens": 410
+    }
+  }
+}

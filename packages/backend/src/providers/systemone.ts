@@ -14,9 +14,10 @@
  * - Vercel AI Gateway's TypeSafe route
  *   (`baseURL: 'https://ai-gateway.vercel.sh/typesafe/v1'`, dialect
  *   `'systemone'`; its own `/v1/evaluate` route is dialect `'vercel-evaluate'`);
- * - OpenRouter (dialect `'openrouter'`);
- * - OpenAI Decisions once its schema is public (dialect `'openai-decisions'`
- *   is an unverified placeholder until then).
+ * - OpenRouter (dialect `'openrouter'`).
+ *
+ * OpenAI's Decisions API is NOT System One-shaped (`input`/`questions[]`/
+ * `answers[]`); it has its own adapter in `OpenAIBackendAdapter.decide()`.
  *
  * Like {@link TypeSafeBackendAdapter} it implements only `metadata` and
  * `decide()`; there is no chat.

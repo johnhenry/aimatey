@@ -1,0 +1,163 @@
+{
+  "metadata": {
+    "provider": "decisions-openai",
+    "scenario": "triage-choice-predicate-score",
+    "model": "gpt-6-luna",
+    "apiVersion": "openai /v1/decisions (preview)",
+    "capturedAt": "2026-10-06T00:00:00.000Z",
+    "description": "Live POST /v1/decisions response: choice + predicate + score in one request. The response body is verbatim from the live probe; the request is reconstructed from the verified wire shape (issue #180).",
+    "tags": [
+      "decision",
+      "openai-decisions",
+      "live-capture"
+    ]
+  },
+  "request": {
+    "state": "Subject: Duplicate charge. Body: I was billed twice this month, please refund me today.",
+    "questions": {
+      "team": {
+        "type": "choice",
+        "instructions": "Which team should handle this?",
+        "criteria": {
+          "billing": "invoices, refunds, charges",
+          "technical": "bugs, outages",
+          "account": "logins, profile changes"
+        }
+      },
+      "refund": {
+        "type": "noul",
+        "instructions": "Does the customer ask for a refund?"
+      },
+      "urgency": {
+        "type": "score",
+        "instructions": "How urgent is this?",
+        "criteria": [
+          "routine",
+          "soon",
+          "urgent"
+        ]
+      }
+    },
+    "parameters": {
+      "model": "gpt-6-luna"
+    },
+    "metadata": {
+      "requestId": "fixture-triage-choice-predicate-score",
+      "timestamp": 0
+    }
+  },
+  "providerRequest": {
+    "model": "gpt-6-luna",
+    "input": "Subject: Duplicate charge. Body: I was billed twice this month, please refund me today.",
+    "questions": [
+      {
+        "name": "team",
+        "type": "choice",
+        "instructions": "Which team should handle this?",
+        "choices": [
+          {
+            "value": "billing",
+            "description": "invoices, refunds, charges"
+          },
+          {
+            "value": "technical",
+            "description": "bugs, outages"
+          },
+          {
+            "value": "account",
+            "description": "logins, profile changes"
+          }
+        ]
+      },
+      {
+        "name": "refund",
+        "type": "predicate",
+        "instructions": "Does the customer ask for a refund?"
+      },
+      {
+        "name": "urgency",
+        "type": "score",
+        "instructions": "How urgent is this?",
+        "levels": [
+          {
+            "label": "routine",
+            "description": "routine"
+          },
+          {
+            "label": "soon",
+            "description": "soon"
+          },
+          {
+            "label": "urgent",
+            "description": "urgent"
+          }
+        ]
+      }
+    ]
+  },
+  "providerResponse": {
+    "model": "gpt-6-luna",
+    "answers": [
+      {
+        "type": "choice",
+        "name": "team",
+        "choice": "billing",
+        "probabilities": [
+          {
+            "value": "billing",
+            "probability": 0.97
+          },
+          {
+            "value": "technical",
+            "probability": 0.01
+          },
+          {
+            "value": "account",
+            "probability": 0.02
+          }
+        ],
+        "confidence": 0.96
+      },
+      {
+        "type": "predicate",
+        "name": "refund",
+        "probability": 1
+      },
+      {
+        "type": "score",
+        "name": "urgency",
+        "score": 1.56,
+        "probabilities": [
+          {
+            "value": 0,
+            "label": "routine",
+            "probability": 0.04
+          },
+          {
+            "value": 1,
+            "label": "soon",
+            "probability": 0.36
+          },
+          {
+            "value": 2,
+            "label": "urgent",
+            "probability": 0.6
+          }
+        ],
+        "confidence": 0.34
+      }
+    ],
+    "usage": {
+      "input_tokens": 403,
+      "input_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "output_tokens": 0,
+      "output_tokens_details": {
+        "reasoning_tokens": 0
+      },
+      "total_tokens": 403
+    }
+  }
+}

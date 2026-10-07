@@ -22,6 +22,7 @@ import type {
 } from '@johnhenry/aimatey-types';
 import type { AIModel, ListModelsOptions, ListModelsResult } from '@johnhenry/aimatey-types';
 import type { IREmbedRequest, IREmbedResponse } from '@johnhenry/aimatey-types';
+import type { IRDecisionRequest, IRDecisionResponse } from '@johnhenry/aimatey-types';
 import {
   AdapterConversionError,
   NetworkError,
@@ -34,6 +35,11 @@ import { normalizeSystemMessages, requireResolvedContent } from '@johnhenry/aima
 import { getModelCache } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
 import { localityForBaseURL, servedByForBaseURL } from '@johnhenry/aimatey-utils';
+import { postSystemOne, estimateSystemOneCost } from '../decisions/systemone-client.js';
+import {
+  buildOpenAIDecisionsRequest,
+  parseOpenAIDecisionsResponse,
+} from '../decisions/openai-decisions.js';
 import { getModelPricingInfo } from '@johnhenry/aimatey-utils';
 import {
   estimateTokens,
@@ -202,12 +208,38 @@ export function requiresMaxCompletionTokens(model: string): boolean {
 // OpenAI Backend Adapter
 // ============================================================================
 
+/** The Decisions API model (preview). */
+export const OPENAI_DECISION_MODEL = 'gpt-6-luna';
+
 /**
- * Backend adapter for OpenAI Chat Completions API.
+ * Config for {@link OpenAIBackendAdapter}.
+ */
+export type OpenAIBackendAdapterConfig = ApiKeyBackendAdapterConfig & {
+  /**
+   * Serve typed decisions via `POST <baseURL>/decisions` (OpenAI's Decisions
+   * API). Defaults to `true` when `baseURL` is api.openai.com and `false`
+   * otherwise, so OpenAI-compatible servers and the adapters that extend this
+   * one keep reporting `decisions: false`; set it `true` for a proxy that
+   * forwards `/decisions`.
+   */
+  readonly decisions?: boolean;
+};
+
+function isOpenAIHost(baseURL: string): boolean {
+  try {
+    return new URL(baseURL).hostname === 'api.openai.com';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Backend adapter for OpenAI Chat Completions API (and, on api.openai.com or
+ * with `decisions: true`, the Decisions API via `decide()`).
  */
 export class OpenAIBackendAdapter implements BackendAdapter<OpenAIRequest, OpenAIResponse> {
   readonly metadata: AdapterMetadata;
-  protected readonly config: ApiKeyBackendAdapterConfig;
+  protected readonly config: OpenAIBackendAdapterConfig;
   protected readonly baseURL: string;
   private readonly modelCache: ReturnType<typeof getModelCache>;
 
@@ -217,9 +249,10 @@ export class OpenAIBackendAdapter implements BackendAdapter<OpenAIRequest, OpenA
    * @param config Backend adapter configuration
    * @param metadataOverride Optional metadata to override defaults (used by subclasses)
    */
-  constructor(config: ApiKeyBackendAdapterConfig, metadataOverride?: Partial<AdapterMetadata>) {
+  constructor(config: OpenAIBackendAdapterConfig, metadataOverride?: Partial<AdapterMetadata>) {
     this.config = config;
     this.baseURL = config.baseURL || 'https://api.openai.com/v1';
+    const decisions = config.decisions ?? isOpenAIHost(this.baseURL);
     this.modelCache = getModelCache(config.modelsCacheScope || 'global');
 
     // Default OpenAI metadata
@@ -246,6 +279,15 @@ export class OpenAIBackendAdapter implements BackendAdapter<OpenAIRequest, OpenA
         supportsFrequencyPenalty: true,
         supportsPresencePenalty: true,
         maxStopSequences: 4,
+        ...(decisions && {
+          // Typed decisions via `/decisions`; every limit below was enforced
+          // by the live API on 2026-10-06 (fixtures/decisions-openai/).
+          decisions: true,
+          decisionModels: [OPENAI_DECISION_MODEL],
+          decisionTypes: ['choice', 'score', 'noul'] as const,
+          decisionImages: true,
+          decisionLimits: { maxQuestions: 200, maxChoiceOptions: 255, maxScoreLevels: 10 },
+        }),
       },
       config: {
         baseURL: this.baseURL,
@@ -267,6 +309,51 @@ export class OpenAIBackendAdapter implements BackendAdapter<OpenAIRequest, OpenA
           },
         }
       : defaultMetadata;
+
+    // Not a decision backend: hide the methods, so `typeof adapter.decide`
+    // (what the router and `supportsDecisions` test) is not 'function'. A
+    // subclass that brings its own `decide()` (Inception) is left alone.
+    if (!decisions && this.decide === OpenAIBackendAdapter.prototype.decide) {
+      Object.defineProperty(this, 'decide', { value: undefined });
+      Object.defineProperty(this, 'estimateDecisionCost', { value: undefined });
+    }
+  }
+
+  /**
+   * Answer a typed-decision request via OpenAI's Decisions API,
+   * `POST <baseURL>/decisions` (default model `gpt-6-luna`). Uses the same
+   * auth and `config.headers` as chat. Only present when decisions are
+   * enabled (see {@link OpenAIBackendAdapterConfig.decisions}). Images go as
+   * `data:` URLs; a `url` source throws. An object or array `state` is sent
+   * as JSON text.
+   */
+  decide(request: IRDecisionRequest, signal?: AbortSignal): Promise<IRDecisionResponse> {
+    const model = request.parameters?.model || this.config.defaultModel || OPENAI_DECISION_MODEL;
+    const wire = buildOpenAIDecisionsRequest(request, { model, backendName: this.metadata.name });
+    return postSystemOne(`${this.baseURL.replace(/\/+$/, '')}/decisions`, wire, {
+      headers: this.getHeaders(),
+      signal,
+      backendName: this.metadata.name,
+    }).then((json) =>
+      parseOpenAIDecisionsResponse(json, request, {
+        backendName: this.metadata.name,
+        locality: localityForBaseURL(this.baseURL),
+        servedBy: servedByForBaseURL(this.baseURL),
+      })
+    );
+  }
+
+  /**
+   * Input-token cost from the model registry. OpenAI has published no
+   * Decisions price, so this is `null` until the registry carries one.
+   */
+  estimateDecisionCost(request: IRDecisionRequest): Promise<number | null> {
+    return Promise.resolve(
+      estimateSystemOneCost(
+        request,
+        request.parameters?.model || this.config.defaultModel || OPENAI_DECISION_MODEL
+      )
+    );
   }
 
   /**
