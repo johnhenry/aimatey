@@ -135,6 +135,22 @@ export interface RouterConfig {
   readonly circuitBreakerThreshold?: number;
 
   /**
+   * Failure window for the circuit breaker, in milliseconds.
+   *
+   * Unset (the default) keeps the original, backward-compatible behaviour: the
+   * breaker opens after `circuitBreakerThreshold` **consecutive** failures,
+   * with no notion of elapsed time, and a success resets the count. Set, the
+   * breaker opens when `circuitBreakerThreshold` failures occur **within this
+   * many milliseconds**, whatever successes fall between them.
+   *
+   * `{ circuitBreaker: { window } }` on {@link Router.register} (or
+   * {@link AdapterMetadata.circuitBreaker}) overrides it for one backend.
+   *
+   * @default undefined (consecutive count, no window)
+   */
+  readonly circuitBreakerWindow?: number;
+
+  /**
    * Time to wait before attempting to close circuit breaker (milliseconds).
    *
    * Router-wide **default**: a backend registered with
@@ -281,12 +297,19 @@ export interface BackendCircuitBreakerOptions {
   /**
    * Whether this backend has a breaker at all. `false` exempts it from a router
    * that has one; `true` gives it one in a router that does not.
+   *
+   * Application policy: only {@link Router.register} can set it. An adapter's
+   * {@link AdapterMetadata.circuitBreaker} recommendation cannot switch the
+   * breaker on or off.
    * @default {@link RouterConfig.enableCircuitBreaker}
    */
   readonly enabled?: boolean;
 
   /**
-   * Consecutive failures before this backend's breaker opens. A positive integer.
+   * Failures before this backend's breaker opens. A positive integer.
+   *
+   * Counted as *consecutive* failures unless {@link BackendCircuitBreakerOptions.window}
+   * is set, in which case as failures within that window.
    * @default {@link RouterConfig.circuitBreakerThreshold}
    */
   readonly threshold?: number;
@@ -296,7 +319,65 @@ export interface BackendCircuitBreakerOptions {
    * @default {@link RouterConfig.circuitBreakerTimeout}
    */
   readonly timeout?: number;
+
+  /**
+   * Failure window in milliseconds: open when `threshold` failures occur within
+   * `window`. A positive, finite number.
+   *
+   * **Unset is the backward-compatible default** and means the original
+   * behaviour: `threshold` *consecutive* failures, any amount of time apart,
+   * reset by a success. Three refusals in four milliseconds and three failures
+   * over three minutes then trip the breaker alike. Set `window` when that
+   * distinction matters.
+   *
+   * Windowed mode keeps the timestamps of recent failures (pruned to the
+   * window) and does **not** let a success reset them -- intermittent failure
+   * is still failure. They are forgotten when the breaker closes, is reset, or
+   * the backend is replaced. A failed half-open probe reopens a windowed
+   * breaker immediately, however long ago the earlier failures were.
+   * @default {@link RouterConfig.circuitBreakerWindow} (itself `undefined`)
+   */
+  readonly window?: number;
+
+  /**
+   * Decide whether a failed call counts toward opening this backend's breaker.
+   * Receives whatever the call failed with: the thrown value, or -- for a
+   * stream that failed in-band -- the `error` payload of the error chunk
+   * (`{ code, message }`). Return `false` to leave the failure uncounted: it
+   * still appears in `failedRequests`, but adds nothing to the breaker.
+   *
+   * **The default** counts every failure *except* one whose `code` is
+   * {@link ErrorCode.MODEL_LOADING}: the adapter's way of saying "this backend
+   * is warming up", which is slowness, not sickness. A predicate given here
+   * **replaces** the default (it does not extend it), so one that should still
+   * ignore warm-up must say so. A predicate that throws is treated as `true`.
+   *
+   * This is the answer to a desktop that legitimately takes 40 s to load a
+   * 7B model: have the adapter report `MODEL_LOADING`, or list the codes it
+   * wants ignored here -- no threshold or timeout expresses it.
+   * @default counts everything except `MODEL_LOADING`
+   */
+  readonly countAsFailure?: (error: unknown) => boolean;
 }
+
+/**
+ * A backend adapter's recommended breaker policy, declared on
+ * {@link AdapterMetadata.circuitBreaker}.
+ *
+ * It is a default, not a mandate: it sits **beneath** the `register()` option
+ * and **above** {@link RouterConfig}. `enabled` is deliberately absent --
+ * whether a router runs breakers at all is the application's decision.
+ */
+export type AdapterCircuitBreakerPolicy = Omit<BackendCircuitBreakerOptions, 'enabled'>;
+
+/**
+ * Which layer a circuit-breaker field was resolved from.
+ *
+ * Precedence, highest first: `register` (the option given to
+ * {@link Router.register}), `adapter` ({@link AdapterMetadata.circuitBreaker}),
+ * `router` ({@link RouterConfig}, and the built-in default where that is unset).
+ */
+export type CircuitBreakerPolicySource = 'register' | 'adapter' | 'router';
 
 /**
  * Per-backend settings accepted by {@link Router.register}.
@@ -317,6 +398,19 @@ export interface EffectiveCircuitBreakerPolicy {
   readonly enabled: boolean;
   readonly threshold: number;
   readonly timeout: number;
+  /** Failure window in ms, or `undefined` for the consecutive-count behaviour. */
+  readonly window: number | undefined;
+  /** The predicate in force, including the default one. */
+  readonly countAsFailure: (error: unknown) => boolean;
+  /** Which layer each field came from. */
+  readonly source: {
+    readonly [K in
+      | 'enabled'
+      | 'threshold'
+      | 'timeout'
+      | 'window'
+      | 'countAsFailure']: CircuitBreakerPolicySource;
+  };
 }
 
 /**
@@ -332,9 +426,37 @@ export interface UnregisterOptions {
    * - a number -- the same, but give up after that many milliseconds.
    *
    * Draining never cancels anything. It is observation, not revocation; see
-   * {@link Router.unregister}.
+   * {@link Router.unregister}. Combine it with `abort` to cut the calls and
+   * then wait for them to unwind.
    */
   readonly drain?: boolean | number;
+
+  /**
+   * Revoke the calls in flight on this backend (#117, #174).
+   *
+   * Every chat, stream, embedding and decision call the router has running
+   * against the backend is aborted: its `AbortSignal` (the router hands each
+   * call its own, linked to the caller's) fires with an `AbortError`,
+   * `BackendAdapter.cancel(requestId, reason)` is called once for it so a far
+   * side that cannot see a signal can stop too, and the caller receives that
+   * abort error -- whatever the adapter made of it, including an adapter that
+   * ignores the signal. A stream ends by throwing it; nothing the revoked
+   * backend yields afterwards is delivered.
+   *
+   * Revocation is **not failed over**: the router does not answer from another
+   * backend a request it was just told to cut. Callers that want a retry make
+   * it. Calls on other backends are untouched, and a revoked call's late
+   * outcome is not accounted (the backend is gone).
+   *
+   * `cancel()` is sent only for revocation. A *caller's* own abort is not
+   * relayed by the router (a proxy behind a router watches the signal itself;
+   * `Bridge` sends `cancel()` for a direct backend), so no far side is told
+   * twice. `cancel()` is idempotent by contract, so the proxy-also-watches-the-
+   * signal case on revocation is safe.
+   *
+   * @default false
+   */
+  readonly abort?: boolean;
 }
 
 /**
@@ -716,10 +838,15 @@ export interface Router extends BackendAdapter<unknown, unknown> {
    *   failure must not trip the breaker of a different backend later
    *   registered under the same name).
    *
-   * **This is not revocation.** If the answer must not be *delivered* -- a
-   * revoked device, a rotated credential -- stop the call with the
-   * `AbortSignal` you passed to it; only the transport can make that
-   * guarantee. Use `unregister()` to stop sending *new* work.
+   * **By default this is not revocation.** To cut the calls in flight --
+   * a revoked device, a rotated credential -- pass `{ abort: true }`: the
+   * router aborts every call it has running against the backend (each has its
+   * own signal, linked to the caller's), calls `adapter.cancel?.(requestId)`,
+   * and hands the callers an `AbortError` without failing over. See
+   * {@link UnregisterOptions.abort}. Whether the *transport* really stops is
+   * still up to the adapter: an adapter that ignores its signal and `cancel()`
+   * keeps working in the background, but its caller is released and nothing it
+   * produces is delivered or accounted.
    *
    * Pass `{ drain: true }` (or a timeout in milliseconds) to get a promise that
    * settles once the in-flight calls have finished. The backend is removed
@@ -728,8 +855,11 @@ export interface Router extends BackendAdapter<unknown, unknown> {
    *
    * Throws if `name` is not registered (synchronously, with or without `drain`).
    */
-  unregister(name: string, options?: { readonly drain?: false }): Router;
-  unregister(name: string, options: { readonly drain: true | number }): Promise<UnregisterResult>;
+  unregister(name: string, options?: { readonly drain?: false; readonly abort?: boolean }): Router;
+  unregister(
+    name: string,
+    options: { readonly drain: true | number; readonly abort?: boolean }
+  ): Promise<UnregisterResult>;
   unregister(name: string, options?: UnregisterOptions): Router | Promise<UnregisterResult>;
 
   /**

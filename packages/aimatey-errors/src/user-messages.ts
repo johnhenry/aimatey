@@ -80,6 +80,7 @@ export const DEFAULT_USER_MESSAGES: Readonly<Record<ErrorCode, string>> = {
   [ErrorCode.PROVIDER_TIMEOUT]: 'The AI service took too long to respond. Please try again.',
   [ErrorCode.PROVIDER_OVERLOADED]:
     'The AI service is busy right now. Please try again in a moment.',
+  [ErrorCode.MODEL_LOADING]: 'The AI model is still starting up. Please try again in a moment.',
   [ErrorCode.ADAPTER_CONVERSION_ERROR]: CATEGORY_MESSAGES[ErrorCategory.ADAPTER],
   [ErrorCode.ADAPTER_VALIDATION_ERROR]: CATEGORY_MESSAGES[ErrorCategory.ADAPTER],
   [ErrorCode.UNSUPPORTED_CONVERSION]: CATEGORY_MESSAGES[ErrorCategory.ADAPTER],
