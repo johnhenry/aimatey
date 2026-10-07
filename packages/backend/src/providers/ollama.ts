@@ -20,6 +20,9 @@ import type {
   IRChatStream,
   IRMessage,
   IRStreamChunk,
+  IRWarning,
+  MessageContent,
+  FinishReason,
   ListModelsOptions,
   ListModelsResult,
   AIModel,
@@ -31,7 +34,7 @@ import {
   ErrorCode,
   createErrorFromHttpResponse,
 } from '@johnhenry/aimatey-errors';
-import { normalizeSystemMessages } from '@johnhenry/aimatey-utils';
+import { normalizeSystemMessages, createWarning } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
 import {
   buildStaticResult,
@@ -40,6 +43,8 @@ import {
   extractStructuredOutputJSON,
   buildResponseFormatFallbackWarning,
   type ModelCapabilityFilter,
+  type StreamedToolCall,
+  buildStreamDoneMessage,
 } from '../shared.js';
 import { decideViaSystemOne } from '../decisions/systemone-client.js';
 
@@ -47,14 +52,42 @@ import { decideViaSystemOne } from '../decisions/systemone-client.js';
 // Ollama API Types
 // ============================================================================
 
+/** A tool call as Ollama's `/api/chat` sends and accepts it. */
+export interface OllamaToolCall {
+  /** Present on newer Ollama versions; absent on older ones. */
+  id?: string;
+  function: {
+    /** Position of the call within the message (newer Ollama versions). */
+    index?: number;
+    name: string;
+    /** A JSON OBJECT -- not a JSON string as in OpenAI's wire format. */
+    arguments?: Record<string, unknown>;
+  };
+}
+
+/** A tool definition as Ollama's `/api/chat` accepts it. */
+export interface OllamaTool {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
 export interface OllamaMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  /** Assistant messages: the tool calls the model made. */
+  tool_calls?: OllamaToolCall[];
+  /** `role: 'tool'` messages: the tool the result belongs to (Ollama >= 0.4). */
+  tool_name?: string;
 }
 
 export interface OllamaRequest {
   model: string;
   messages: OllamaMessage[];
+  tools?: OllamaTool[];
   options?: {
     temperature?: number;
     top_p?: number;
@@ -70,6 +103,7 @@ export interface OllamaResponse {
   created_at: string;
   message: OllamaMessage;
   done: boolean;
+  done_reason?: string;
   total_duration?: number;
   load_duration?: number;
   prompt_eval_count?: number;
@@ -119,6 +153,18 @@ export function isOllamaDecisionModel(name: string, parentModel?: string): boole
 // Ollama Backend Adapter
 // ============================================================================
 
+/**
+ * Id for a tool call Ollama did not label. Older Ollama versions send no
+ * `id`; the IR needs one to pair a `tool_result` with its `tool_use`. The id
+ * is `call_<index>` -- deterministic, so replaying a recorded response yields
+ * identical ids -- where `index` is the call's position in the assistant
+ * message (across stream chunks too). Ids are unique within a turn, not
+ * across turns; Ollama itself never reads them back.
+ */
+function generateToolCallId(index: number): string {
+  return `call_${index}`;
+}
+
 export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, OllamaResponse> {
   readonly metadata: AdapterMetadata;
   private readonly config: BackendAdapterConfig;
@@ -141,7 +187,10 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
         decisionLimits: { maxQuestions: 64, maxChoiceOptions: 255, maxScoreLevels: 26 },
         streaming: true,
         multiModal: false,
-        tools: false,
+        // `tools` / `tool_calls` on `/api/chat`. Models that lack tool support
+        // make Ollama answer HTTP 400 ("does not support tools"), which is
+        // surfaced as the usual provider error.
+        tools: true,
         structuredOutput: 'fallback',
         embeddings: true,
         maxContextTokens: 4096, // Varies by model
@@ -310,8 +359,14 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
         metadata: {
           ...request.metadata,
           provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+          warnings: this.withToolChoiceWarnings(request),
         },
       } as IRStreamChunk;
+
+      // Ollama delivers each tool call whole (arguments is a finished object),
+      // so every call becomes a single `tool_use` chunk carrying the complete
+      // JSON in `inputDelta` rather than incremental fragments.
+      const toolCalls: StreamedToolCall[] = [];
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -356,12 +411,31 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
                 yield contentChunk;
               }
 
+              for (const call of chunk.message?.tool_calls ?? []) {
+                const index = toolCalls.length;
+                const toolCall: StreamedToolCall = {
+                  id: call.id ?? generateToolCallId(index),
+                  name: call.function.name,
+                  args: JSON.stringify(call.function.arguments ?? {}),
+                  index,
+                };
+                toolCalls.push(toolCall);
+                yield {
+                  type: 'tool_use',
+                  sequence: sequence++,
+                  id: toolCall.id,
+                  name: toolCall.name,
+                  inputDelta: toolCall.args,
+                  index,
+                } as IRStreamChunk;
+              }
+
               if (chunk.done) {
-                const message: IRMessage = { role: 'assistant', content: contentBuffer };
+                const message: IRMessage = buildStreamDoneMessage(contentBuffer, toolCalls);
                 yield {
                   type: 'done',
                   sequence: sequence++,
-                  finishReason: 'stop',
+                  finishReason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
                   usage:
                     chunk.prompt_eval_count && chunk.eval_count
                       ? {
@@ -421,17 +495,28 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
       this.metadata.capabilities.supportsMultipleSystemMessages
     );
 
-    const ollamaMessages: OllamaMessage[] = messages.map((msg) => ({
-      role: msg.role as 'system' | 'user' | 'assistant',
-      content:
-        typeof msg.content === 'string'
-          ? msg.content
-          : msg.content.map((c) => (c.type === 'text' ? c.text : JSON.stringify(c))).join(''),
-    }));
+    const ollamaMessages = this.convertMessages(messages);
+    // `toolChoice: 'none'` is honoured by not offering the tools at all.
+    const offerTools =
+      request.tools && request.tools.length > 0 && request.toolChoice !== 'none'
+        ? request.tools
+        : undefined;
 
     return {
       model: request.parameters?.model || this.config.defaultModel || 'llama3.2',
       messages: ollamaMessages,
+      ...(offerTools
+        ? {
+            tools: offerTools.map((tool) => ({
+              type: 'function' as const,
+              function: {
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.parameters as unknown as Record<string, unknown>,
+              },
+            })),
+          }
+        : {}),
       options: {
         temperature: request.parameters?.temperature,
         top_p: request.parameters?.topP,
@@ -441,6 +526,89 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
       },
       stream: request.stream,
     };
+  }
+
+  /**
+   * Convert IR messages to Ollama messages.
+   *
+   * - `tool_use` blocks become the assistant message's `tool_calls`
+   *   (`arguments` stays an object).
+   * - Each `tool_result` block becomes its own `role: 'tool'` message; the
+   *   `tool_name` is resolved from the matching earlier `tool_use` id when
+   *   there is one (Ollama >= 0.4 uses it, older versions ignore it).
+   * - Remaining text keeps the previous behaviour (text joined, other block
+   *   types JSON-stringified).
+   */
+  private convertMessages(messages: readonly IRMessage[]): OllamaMessage[] {
+    const toolNames = new Map<string, string>();
+    const out: OllamaMessage[] = [];
+
+    for (const msg of messages) {
+      if (typeof msg.content === 'string') {
+        out.push({ role: msg.role, content: msg.content });
+        continue;
+      }
+
+      const textOf = (blocks: readonly MessageContent[]): string =>
+        blocks.map((c) => (c.type === 'text' ? c.text : JSON.stringify(c))).join('');
+
+      const toolUses = msg.content.filter((c) => c.type === 'tool_use');
+      const toolResults = msg.content.filter((c) => c.type === 'tool_result');
+      const rest = msg.content.filter((c) => c.type !== 'tool_use' && c.type !== 'tool_result');
+
+      for (const use of toolUses) {
+        toolNames.set(use.id, use.name);
+      }
+
+      for (const result of toolResults) {
+        const toolName = toolNames.get(result.toolUseId);
+        out.push({
+          role: 'tool',
+          content:
+            typeof result.content === 'string'
+              ? result.content
+              : result.content.map((t) => t.text).join(''),
+          ...(toolName ? { tool_name: toolName } : {}),
+        });
+      }
+
+      if (toolUses.length > 0) {
+        out.push({
+          role: 'assistant',
+          content: textOf(rest),
+          tool_calls: toolUses.map((use) => ({
+            function: { name: use.name, arguments: { ...use.input } },
+          })),
+        });
+      } else if (rest.length > 0 || toolResults.length === 0) {
+        out.push({ role: msg.role, content: textOf(rest) });
+      }
+    }
+
+    return out;
+  }
+
+  /**
+   * `parameter-unsupported` warnings for the part of `toolChoice` Ollama has
+   * no wire equivalent for (`'required'` and a forced `{ name }`); `'auto'`
+   * is Ollama's behaviour and `'none'` is honoured by omitting the tools.
+   */
+  private withToolChoiceWarnings(request: IRChatRequest): IRWarning[] | undefined {
+    const existing = request.metadata.warnings;
+    const choice = request.toolChoice;
+    if (!request.tools?.length || choice === undefined || choice === 'auto' || choice === 'none') {
+      return existing ? [...existing] : undefined;
+    }
+    return [
+      ...(existing ?? []),
+      createWarning(
+        'parameter-unsupported',
+        `Ollama's /api/chat has no tool_choice; toolChoice ${
+          typeof choice === 'string' ? `'${choice}'` : `{ name: '${choice.name}' }`
+        } was not forwarded and the model decides whether to call a tool.`,
+        { field: 'toolChoice', source: this.metadata.name }
+      ),
+    ];
   }
 
   /**
@@ -456,11 +624,27 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
     const content = originalRequest.responseFormat
       ? extractStructuredOutputJSON(response.message.content)
       : response.message.content;
-    const message: IRMessage = { role: 'assistant', content };
+    const toolCalls = response.message.tool_calls ?? [];
+    const message: IRMessage =
+      toolCalls.length > 0
+        ? {
+            role: 'assistant',
+            content: [
+              ...(content ? [{ type: 'text' as const, text: content }] : []),
+              ...toolCalls.map((call, index) => ({
+                type: 'tool_use' as const,
+                id: call.id ?? generateToolCallId(index),
+                name: call.function.name,
+                input: call.function.arguments ?? {},
+              })),
+            ],
+          }
+        : { role: 'assistant', content };
+    const finishReason: FinishReason = toolCalls.length > 0 ? 'tool_calls' : 'stop';
 
     return {
       message,
-      finishReason: 'stop',
+      finishReason,
       usage:
         response.prompt_eval_count && response.eval_count
           ? {
@@ -484,10 +668,10 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
         },
         warnings: originalRequest.responseFormat
           ? [
-              ...(originalRequest.metadata.warnings ?? []),
+              ...(this.withToolChoiceWarnings(originalRequest) ?? []),
               buildResponseFormatFallbackWarning(this.metadata.name),
             ]
-          : originalRequest.metadata.warnings,
+          : this.withToolChoiceWarnings(originalRequest),
       },
       raw: response as unknown as Record<string, unknown>,
     };

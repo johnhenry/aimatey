@@ -57,7 +57,7 @@ This package includes adapters for **30 chat providers**, plus 1 typed-decision 
 - **DeepSeek** - Research models
 
 ### Local/Development
-- **Ollama** - Local model hosting
+- **Ollama** - Local model hosting; tool calling via `/api/chat` `tools` / `tool_calls` (needs a tool-capable model; `toolChoice: 'none'` withholds tools, `'required'`/forced names warn `parameter-unsupported`; streamed tool calls arrive whole, not as fragments)
 - **LM Studio** - Local desktop inference
 - **OmniRoute** - Self-hosted gateway fronting 290+ providers (90+ free), no API key required by default
 
