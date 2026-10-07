@@ -438,18 +438,24 @@ Manage the backend registry. All three return the router for chaining.
 ```typescript
 register(name: string, adapter: BackendAdapter, options?: BackendRegistrationOptions): Router
 replace(name: string, adapter: BackendAdapter): Router
-unregister(name: string): Router
-unregister(name: string, options: { drain: true | number }): Promise<UnregisterResult>
+unregister(name: string, options?: { abort?: boolean }): Router
+unregister(name: string, options: { drain: true | number; abort?: boolean }): Promise<UnregisterResult>
 ```
 
-- `register`'s `options.circuitBreaker` (`{ enabled?, threshold?, timeout? }`)
-  overrides the router-wide circuit-breaker settings for that one backend; omitted
-  fields inherit `RouterConfig`. The overrides survive `replace()` and `clone()`, and
-  `getBackendInfo()` reports the effective policy.
+- `register`'s `options.circuitBreaker` (`{ enabled?, threshold?, timeout?, window?,
+  countAsFailure? }`) overrides the router-wide circuit-breaker settings for that one
+  backend; omitted fields inherit the adapter's own `AdapterMetadata.circuitBreaker`
+  recommendation, then `RouterConfig`. The overrides survive `replace()` and `clone()`,
+  and `getBackendInfo()` reports the effective policy and which layer each field came from
+  (`circuitBreaker.source`). `window` (ms) makes the breaker count failures *within* that
+  window instead of consecutive ones (unset, the default, is the original consecutive
+  count); the default `countAsFailure` ignores a backend that reports `MODEL_LOADING`.
 - `unregister` is not cancellation: in-flight calls (streams included) run to their
   natural end and are not accounted. `{ drain }` returns a promise that settles when
-  they finish, or after the timeout. To stop delivery, abort with the call's
-  `AbortSignal`.
+  they finish, or after the timeout. `{ abort: true }` revokes them instead: every
+  call in flight on that backend is aborted (the router gives each its own signal,
+  linked to the caller's), `adapter.cancel?.(requestId)` is called, and the caller gets an
+  `AbortError` without failing over to another backend.
 
 ##### `execute(request, signal?)`
 

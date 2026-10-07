@@ -700,7 +700,11 @@ export class MockBackendAdapter implements BackendAdapter {
       model: this.config.defaultModel,
       metadata: {
         ...request.metadata,
-        provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+        provenance: {
+          ...request.metadata.provenance,
+          backend: this.metadata.name,
+          locality: 'in-process',
+        },
       },
     };
   }

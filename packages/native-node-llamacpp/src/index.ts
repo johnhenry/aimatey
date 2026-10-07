@@ -99,6 +99,8 @@ export class NodeLlamaCppBackend implements BackendAdapter {
   private context: any;
   private session: any;
   private initialized: boolean = false;
+  /** True while an `initialize()` this adapter started is still loading the model. */
+  private loading: boolean = false;
 
   constructor(config: NodeLlamaCppConfig) {
     this.config = {
@@ -157,6 +159,36 @@ export class NodeLlamaCppBackend implements BackendAdapter {
   }
 
   /**
+   * Load the model for the first request, once.
+   *
+   * The request that finds the model unloaded loads it and waits. A request
+   * that arrives *while that load is running* is told so with `MODEL_LOADING`
+   * instead of starting a second load of the same model (which this used to do,
+   * doubling its memory) or queueing behind a load that can take tens of
+   * seconds -- a router can send it to another backend, and its breaker does not
+   * count a warm-up as a failure.
+   */
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+    if (this.loading) {
+      throw new ProviderError({
+        code: ErrorCode.MODEL_LOADING,
+        message: 'node-llama-cpp is still loading the model; try again shortly.',
+        isRetryable: true,
+        provenance: { backend: this.metadata.name },
+      });
+    }
+    this.loading = true;
+    try {
+      await this.initialize();
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  /**
    * Convert IR request to provider format (passthrough - uses IR internally).
    */
   fromIR(request: IRChatRequest): IRChatRequest {
@@ -178,9 +210,7 @@ export class NodeLlamaCppBackend implements BackendAdapter {
    * Execute a non-streaming chat request.
    */
   async execute(request: IRChatRequest): Promise<IRChatResponse> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
+    await this.ensureInitialized();
 
     try {
       // Extract the user's message (last message)
@@ -233,6 +263,7 @@ export class NodeLlamaCppBackend implements BackendAdapter {
           ...request.metadata,
           provenance: {
             backend: this.metadata.name,
+            locality: 'in-process',
           },
         },
       };
@@ -250,9 +281,7 @@ export class NodeLlamaCppBackend implements BackendAdapter {
    * Execute a streaming chat request.
    */
   async *executeStream(request: IRChatRequest): IRChatStream {
-    if (!this.initialized) {
-      await this.initialize();
-    }
+    await this.ensureInitialized();
 
     let sequence = 0;
 

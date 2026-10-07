@@ -25,6 +25,7 @@
  * @module
  */
 
+import { localityForBaseURL, servedByForBaseURL } from '@johnhenry/aimatey-utils';
 import type {
   BackendAdapter,
   AdapterMetadata,
@@ -112,6 +113,8 @@ export class SystemOneBackendAdapter implements BackendAdapter {
       headers: this.getHeaders(),
       signal,
       backendName: this.metadata.name,
+      locality: localityForBaseURL(this.url),
+      servedBy: servedByForBaseURL(this.url),
       warnings: sendImages
         ? []
         : buildImageDroppedWarning(request, this.metadata.name, this.metadata.name),

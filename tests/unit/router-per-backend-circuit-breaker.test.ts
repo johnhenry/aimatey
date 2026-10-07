@@ -200,14 +200,14 @@ describe('per-backend circuit breaker overrides', () => {
     router.register('lan', lan, { circuitBreaker: { threshold: 2, timeout: 7_000 } });
 
     router.replace('lan', cloud);
-    expect(router.getBackendInfo('lan')?.circuitBreaker).toEqual({
+    expect(router.getBackendInfo('lan')?.circuitBreaker).toMatchObject({
       enabled: true,
       threshold: 2,
       timeout: 7_000,
     });
 
     const cloned = router.clone({ trackLatency: false });
-    expect(cloned.getBackendInfo('lan')?.circuitBreaker).toEqual({
+    expect(cloned.getBackendInfo('lan')?.circuitBreaker).toMatchObject({
       enabled: true,
       threshold: 2,
       timeout: 7_000,
@@ -219,12 +219,12 @@ describe('per-backend circuit breaker overrides', () => {
     router.register('lan', lan, { circuitBreaker: { threshold: 2 } });
     router.register('cloud', cloud);
 
-    expect(router.getBackendInfo('lan')?.circuitBreaker).toEqual({
+    expect(router.getBackendInfo('lan')?.circuitBreaker).toMatchObject({
       enabled: true,
       threshold: 2,
       timeout: 60_000,
     });
-    expect(router.getBackendInfo('cloud')?.circuitBreaker).toEqual({
+    expect(router.getBackendInfo('cloud')?.circuitBreaker).toMatchObject({
       enabled: true,
       threshold: 5,
       timeout: 60_000,

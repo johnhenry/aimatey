@@ -30,6 +30,8 @@ import type {
   ParallelDispatchResult,
   BackendRegistrationOptions,
   EffectiveCircuitBreakerPolicy,
+  BackendCircuitBreakerOptions,
+  CircuitBreakerPolicySource,
   UnregisterOptions,
   UnregisterResult,
 } from '@johnhenry/aimatey-types';
@@ -64,6 +66,33 @@ import { inferCapabilities } from './capability-inference.js';
 // ============================================================================
 
 /**
+ * The default `countAsFailure`: every failure counts toward the breaker except a
+ * backend saying it is warming up (`MODEL_LOADING`). Works for a thrown error
+ * and for the `{ code, message }` payload of an in-band stream error chunk.
+ */
+function defaultCountAsFailure(error: unknown): boolean {
+  return (error as { code?: unknown } | null | undefined)?.code !== ErrorCode.MODEL_LOADING;
+}
+
+/**
+ * One call running against a backend (a unary call until it settles; a stream
+ * until it ends, fails, or is abandoned).
+ *
+ * The router hands the adapter {@link InFlightCall.signal} rather than the
+ * caller's own, so that `unregister(name, { abort: true })` has something to
+ * abort. It follows the caller's signal, so the caller keeps its own control.
+ */
+interface InFlightCall {
+  readonly controller: AbortController;
+  readonly signal: AbortSignal;
+  readonly requestId: string | undefined;
+  /** Set when the call was cut by `unregister({ abort: true })`. */
+  revocation?: DOMException;
+  /** Detach from the caller's signal. */
+  release: () => void;
+}
+
+/**
  * Internal backend state tracking.
  */
 interface BackendState {
@@ -73,6 +102,12 @@ interface BackendState {
   circuitBreakerState: 'closed' | 'open' | 'half-open';
   consecutiveFailures: number;
   circuitOpenedAt?: number;
+  /**
+   * Timestamps (ms) of recent counted failures, pruned to the policy's
+   * `window`. Only maintained for a backend whose policy sets a window; empty
+   * otherwise. Forgotten whenever the breaker closes or is reset.
+   */
+  failureTimes: number[];
   /**
    * Handle of the pending open -> half-open transition scheduled by
    * {@link Router.openCircuitBreaker}, held so the transition can be
@@ -103,6 +138,8 @@ interface BackendState {
    * settle; a stream until it ends, fails, or is abandoned).
    */
   inFlight: number;
+  /** The calls counted in `inFlight`, kept so `unregister({ abort })` can reach them. */
+  calls: Set<InFlightCall>;
   /**
    * Set when the backend has been unregistered. A detached state is owned by
    * the calls still holding it and by nobody else: their outcome is not
@@ -174,6 +211,8 @@ export class Router implements IRouter {
   private readonly mutableConfig: MutableRouterConfig;
 
   private backends: Map<string, BackendState> = new Map();
+  /** Abort errors minted by `unregister({ abort: true })`; see {@link Router.isRevocation}. */
+  private readonly revocations = new WeakSet<DOMException>();
   private modelMapping: Map<string, string> = new Map(); // model -> backend (for routing)
   private modelTranslationMapping: Map<string, string> = new Map(); // model -> model (for translation)
   private backendTranslationMappings: Map<string, Map<string, string>> = new Map(); // backend -> (model -> model)
@@ -201,6 +240,17 @@ export class Router implements IRouter {
   };
 
   constructor(config: Partial<RouterConfig> = {}) {
+    if (
+      config.circuitBreakerWindow !== undefined &&
+      !(Number.isFinite(config.circuitBreakerWindow) && config.circuitBreakerWindow > 0)
+    ) {
+      throw new AdapterError({
+        code: ErrorCode.INVALID_PARAMETERS,
+        message: `circuitBreakerWindow must be a positive number of milliseconds, got ${config.circuitBreakerWindow}`,
+        isRetryable: false,
+        provenance: { router: 'router' },
+      });
+    }
     this.mutableConfig = {
       routingStrategy: config.routingStrategy ?? 'explicit',
       fallbackStrategy: config.fallbackStrategy ?? 'sequential',
@@ -209,6 +259,7 @@ export class Router implements IRouter {
       enableCircuitBreaker: config.enableCircuitBreaker ?? false,
       circuitBreakerThreshold: config.circuitBreakerThreshold ?? 5,
       circuitBreakerTimeout: config.circuitBreakerTimeout ?? 60000,
+      circuitBreakerWindow: config.circuitBreakerWindow,
       trackLatency: config.trackLatency ?? true,
       trackCost: config.trackCost ?? false,
       capabilityBasedRouting: config.capabilityBasedRouting ?? false,
@@ -279,7 +330,7 @@ export class Router implements IRouter {
    * use {@link Router.replace}.
    */
   register(name: string, adapter: BackendAdapter, options?: BackendRegistrationOptions): Router {
-    this.validateRegistrationOptions(name, options);
+    this.validateRegistrationOptions(name, adapter, options);
 
     if (this.backends.has(name)) {
       throw new AdapterError({
@@ -295,10 +346,12 @@ export class Router implements IRouter {
       isHealthy: true,
       circuitBreakerState: 'closed',
       consecutiveFailures: 0,
+      failureTimes: [],
       options: options?.circuitBreaker
         ? { circuitBreaker: { ...options.circuitBreaker } }
         : undefined,
       inFlight: 0,
+      calls: new Set(),
       detached: false,
       idleWaiters: [],
       latencies: [],
@@ -349,6 +402,9 @@ export class Router implements IRouter {
    * @throws AdapterError ROUTING_FAILED if `name` is not registered.
    */
   replace(name: string, adapter: BackendAdapter): Router {
+    // The replacement's own recommended breaker policy takes over from the old
+    // adapter's, so it must be as valid as one given to register().
+    this.validatePolicy(name, adapter.metadata.circuitBreaker, 'adapter metadata ');
     const state = this.backends.get(name);
     if (!state) {
       throw new AdapterError({
@@ -370,6 +426,7 @@ export class Router implements IRouter {
     state.isHealthy = true;
     state.circuitBreakerState = 'closed';
     state.consecutiveFailures = 0;
+    state.failureTimes = [];
     state.circuitOpenedAt = undefined;
     state.circuitRestMs = undefined;
     state.lastHealthCheck = undefined;
@@ -401,8 +458,12 @@ export class Router implements IRouter {
    * land on an object nobody can read, nor trip the breaker of a different
    * backend registered under the same name later.
    *
-   * If the answer must not be *delivered* (revocation), abort the call with its
-   * `AbortSignal`; only the transport can guarantee that.
+   * If the answer must not be *delivered* (revocation), pass `{ abort: true }`:
+   * every call in flight on the backend is aborted (the router gives each its
+   * own `AbortSignal`, linked to the caller's), `adapter.cancel?.(requestId)`
+   * is called for it, and the caller receives an `AbortError` -- without
+   * failing over to another backend. Only the transport can guarantee the far
+   * side really stops; the caller is released either way.
    *
    * With `{ drain: true | timeoutMs }` the backend is still removed
    * synchronously, but a promise is returned that settles once in-flight calls
@@ -412,8 +473,11 @@ export class Router implements IRouter {
    * @throws AdapterError ROUTING_FAILED if `name` is not registered
    *   (synchronously, with or without `drain`).
    */
-  unregister(name: string, options?: { readonly drain?: false }): Router;
-  unregister(name: string, options: { readonly drain: true | number }): Promise<UnregisterResult>;
+  unregister(name: string, options?: { readonly drain?: false; readonly abort?: boolean }): Router;
+  unregister(
+    name: string,
+    options: { readonly drain: true | number; readonly abort?: boolean }
+  ): Promise<UnregisterResult>;
   unregister(name: string, options?: UnregisterOptions): Router | Promise<UnregisterResult>;
   unregister(name: string, options?: UnregisterOptions): Router | Promise<UnregisterResult> {
     const removed = this.backends.get(name);
@@ -433,6 +497,15 @@ export class Router implements IRouter {
     this.clearCircuitTimer(removed);
 
     const drain = options?.drain;
+    const abort = options?.abort;
+    if (abort !== undefined && typeof abort !== 'boolean') {
+      throw new AdapterError({
+        code: ErrorCode.INVALID_PARAMETERS,
+        message: `unregister('${name}'): abort must be a boolean, got ${String(abort)}`,
+        isRetryable: false,
+        provenance: { router: this.metadata.name },
+      });
+    }
     if (typeof drain === 'number' && !(Number.isFinite(drain) && drain >= 0)) {
       throw new AdapterError({
         code: ErrorCode.INVALID_PARAMETERS,
@@ -479,6 +552,12 @@ export class Router implements IRouter {
       );
     }
 
+    // Revocation last, once the routing state is consistent: aborting settles
+    // callers, whose continuations must find the backend already gone.
+    if (abort === true) {
+      this.revokeCalls(name, removed);
+    }
+
     if (drain === undefined || drain === false) {
       return this;
     }
@@ -516,13 +595,40 @@ export class Router implements IRouter {
     });
   }
 
-  /** Mark a call as running against `state`. Pair with {@link Router.endCall}. */
-  private beginCall(state: BackendState): void {
+  /**
+   * Mark a call as running against `state`, and give it the signal the adapter
+   * will see. Pair with {@link Router.endCall}.
+   *
+   * The signal follows `callerSignal` (an already-aborted one is honoured at
+   * once, with its reason) and additionally fires when the backend is
+   * unregistered with `{ abort: true }`.
+   */
+  private beginCall(
+    state: BackendState,
+    requestId: string | undefined,
+    callerSignal?: AbortSignal
+  ): InFlightCall {
+    const controller = new AbortController();
+    let release = (): void => undefined;
+    if (callerSignal) {
+      if (callerSignal.aborted) {
+        controller.abort(callerSignal.reason);
+      } else {
+        const onAbort = (): void => controller.abort(callerSignal.reason);
+        callerSignal.addEventListener('abort', onAbort, { once: true });
+        release = () => callerSignal.removeEventListener('abort', onAbort);
+      }
+    }
+    const call: InFlightCall = { controller, signal: controller.signal, requestId, release };
+    state.calls.add(call);
     state.inFlight++;
+    return call;
   }
 
   /** Mark a call as finished, releasing anyone draining the backend. */
-  private endCall(state: BackendState): void {
+  private endCall(state: BackendState, call: InFlightCall): void {
+    call.release();
+    state.calls.delete(call);
     state.inFlight--;
     if (state.inFlight === 0 && state.idleWaiters.length > 0) {
       const waiters = state.idleWaiters;
@@ -534,12 +640,114 @@ export class Router implements IRouter {
   }
 
   /**
-   * Reject circuit-breaker overrides that could never behave, before anything
-   * is registered. A threshold of 0 would open on the first success; a
+   * Cut every call running against a backend that has just been unregistered:
+   * abort its signal with an `AbortError`, then tell the adapter's far side via
+   * `cancel(requestId, reason)` (best effort, never throws).
+   */
+  private revokeCalls(name: string, state: BackendState): void {
+    for (const call of [...state.calls]) {
+      if (call.revocation) {
+        continue;
+      }
+      const reason = new DOMException(`Backend '${name}' was unregistered`, 'AbortError');
+      call.revocation = reason;
+      this.revocations.add(reason);
+      call.controller.abort(reason);
+      if (call.requestId !== undefined && typeof state.adapter.cancel === 'function') {
+        try {
+          Promise.resolve(state.adapter.cancel(call.requestId, reason)).catch(() => undefined);
+        } catch {
+          // Best effort by contract: the signal has already settled the caller.
+        }
+      }
+    }
+  }
+
+  /**
+   * True for the abort error a revoked call surfaces. Such an error ends the
+   * request: it is never failed over to another backend.
+   */
+  private isRevocation(error: unknown): boolean {
+    return error instanceof DOMException && this.revocations.has(error);
+  }
+
+  /**
+   * Settle with `work`, or with the abort error the moment the call is revoked
+   * -- whichever comes first. An adapter that ignores its signal still cannot
+   * hold a revoked caller hostage; its late result is dropped.
+   */
+  private raceRevocation<T>(call: InFlightCall, work: Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = (): void => {
+        if (call.revocation) {
+          reject(call.revocation);
+        }
+      };
+      call.signal.addEventListener('abort', onAbort, { once: true });
+      if (call.revocation) {
+        onAbort();
+      }
+      work.then(resolve, reject).finally(() => call.signal.removeEventListener('abort', onAbort));
+    });
+  }
+
+  /**
+   * Iterate `source` until it ends or the call is revoked. A revoked call ends
+   * by throwing its abort error, and a chunk the backend produced after the cut
+   * is never delivered -- even from an adapter that ignores its signal.
+   */
+  private async *revocable<T>(
+    call: InFlightCall,
+    source: AsyncIterable<T>
+  ): AsyncGenerator<T, void, undefined> {
+    const iterator = source[Symbol.asyncIterator]();
+    try {
+      for (;;) {
+        let next: IteratorResult<T>;
+        try {
+          next = await this.raceRevocation(call, iterator.next());
+        } catch (error) {
+          throw call.revocation ?? error;
+        }
+        if (call.revocation) {
+          throw call.revocation;
+        }
+        if (next.done) {
+          return;
+        }
+        yield next.value;
+      }
+    } finally {
+      // A revoked source may be blocked inside next(); awaiting its return()
+      // would queue behind that and hang.
+      if (call.revocation) {
+        void Promise.resolve(iterator.return?.()).catch(() => undefined);
+      } else {
+        await iterator.return?.();
+      }
+    }
+  }
+
+  /**
+   * Reject circuit-breaker policies that could never behave, before anything
+   * is registered: the `register()` override and the adapter's own
+   * recommendation alike. A threshold of 0 would open on the first success; a
    * fractional one is unreachable by an integer count.
    */
-  private validateRegistrationOptions(name: string, options?: BackendRegistrationOptions): void {
-    const breaker = options?.circuitBreaker;
+  private validateRegistrationOptions(
+    name: string,
+    adapter: BackendAdapter,
+    options?: BackendRegistrationOptions
+  ): void {
+    this.validatePolicy(name, options?.circuitBreaker, '');
+    this.validatePolicy(name, adapter.metadata.circuitBreaker, 'adapter metadata ');
+  }
+
+  private validatePolicy(
+    name: string,
+    breaker: Partial<BackendCircuitBreakerOptions> | undefined,
+    origin: string
+  ): void {
     if (!breaker) {
       return;
     }
@@ -551,12 +759,16 @@ export class Router implements IRouter {
         : breaker.timeout !== undefined &&
             !(Number.isFinite(breaker.timeout) && breaker.timeout >= 0)
           ? `circuitBreaker.timeout must be a non-negative number of milliseconds, got ${breaker.timeout}`
-          : undefined;
+          : breaker.window !== undefined && !(Number.isFinite(breaker.window) && breaker.window > 0)
+            ? `circuitBreaker.window must be a positive number of milliseconds, got ${breaker.window}`
+            : breaker.countAsFailure !== undefined && typeof breaker.countAsFailure !== 'function'
+              ? 'circuitBreaker.countAsFailure must be a function'
+              : undefined;
 
     if (problem !== undefined) {
       throw new AdapterError({
         code: ErrorCode.INVALID_PARAMETERS,
-        message: `Backend '${name}': ${problem}`,
+        message: `Backend '${name}': ${origin}${problem}`,
         isRetryable: false,
         provenance: { router: this.metadata.name },
       });
@@ -564,15 +776,49 @@ export class Router implements IRouter {
   }
 
   /**
-   * The circuit-breaker policy in force for a backend: its registration
-   * overrides resolved against the router-wide defaults.
+   * The circuit-breaker policy in force for a backend, resolved field by field:
+   * the `register()` override, then the adapter's own recommendation
+   * ({@link AdapterMetadata.circuitBreaker}), then the router-wide config, then
+   * the built-in default. `source` records which layer won each field.
+   *
+   * The adapter layer is read from the adapter currently registered, so
+   * `replace()` hands the name the replacement's recommendation.
    */
   private breakerPolicy(state: BackendState): EffectiveCircuitBreakerPolicy {
     const override = state.options?.circuitBreaker;
+    const advice = state.adapter.metadata.circuitBreaker;
+
+    const layered = <K extends 'threshold' | 'timeout' | 'window' | 'countAsFailure'>(
+      key: K,
+      fromRouter: BackendCircuitBreakerOptions[K]
+    ): [BackendCircuitBreakerOptions[K], CircuitBreakerPolicySource] =>
+      override?.[key] !== undefined
+        ? [override[key], 'register']
+        : advice?.[key] !== undefined
+          ? [advice[key], 'adapter']
+          : [fromRouter, 'router'];
+
+    const [threshold, thresholdSource] = layered(
+      'threshold',
+      this.config.circuitBreakerThreshold ?? 5
+    );
+    const [timeout, timeoutSource] = layered('timeout', this.config.circuitBreakerTimeout ?? 60000);
+    const [window, windowSource] = layered('window', this.config.circuitBreakerWindow);
+    const [countAsFailure, countSource] = layered('countAsFailure', defaultCountAsFailure);
+
     return {
       enabled: override?.enabled ?? this.config.enableCircuitBreaker ?? false,
-      threshold: override?.threshold ?? this.config.circuitBreakerThreshold ?? 5,
-      timeout: override?.timeout ?? this.config.circuitBreakerTimeout ?? 60000,
+      threshold: threshold as number,
+      timeout: timeout as number,
+      window,
+      countAsFailure: countAsFailure as (error: unknown) => boolean,
+      source: {
+        enabled: override?.enabled !== undefined ? 'register' : 'router',
+        threshold: thresholdSource,
+        timeout: timeoutSource,
+        window: windowSource,
+        countAsFailure: countSource,
+      },
     };
   }
 
@@ -953,6 +1199,12 @@ export class Router implements IRouter {
       this.stats.successfulRequests++;
       return response;
     } catch (primaryError) {
+      // A revoked call is cut, not failed: no other backend answers it.
+      if (this.isRevocation(primaryError)) {
+        this.stats.failedRequests++;
+        throw primaryError;
+      }
+
       // Handle fallback
       if (this.config.fallbackStrategy === 'none') {
         this.stats.failedRequests++;
@@ -1113,6 +1365,13 @@ export class Router implements IRouter {
         this.stats.successfulRequests++;
         return;
       } catch (error) {
+        // A revoked stream is cut, not failed: it ends with the abort error and
+        // no other backend takes over.
+        if (this.isRevocation(error)) {
+          this.stats.failedRequests++;
+          throw error;
+        }
+
         lastError = error;
         lastErrorChunk = attemptErrorChunk;
 
@@ -1479,6 +1738,7 @@ export class Router implements IRouter {
     this.clearCircuitTimer(state);
     state.circuitBreakerState = 'closed';
     state.consecutiveFailures = 0;
+    state.failureTimes = [];
     state.circuitOpenedAt = undefined;
     state.circuitRestMs = undefined;
   }
@@ -1492,6 +1752,7 @@ export class Router implements IRouter {
       if (state) {
         this.clearCircuitTimer(state);
         state.consecutiveFailures = 0;
+        state.failureTimes = [];
         state.circuitBreakerState = 'closed';
         state.circuitOpenedAt = undefined;
       }
@@ -1499,6 +1760,7 @@ export class Router implements IRouter {
       for (const state of this.backends.values()) {
         this.clearCircuitTimer(state);
         state.consecutiveFailures = 0;
+        state.failureTimes = [];
         state.circuitBreakerState = 'closed';
         state.circuitOpenedAt = undefined;
       }
@@ -1646,6 +1908,7 @@ export class Router implements IRouter {
       clonedState.isHealthy = state.isHealthy;
       clonedState.lastHealthCheck = state.lastHealthCheck;
       clonedState.consecutiveFailures = state.consecutiveFailures;
+      clonedState.failureTimes = [...state.failureTimes];
 
       // An open circuit is only inherited by a router that can reopen and
       // recover it; otherwise it would be permanent.
@@ -1750,14 +2013,14 @@ export class Router implements IRouter {
 
       state.totalRequests++;
       const startTime = Date.now();
-      this.beginCall(state);
+      const call = this.beginCall(state, request.metadata?.requestId, signal);
 
       try {
         const adapter = state.adapter;
         if (!supportsEmbeddings(adapter, resolved.get(name))) {
           continue;
         }
-        const response = await adapter.embed(request, signal);
+        const response = await this.raceRevocation(call, adapter.embed(request, call.signal));
 
         state.successfulRequests++;
         state.consecutiveFailures = 0;
@@ -1775,18 +2038,22 @@ export class Router implements IRouter {
         }
         if (state.circuitBreakerState === 'half-open') {
           state.circuitBreakerState = 'closed';
+          state.failureTimes = [];
         }
 
         return response;
       } catch (error) {
-        lastError = error as Error;
-        this.recordFailure(name, state);
+        // A revoked call fails with the abort error, whatever the adapter threw,
+        // and is never failed over to the next candidate.
+        const failure = call.revocation ?? error;
+        lastError = failure as Error;
+        this.recordFailure(name, state, failure);
         // Fall through to the next candidate (sequential fallback)
-        if (this.config.fallbackStrategy === 'none') {
-          throw error;
+        if (call.revocation || this.config.fallbackStrategy === 'none') {
+          throw failure;
         }
       } finally {
-        this.endCall(state);
+        this.endCall(state, call);
       }
     }
 
@@ -1904,7 +2171,7 @@ export class Router implements IRouter {
 
       state.totalRequests++;
       const startTime = Date.now();
-      this.beginCall(state);
+      const call = this.beginCall(state, request.metadata?.requestId, signal);
 
       try {
         const adapter = state.adapter;
@@ -1922,7 +2189,7 @@ export class Router implements IRouter {
                   warnings: [...(request.metadata.warnings ?? []), ...warnings],
                 },
               };
-        const response = await adapter.decide(attempt, signal);
+        const response = await this.raceRevocation(call, adapter.decide(attempt, call.signal));
 
         state.successfulRequests++;
         state.consecutiveFailures = 0;
@@ -1940,18 +2207,22 @@ export class Router implements IRouter {
         }
         if (state.circuitBreakerState === 'half-open') {
           state.circuitBreakerState = 'closed';
+          state.failureTimes = [];
         }
 
         return response;
       } catch (error) {
-        lastError = error as Error;
-        this.recordFailure(name, state);
+        // A revoked call fails with the abort error, whatever the adapter threw,
+        // and is never failed over to the next candidate.
+        const failure = call.revocation ?? error;
+        lastError = failure as Error;
+        this.recordFailure(name, state, failure);
         // Fall through to the next candidate (sequential fallback)
-        if (this.config.fallbackStrategy === 'none') {
-          throw error;
+        if (call.revocation || this.config.fallbackStrategy === 'none') {
+          throw failure;
         }
       } finally {
-        this.endCall(state);
+        this.endCall(state, call);
       }
     }
 
@@ -2005,16 +2276,18 @@ export class Router implements IRouter {
 
     // The call holds `state` (and so the adapter) for as long as it runs, even
     // if the backend is unregistered underneath it.
-    this.beginCall(state);
+    const call = this.beginCall(state, request.metadata?.requestId, signal);
     try {
-      const response = await state.adapter.execute(request, signal);
+      const response = await this.raceRevocation(call, state.adapter.execute(request, call.signal));
       await this.recordSuccess(state, request, startTime);
       return response;
     } catch (error) {
-      this.recordFailure(name, state);
-      throw error;
+      // A revoked call fails with the abort error, whatever the adapter threw.
+      const failure = call.revocation ?? error;
+      this.recordFailure(name, state, failure);
+      throw failure;
     } finally {
-      this.endCall(state);
+      this.endCall(state, call);
     }
   }
 
@@ -2066,18 +2339,28 @@ export class Router implements IRouter {
     // Update circuit breaker
     if (state.circuitBreakerState === 'half-open') {
       state.circuitBreakerState = 'closed';
+      state.failureTimes = [];
     }
   }
 
   /**
    * Record a failed backend call, tripping the circuit breaker once the
-   * consecutive-failure threshold is reached.
+   * policy's threshold is reached.
    *
    * Shared by the streaming and non-streaming paths, so a backend that only
    * ever fails streamed requests trips its breaker just like one that fails
    * unary requests.
+   *
+   * Every failure is a failed request, but only one the policy's
+   * `countAsFailure` accepts counts toward the breaker: a backend reporting
+   * `MODEL_LOADING` is slow, not sick, and must not be tripped for it. Without
+   * a `window` the breaker counts consecutive failures; with one, failures
+   * inside the window, whatever succeeded between them.
+   *
+   * @param error What the call failed with: the thrown value, or the `error`
+   *   payload of an in-band stream error chunk.
    */
-  private recordFailure(name: string, state: BackendState): void {
+  private recordFailure(name: string, state: BackendState, error: unknown): void {
     // A backend that has left the router is not accounted: see `detached`.
     // Without this guard `openCircuitBreaker(name)` would resolve the *name*
     // and open the breaker of whichever backend was registered under it next.
@@ -2086,10 +2369,34 @@ export class Router implements IRouter {
     }
 
     state.failedRequests++;
-    state.consecutiveFailures++;
 
     const policy = this.breakerPolicy(state);
-    if (policy.enabled && state.consecutiveFailures >= policy.threshold) {
+    let counts = true;
+    try {
+      counts = policy.countAsFailure(error);
+    } catch {
+      // A predicate that cannot decide must not hide a failure.
+    }
+    if (!counts) {
+      return;
+    }
+
+    state.consecutiveFailures++;
+
+    let tripped: boolean;
+    if (policy.window === undefined) {
+      tripped = state.consecutiveFailures >= policy.threshold;
+    } else {
+      const now = Date.now();
+      state.failureTimes.push(now);
+      state.failureTimes = state.failureTimes.filter((at) => now - at < policy.window!);
+      // A half-open probe that fails reopens at once: the window that the
+      // earlier failures sat in may well have passed during the rest period.
+      tripped =
+        state.circuitBreakerState === 'half-open' || state.failureTimes.length >= policy.threshold;
+    }
+
+    if (policy.enabled && tripped) {
       this.openCircuitBreaker(name);
     }
   }
@@ -2178,16 +2485,16 @@ export class Router implements IRouter {
     let settled = false;
 
     // An open stream is a call in flight until it ends, fails, or is abandoned.
-    this.beginCall(state);
+    const call = this.beginCall(state, request.metadata?.requestId, signal);
     try {
-      const guarded = withTerminationGuard(state.adapter.executeStream(request, signal), {
-        signal,
+      const guarded = withTerminationGuard(state.adapter.executeStream(request, call.signal), {
+        signal: call.signal,
         backend: name,
       });
-      for await (const chunk of guarded) {
+      for await (const chunk of this.revocable(call, guarded)) {
         if (!settled && chunk.type === 'error') {
           settled = true;
-          this.recordFailure(name, state);
+          this.recordFailure(name, state, chunk.error);
         } else if (!settled && chunk.type === 'done') {
           // Recorded before the chunk is handed over: a consumer that stops
           // reading at `done` is a normal, complete stream.
@@ -2201,11 +2508,13 @@ export class Router implements IRouter {
       // Reaching here unsettled means the guard ended the stream silently, which
       // it does only for a cancelled request: abandoned, handled in `finally`.
     } catch (error) {
+      // A revoked stream fails with the abort error, whatever the adapter threw.
+      const failure = call.revocation ?? error;
       if (!settled) {
         settled = true;
-        this.recordFailure(name, state);
+        this.recordFailure(name, state, failure);
       }
-      throw error;
+      throw failure;
     } finally {
       if (!settled) {
         // Reached only when the consumer abandoned the iterator.
@@ -2214,7 +2523,7 @@ export class Router implements IRouter {
           state.successfulRequests++;
         }
       }
-      this.endCall(state);
+      this.endCall(state, call);
     }
   }
 
@@ -2490,6 +2799,9 @@ export class Router implements IRouter {
 
         return await this.executeOnBackend(backendName, translatedRequest, signal);
       } catch (error) {
+        if (this.isRevocation(error)) {
+          throw error;
+        }
         lastError = error as Error;
         continue;
       }

@@ -40,6 +40,7 @@ export * from './decisions.js';
 export * from './cancellation.js';
 export * from './capabilities.js';
 export * from './forwarding.js';
+export * from './locality.js';
 
 // Tool-calling helpers
 export * from './tools.js';

@@ -22,6 +22,7 @@ import type {
   IRDecisionResponse,
   IRDecisionUsage,
   IRWarning,
+  ProvenanceLocality,
 } from '@johnhenry/aimatey-types';
 import { ProviderError, ErrorCode, createErrorFromHttpResponse } from '@johnhenry/aimatey-errors';
 import {
@@ -249,6 +250,15 @@ export interface ParseSystemOneResponseOptions {
   readonly deriveNoulConfidence?: boolean;
   /** Warnings the caller already knows about (e.g. dropped images); appended after the request's own. */
   readonly warnings?: readonly IRWarning[];
+  /**
+   * The link the adapter crossed to reach the server, for
+   * `IRProvenance.locality`. Set by the adapter (usually
+   * `localityForBaseURL(url)`); omitted, none is declared and consumers treat
+   * the hop as `'external'`.
+   */
+  readonly locality?: ProvenanceLocality;
+  /** `IRProvenance.servedBy`: the server's `host[:port]`. Informational only. */
+  readonly servedBy?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -328,7 +338,12 @@ export function parseSystemOneResponse(
     ...(usage && { usage }),
     metadata: {
       ...ir.metadata,
-      provenance: { ...ir.metadata.provenance, backend: opts.backendName },
+      provenance: {
+        ...ir.metadata.provenance,
+        backend: opts.backendName,
+        ...(opts.locality !== undefined && { locality: opts.locality }),
+        ...(opts.servedBy !== undefined && { servedBy: opts.servedBy }),
+      },
     },
     raw: isRecord(body) ? body : data,
   };

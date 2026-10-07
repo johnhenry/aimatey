@@ -273,6 +273,7 @@ export class CerebrasBackendAdapter implements BackendAdapter<CerebrasRequest, C
         provenance: {
           ...originalRequest.metadata.provenance,
           backend: this.metadata.name,
+          locality: 'external',
           servedModel: response.model,
         },
         custom: {
@@ -380,6 +381,7 @@ export class CerebrasBackendAdapter implements BackendAdapter<CerebrasRequest, C
           provenance: {
             ...request.metadata.provenance,
             backend: this.metadata.name,
+            locality: 'external',
           },
         },
       } as IRStreamChunk;

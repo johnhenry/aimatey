@@ -368,6 +368,7 @@ export class AnthropicBackendAdapter implements BackendAdapter<
                         provenance: {
                           ...request.metadata.provenance,
                           backend: this.metadata.name,
+                          locality: 'external',
                         },
                         custom: {
                           ...request.metadata.custom,
@@ -741,6 +742,7 @@ export class AnthropicBackendAdapter implements BackendAdapter<
           provenance: {
             ...originalRequest.metadata.provenance,
             backend: this.metadata.name,
+            locality: 'external',
             servedModel: response.model,
           },
           custom: {

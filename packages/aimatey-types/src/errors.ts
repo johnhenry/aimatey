@@ -43,6 +43,12 @@ export const ErrorCode = {
   PROVIDER_UNAVAILABLE: 'PROVIDER_UNAVAILABLE',
   PROVIDER_TIMEOUT: 'PROVIDER_TIMEOUT',
   PROVIDER_OVERLOADED: 'PROVIDER_OVERLOADED',
+  /**
+   * The backend is alive but warming up (loading a model into memory). A signal,
+   * not a fault: the default circuit-breaker predicate does not count it, so a
+   * slow-starting local backend is not tripped by being slow to start.
+   */
+  MODEL_LOADING: 'MODEL_LOADING',
 
   // Adapter errors
   ADAPTER_CONVERSION_ERROR: 'ADAPTER_CONVERSION_ERROR',
@@ -120,6 +126,7 @@ export const ERROR_CODE_CATEGORIES: Record<ErrorCode, ErrorCategory> = {
   [ErrorCode.PROVIDER_UNAVAILABLE]: ErrorCategory.PROVIDER,
   [ErrorCode.PROVIDER_TIMEOUT]: ErrorCategory.PROVIDER,
   [ErrorCode.PROVIDER_OVERLOADED]: ErrorCategory.PROVIDER,
+  [ErrorCode.MODEL_LOADING]: ErrorCategory.PROVIDER,
   [ErrorCode.ADAPTER_CONVERSION_ERROR]: ErrorCategory.ADAPTER,
   [ErrorCode.ADAPTER_VALIDATION_ERROR]: ErrorCategory.ADAPTER,
   [ErrorCode.UNSUPPORTED_CONVERSION]: ErrorCategory.ADAPTER,
@@ -351,7 +358,8 @@ export interface ProviderErrorOptions {
     | typeof ErrorCode.PROVIDER_ERROR
     | typeof ErrorCode.PROVIDER_UNAVAILABLE
     | typeof ErrorCode.PROVIDER_TIMEOUT
-    | typeof ErrorCode.PROVIDER_OVERLOADED;
+    | typeof ErrorCode.PROVIDER_OVERLOADED
+    | typeof ErrorCode.MODEL_LOADING;
   readonly message: string;
   /** See {@link BaseErrorOptions.userMessage}. */
   readonly userMessage?: string;

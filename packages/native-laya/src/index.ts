@@ -268,6 +268,7 @@ export class LayaBackendAdapter implements BackendAdapter {
           provenance: {
             ...request.metadata.provenance,
             backend: this.metadata.name,
+            locality: 'in-process',
           },
           ...(warnings.length > 0 && {
             warnings: [...(request.metadata.warnings ?? []), ...warnings],

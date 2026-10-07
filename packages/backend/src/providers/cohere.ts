@@ -288,6 +288,7 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
         provenance: {
           ...originalRequest.metadata.provenance,
           backend: this.metadata.name,
+          locality: 'external',
           // This provider does not report a served model. Setting it explicitly
           // stops an upstream hop's value, spread in above, from being
           // re-attributed to this backend — absent is acceptable, wrong is not.
@@ -372,7 +373,11 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
       usage: promptTokens !== undefined ? { promptTokens, totalTokens: promptTokens } : undefined,
       metadata: {
         ...request.metadata,
-        provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+        provenance: {
+          ...request.metadata.provenance,
+          backend: this.metadata.name,
+          locality: 'external',
+        },
       },
       raw: json as unknown as Record<string, unknown>,
     };
@@ -464,6 +469,7 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
           provenance: {
             ...request.metadata.provenance,
             backend: this.metadata.name,
+            locality: 'external',
           },
         },
       } as IRStreamChunk;

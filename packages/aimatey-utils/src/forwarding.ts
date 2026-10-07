@@ -16,6 +16,7 @@
 
 import { withUpstreamProvenance } from '@johnhenry/aimatey-types';
 import type {
+  ProvenanceLocality,
   IRChatRequest,
   IRChatResponse,
   IRMetadata,
@@ -33,6 +34,16 @@ export const FORWARDED_CUSTOM_PREFIX = 'e2e:';
 export interface ForwardingOptions {
   /** The proxying adapter's own `metadata.name`: the hop being added. */
   readonly proxyName: string;
+
+  /**
+   * The link the proxy's own hop crossed to reach the far side (#174).
+   * Defaults to `'external'`: a proxy exists to reach another process, device or
+   * trust boundary, and the fail-closed answer for a hop that cannot say is the
+   * widest. A proxy that knows its far side is on this host (a loopback daemon,
+   * a unix socket) passes `localityForBaseURL(url)`; one that does not know
+   * leaves the default.
+   */
+  readonly locality?: ProvenanceLocality;
 }
 
 /** Options for {@link prepareForwardedResponse}. */
@@ -116,7 +127,7 @@ export function prepareForwardedRequest(
  * | `message`, `finishReason`, `usage` | forward unchanged |
  * | `raw` | **strip, always.** It is the far side's provider payload, unredacted, and doubles the response; the proxy's own hop has no provider payload to stamp, so it is absent |
  * | `metadata.requestId`, `providerResponseId`, `timestamp` | forward -- correlation with the far side's logs and the provider's billing |
- * | `metadata.provenance` | **rewrite**: `{ backend: proxyName, upstream: <far provenance> }` via `withUpstreamProvenance`, so the near hop stays authoritative and the far side nests beneath it |
+ * | `metadata.provenance` | **rewrite**: `{ backend: proxyName, locality, upstream: <far provenance> }` via `withUpstreamProvenance`, so the near hop stays authoritative and the far side nests beneath it. `locality` is the proxy's own link: `'external'` unless {@link ForwardingOptions.locality} says otherwise |
  * | `metadata.warnings` | **merge** the far side's, each `source` rewritten to `<proxyName>/<source>` (`<proxyName>/upstream` when the far side named none), so a reader can tell which hop degraded; add `provenance-lost` when `expectProvenance` and none arrived |
  * | `metadata.custom` | strip every key not prefixed {@link FORWARDED_CUSTOM_PREFIX} |
  *
@@ -148,7 +159,10 @@ export function prepareForwardedResponse(
 
   const forwarded: IRMetadata = {
     ...metadata,
-    provenance: withUpstreamProvenance({ backend: options.proxyName }, farProvenance),
+    provenance: withUpstreamProvenance(
+      { backend: options.proxyName, locality: options.locality ?? 'external' },
+      farProvenance
+    ),
     ...(warnings.length > 0 ? { warnings } : {}),
     ...(forwardedCustom ? { custom: forwardedCustom } : {}),
   };
