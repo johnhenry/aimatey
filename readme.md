@@ -801,6 +801,16 @@ scoped to the client), consider whether it belongs there too, following
 than this section (server-side adapters and browser-side adapters are
 different `BackendAdapter` implementations, not the same class reused).
 
+**Proxying adapters.** If the new backend forwards to another aimatey
+instance (a tunnel, a gateway, a relay) rather than to a provider, three
+more contracts apply, all in `docs/IR-FORMAT.md`: run requests and
+responses through `prepareForwardedRequest()` / `prepareForwardedResponse()`
+from `@johnhenry/aimatey-utils` (`raw` is never forwarded, `metadata.custom`
+only under the `e2e:` prefix, provenance nests via `withUpstreamProvenance`);
+implement `cancel?(requestId)` and still settle promptly when `signal` aborts;
+and implement `discoverCapabilities?()` if the far side's capabilities can
+change, leaving `metadata.capabilities` as the static lower bound.
+
 New **frontend** adapters (accepting a different client request format) and
 new **middleware** types follow the same numbered shape, in
 `packages/frontend/src/` and `packages/middleware/src/` respectively — one

@@ -46,8 +46,37 @@ export interface AdapterMetadata {
 
   /**
    * Adapter capabilities for router decisions.
+   *
+   * **This is the static lower bound, not necessarily the truth.** It is read
+   * synchronously, and `metadata` is readonly, so it can only describe what
+   * was knowable when the adapter was constructed. For an adapter whose far
+   * side is another machine -- a tunnel, a paired device -- that is a
+   * placeholder: the far side's inventory can change while this object cannot.
+   * Such an adapter implements {@link BackendAdapter.discoverCapabilities},
+   * and consumers that need the current answer call `resolveCapabilities()`
+   * from `@johnhenry/aimatey-utils` instead of reading this field. The
+   * synchronous `supports*` guards keep reading this field, by design, so
+   * they stay cheap and total.
+   *
+   * Set it to what is *safe to assume* before discovery (usually: nothing
+   * optional). A `Router` caches whatever discovery returns for
+   * `capabilityCacheDuration` and falls back to this value when discovery
+   * fails.
    */
   readonly capabilities: IRCapabilities;
+
+  /**
+   * `true` when {@link AdapterMetadata.capabilities} already is the resolved
+   * answer -- the adapter was constructed after discovering it, or its
+   * capabilities are genuinely fixed -- so nothing is gained by calling
+   * {@link BackendAdapter.discoverCapabilities}. `resolveCapabilities()` and
+   * the `Router` skip discovery for such an adapter.
+   *
+   * Absent or `false` means the static value is a placeholder, which is the
+   * only meaning that is safe for an adapter that never set it. Adapters that
+   * do not implement `discoverCapabilities` can ignore this field entirely.
+   */
+  readonly capabilitiesResolved?: boolean;
 
   /**
    * Optional adapter-specific configuration.
@@ -389,6 +418,24 @@ export interface BackendAdapter<TRequest = unknown, TResponse = unknown> {
    * (the same pattern `Bridge.embed()`/`Bridge.decide()` already use) if a
    * backend that lacks it is used for a chat request.
    *
+   * **Cancellation.** `signal` is the in-process mechanism and the only one
+   * every adapter must honour. It cannot cross a transport, so a *proxying*
+   * adapter owes its caller two things when the signal fires (#121):
+   *
+   * 1. It must still settle: reject the returned promise (or terminate the
+   *    returned stream) promptly, even when the far side has stopped
+   *    answering. A proxy that waits for a socket the far side no longer
+   *    reads leaves the consumer hanging.
+   * 2. It should tell the far side to stop, keyed on
+   *    `request.metadata.requestId` -- see {@link BackendAdapter.cancel}.
+   *
+   * A stream cancelled mid-turn ends with a `done` chunk whose
+   * `finishReason` is `'cancelled'` and whose `message` carries the partial
+   * output already delivered, so a consumer that wants what the user saw does
+   * not have to re-accumulate deltas. An adapter that cannot build that
+   * message may end the stream by throwing the signal's abort error instead;
+   * it must not end it silently without either.
+   *
    * @param request Universal IR request
    * @param signal Optional AbortSignal for cancellation
    * @returns Universal IR response
@@ -416,11 +463,77 @@ export interface BackendAdapter<TRequest = unknown, TResponse = unknown> {
   executeStream?(request: IRChatRequest, signal?: AbortSignal): IRChatStream;
 
   /**
+   * Optional: ask the far side to stop work on a request (#121).
+   *
+   * `AbortSignal` only exists inside one process. A proxying adapter has to
+   * turn "the caller gave up" into a message the far side can act on, and the
+   * IR already carries the name for it: `request.metadata.requestId`, which
+   * is stable across retries and fallbacks, so a cancel keyed on it cancels
+   * the **whole logical request**, including a fallback attempt in flight.
+   * That is the contract; per-attempt cancellation is not expressible.
+   *
+   * `Bridge` calls this when the `signal` it passed to `execute` /
+   * `executeStream` aborts -- once per request, and in addition to (never
+   * instead of) the signal. It is also called when the signal was already
+   * aborted before the call started, so a far side with a queue can drop the
+   * request. Rules for implementers:
+   *
+   * - **Best effort and idempotent.** A cancel after completion is a no-op;
+   *   the Bridge ignores a rejection and a thrown error. The signal remains
+   *   the authority for settling the caller's promise or stream.
+   * - **Do not also forward `signal` yourself** to the same far side as a
+   *   second cancel path unless the far side tolerates both.
+   * - **Only the Bridge's direct backend receives it.** A `Router` hands
+   *   its backends the `signal` and nothing more, so a proxy registered
+   *   behind a Router must watch `signal` itself (see
+   *   `withCancellation()` in `@johnhenry/aimatey-utils`).
+   *
+   * The far side of an aimatey transport can use
+   * `createCancellationRegistry()` from `@johnhenry/aimatey-utils` to map an
+   * incoming cancel back onto the in-process `AbortController` of the
+   * request it is running.
+   *
+   * @param requestId `IRMetadata.requestId` of the request to cancel
+   * @param reason The signal's abort reason, when there is one
+   */
+  cancel?(requestId: string, reason?: unknown): void | Promise<void>;
+
+  /**
    * Optional: Health check to verify backend is available.
    *
    * @returns true if backend is healthy and available
    */
   healthCheck?(): Promise<boolean>;
+
+  /**
+   * Optional: report what this backend can do *now* (#127).
+   *
+   * {@link AdapterMetadata.capabilities} is static and synchronous. That is
+   * correct for an SDK adapter and wrong for one whose far side is another
+   * machine -- a paired device can gain or lose embeddings, tools or a model
+   * while the adapter's readonly metadata cannot change. This is the async
+   * channel for that: it asks the far side, and the answer **replaces**
+   * `metadata.capabilities` as the resolved view (it is not merged into it;
+   * the far side is authoritative, the static value is only a placeholder
+   * for before the first answer and for when discovery fails).
+   *
+   * Callers should not call it directly on a hot path. Use
+   * `resolveCapabilities()` from `@johnhenry/aimatey-utils`, or let a
+   * `Router` do it: the router calls it when it chooses among backends for
+   * embeddings and decisions, caches the answer for
+   * `capabilityCacheDuration` milliseconds, refreshes it on `checkHealth()`,
+   * and falls back to the static value when it throws. It is duck-typed
+   * exactly like {@link BackendAdapter.listModels}: an adapter without it
+   * behaves as it always did.
+   *
+   * To change the capabilities of an adapter that cannot discover, the
+   * supported route is `Router.replace(name, adapter)`, which keeps the
+   * backend's stats and latency history while swapping what it advertises.
+   *
+   * @param signal Optional AbortSignal for cancellation
+   * @returns The capabilities the far side currently offers
+   */
+  discoverCapabilities?(signal?: AbortSignal): Promise<IRCapabilities>;
 
   /**
    * Optional: Estimate cost for a request.

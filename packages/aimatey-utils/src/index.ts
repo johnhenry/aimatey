@@ -36,6 +36,11 @@ export * from './embeddings.js';
 // Decision utilities
 export * from './decisions.js';
 
+// Forwardable cancellation, capability resolution, proxy forwarding rules
+export * from './cancellation.js';
+export * from './capabilities.js';
+export * from './forwarding.js';
+
 // Tool-calling helpers
 export * from './tools.js';
 

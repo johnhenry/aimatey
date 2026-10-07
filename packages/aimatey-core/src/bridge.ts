@@ -54,6 +54,8 @@ import {
   monitorStreamContract,
   createGenerateObject,
   createStreamObject,
+  withCancellation,
+  withStreamCancellation,
 } from '@johnhenry/aimatey-utils';
 import { createRunTools } from './run-tools.js';
 import { mapWithConcurrency } from './concurrency.js';
@@ -247,7 +249,12 @@ export class Bridge<
           // before reaching this closure -- TS narrowing doesn't survive the
           // closure boundary, so this asserts what the earlier guard verified.
           this.assertBlobRefsResolved(context.request);
-          const response = await this.backend.execute!(context.request, options?.signal);
+          const response = await withCancellation(
+            this.backend,
+            enrichedRequest.metadata.requestId,
+            options?.signal,
+            () => this.backend.execute!(context.request, options?.signal)
+          );
           this.narrowContextBackend(context, response.metadata.provenance?.backend);
           return response;
         });
@@ -908,7 +915,12 @@ export class Bridge<
       // before reaching this closure -- TS narrowing doesn't survive the
       // closure boundary, so this asserts what the earlier guard verified.
       this.assertBlobRefsResolved(context.request);
-      const response = await this.backend.execute!(context.request, options?.signal);
+      const response = await withCancellation(
+        this.backend,
+        enrichedRequest.metadata.requestId,
+        options?.signal,
+        () => this.backend.execute!(context.request, options?.signal)
+      );
       this.narrowContextBackend(context, response.metadata.provenance?.backend);
       return response;
     });
@@ -1573,7 +1585,12 @@ export class Bridge<
     const { onContractViolation } = this.config;
     // Non-null: chatStream() and executeIRStream() both check
     // `backend.executeStream` exists before reaching this point.
-    const raw = this.backend.executeStream!(context.request, signal);
+    const raw = withStreamCancellation(
+      this.backend,
+      context.request.metadata.requestId,
+      signal,
+      this.backend.executeStream!(context.request, signal)
+    );
     const watched = onContractViolation ? monitorStreamContract(raw, onContractViolation) : raw;
     return this.trackContextBackend(
       withTerminationGuard(watched, {

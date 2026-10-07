@@ -41,10 +41,12 @@ import {
   supportsChat,
   supportsChatStream,
   validateDecisionRequest,
+  resolveCapabilities,
   assertNoUnresolvedBlobRefs,
   withTerminationGuard,
 } from '@johnhenry/aimatey-utils';
 import type {
+  IRCapabilities,
   IRDecisionRequest,
   IRDecisionResponse,
   IREmbedRequest,
@@ -179,6 +181,14 @@ export class Router implements IRouter {
   private fallbackChain: string[] = [];
   private roundRobinIndex = 0;
   private healthCheckInterval?: NodeJS.Timeout;
+  /**
+   * Discovered capabilities per adapter *instance* (#127). Keyed on the
+   * adapter rather than the registered name so `replace()` and
+   * `unregister()` need no cache bookkeeping: a replacement is a different
+   * object and is discovered afresh, a removed adapter is collectable.
+   */
+  private capabilityCache: WeakMap<BackendAdapter, { caps: IRCapabilities; at: number }> =
+    new WeakMap();
 
   // Stats
   private stats = {
@@ -1288,6 +1298,9 @@ export class Router implements IRouter {
         const healthy = state.adapter.healthCheck ? await state.adapter.healthCheck() : true;
         state.isHealthy = healthy;
         state.lastHealthCheck = Date.now();
+        if (healthy) {
+          await this.refreshCapabilities(state.adapter);
+        }
         return healthy;
       } catch {
         state.isHealthy = false;
@@ -1304,6 +1317,9 @@ export class Router implements IRouter {
         state.isHealthy = healthy;
         state.lastHealthCheck = Date.now();
         results[backendName] = healthy;
+        if (healthy) {
+          await this.refreshCapabilities(state.adapter);
+        }
       } catch {
         state.isHealthy = false;
         state.lastHealthCheck = Date.now();
@@ -1313,6 +1329,78 @@ export class Router implements IRouter {
 
     await Promise.all(promises);
     return results;
+  }
+
+  /**
+   * Capabilities this router should judge `adapter` by right now (#127).
+   *
+   * An adapter without `discoverCapabilities()` (or one that marks its
+   * metadata `capabilitiesResolved`) is judged by its static
+   * `metadata.capabilities`, exactly as before. One that can discover is
+   * asked, and the answer is cached for `capabilityCacheDuration` ms.
+   * A discovery that throws never fails the request: the router uses the last
+   * known answer (or the static value) and retries after a short back-off
+   * rather than on every call, so an unreachable peer cannot add a failing
+   * round trip to each request.
+   */
+  private async capabilitiesOf(
+    adapter: BackendAdapter,
+    signal?: AbortSignal
+  ): Promise<IRCapabilities> {
+    if (
+      typeof adapter.discoverCapabilities !== 'function' ||
+      adapter.metadata.capabilitiesResolved === true
+    ) {
+      return adapter.metadata.capabilities;
+    }
+
+    const ttl = this.config.capabilityCacheDuration ?? 3600000;
+    const cached = this.capabilityCache.get(adapter);
+    const now = Date.now();
+    if (cached && now - cached.at < ttl) {
+      return cached.caps;
+    }
+
+    try {
+      const caps = await resolveCapabilities(adapter, signal);
+      this.capabilityCache.set(adapter, { caps, at: Date.now() });
+      return caps;
+    } catch {
+      const fallback = cached?.caps ?? adapter.metadata.capabilities;
+      const retryAfter = Math.min(ttl, 5000);
+      this.capabilityCache.set(adapter, { caps: fallback, at: Date.now() - ttl + retryAfter });
+      return fallback;
+    }
+  }
+
+  /** Drop the cached answer and discover again; used when a health check passes. */
+  private async refreshCapabilities(adapter: BackendAdapter): Promise<void> {
+    if (typeof adapter.discoverCapabilities !== 'function') {
+      return;
+    }
+    this.capabilityCache.delete(adapter);
+    await this.capabilitiesOf(adapter);
+  }
+
+  /**
+   * Resolve capabilities for every candidate that has the method `has` names,
+   * concurrently, so one slow peer does not serialize the rest.
+   */
+  private async capabilitiesFor(
+    names: readonly string[],
+    has: (adapter: BackendAdapter) => boolean,
+    signal?: AbortSignal
+  ): Promise<Map<string, IRCapabilities>> {
+    const resolved = new Map<string, IRCapabilities>();
+    await Promise.all(
+      names.map(async (name) => {
+        const adapter = this.backends.get(name)?.adapter;
+        if (adapter && has(adapter)) {
+          resolved.set(name, await this.capabilitiesOf(adapter, signal));
+        }
+      })
+    );
+    return resolved;
   }
 
   /**
@@ -1615,9 +1703,15 @@ export class Router implements IRouter {
    * first). Success/failure and cost are tracked like chat requests.
    */
   async embed(request: IREmbedRequest, signal?: AbortSignal): Promise<IREmbedResponse> {
+    const resolved = await this.capabilitiesFor(
+      this.getAvailableBackends('any'),
+      (adapter) => typeof adapter.embed === 'function',
+      signal
+    );
     const candidates = this.getAvailableBackends('any').filter((name) => {
       const adapter = this.backends.get(name)?.adapter;
-      return adapter !== undefined && supportsEmbeddings(adapter);
+      const caps = resolved.get(name);
+      return adapter !== undefined && caps !== undefined && supportsEmbeddings(adapter, caps);
     });
 
     // Prefer fallback-chain order, then default backend, then registration order
@@ -1660,7 +1754,7 @@ export class Router implements IRouter {
 
       try {
         const adapter = state.adapter;
-        if (!supportsEmbeddings(adapter)) {
+        if (!supportsEmbeddings(adapter, resolved.get(name))) {
           continue;
         }
         const response = await adapter.embed(request, signal);
@@ -1733,13 +1827,19 @@ export class Router implements IRouter {
     let firstRejection: Error | undefined;
     const advisories = new Map<string, readonly IRWarning[]>();
 
+    const resolved = await this.capabilitiesFor(
+      this.getAvailableBackends('any'),
+      (adapter) => typeof adapter.decide === 'function',
+      signal
+    );
     const candidates = this.getAvailableBackends('any').filter((name) => {
       const adapter = this.backends.get(name)?.adapter;
-      if (adapter === undefined || !supportsDecisions(adapter)) {
+      const caps = resolved.get(name);
+      if (adapter === undefined || caps === undefined || !supportsDecisions(adapter, caps)) {
         return false;
       }
       try {
-        advisories.set(name, validateDecisionRequest(request, adapter.metadata.capabilities));
+        advisories.set(name, validateDecisionRequest(request, caps));
         return true;
       } catch (error) {
         firstRejection ??= error as Error;
@@ -1767,7 +1867,7 @@ export class Router implements IRouter {
     const hint = request.parameters?.model;
     if (hint) {
       const declares = (name: string): boolean => {
-        const models = this.backends.get(name)?.adapter.metadata.capabilities.decisionModels;
+        const models = resolved.get(name)?.decisionModels;
         return !models || models.length === 0 || models.includes(hint);
       };
       ordered.sort((a, b) => Number(!declares(a)) - Number(!declares(b)));
@@ -1808,7 +1908,7 @@ export class Router implements IRouter {
 
       try {
         const adapter = state.adapter;
-        if (!supportsDecisions(adapter)) {
+        if (!supportsDecisions(adapter, resolved.get(name))) {
           continue;
         }
         const warnings = advisories.get(name) ?? [];

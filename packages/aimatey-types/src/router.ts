@@ -184,6 +184,11 @@ export interface RouterConfig {
 
   /**
    * Cache duration for model capability data in milliseconds.
+   *
+   * Also bounds how long the router trusts an adapter's
+   * `discoverCapabilities()` answer before asking the far side again (#127);
+   * a passing `checkHealth()` refreshes it early, and a discovery that throws
+   * falls back to the last answer or the static `metadata.capabilities`.
    * @default 3600000 (1 hour)
    */
   readonly capabilityCacheDuration?: number;

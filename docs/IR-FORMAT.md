@@ -898,6 +898,85 @@ sees the proxy as its caller and has its own principal. Do not read it as "who t
 ultimately belongs to" or as a statement about any hop. Facts about a hop - including how
 far it reached - live on `IRProvenance`.
 
+### Forwarding across a proxy
+
+A **proxying adapter** is a `BackendAdapter` whose far side is another aimatey instance
+across a process, device or trust boundary (a tunnel, a gateway, a relay). Inside one
+process `metadata.custom` is a private convention between two files and `raw` is the
+provider's own payload. Across a boundary the first becomes a claim the far side's middleware
+will obey ("this turn is `local`") and the second an unredacted provider payload that the
+provider never knew would leave. So a proxy does not forward the IR as-is: each field is
+**forwarded**, **stripped** or **rewritten**, by the rules below.
+`prepareForwardedRequest()` and `prepareForwardedResponse()` in `@johnhenry/aimatey-utils`
+encode them; use them rather than spreading `metadata`.
+
+**Request, near side to far side** (`prepareForwardedRequest(request, { proxyName })`)
+
+| Field | Rule |
+|---|---|
+| `messages`, `tools`, `toolChoice`, `responseFormat`, `parameters`, `stream` | Forward unchanged |
+| `metadata.requestId` | Forward. Preserved across a hop: it is the correlation key and the key a cancel names ([Cancellation](#cancellation-across-a-transport)) |
+| `metadata.timestamp`, `metadata.warnings` | Forward |
+| `metadata.provenance` | Forward, with `proxyName` **appended** to `middleware`. Appended, never replaced |
+| `metadata.principal` | **Strip.** It names the caller as seen by this process; the far side sees the proxy as its caller and has its own principal (see `metadata.principal` and the boundary). A proxy that wants far-side cache scoping sets the principal it is entitled to assert after preparing the request |
+| `metadata.custom` | **Strip** every key that does not start with `e2e:` |
+| `metadata.providerResponseId` | Strip (response-side) |
+
+`custom` is the field with teeth. A proxy cannot safely read anything out of it, for the
+same reason `principal` is a first-class field and not a `custom` key. So nothing in
+`custom` crosses by default, and an application marks what may with a documented prefix
+(`FORWARDED_CUSTOM_PREFIX`, `'e2e:'`): `custom['e2e:traceId']` is forwarded,
+`custom.local` is not. The library understands none of the keys.
+
+**Response, far side to near side** (`prepareForwardedResponse(response, { proxyName })`)
+
+| Field | Rule |
+|---|---|
+| `message`, `finishReason`, `usage` | Forward unchanged |
+| `raw` | **Strip, always.** It is the far side's provider payload; forwarding it doubles the response and ships it unredacted across a boundary the provider never knew about. The proxy's own hop has no provider payload, so `raw` is absent. A caller that needs the provider payload must talk to the provider |
+| `metadata.requestId`, `providerResponseId`, `timestamp` | Forward |
+| `metadata.provenance` | **Rewrite** to `{ backend: proxyName, upstream: <far provenance> }` (`withUpstreamProvenance`). The near hop stays authoritative |
+| `metadata.warnings` | **Merge.** Far-side warnings are kept and each `source` becomes `<proxyName>/<source>` (`<proxyName>/upstream` when the far side named none), so a reader can tell which hop degraded. With `expectProvenance: true` and no provenance in the response, a `provenance-lost` warning is added |
+| `metadata.custom` | Strip every key that does not start with `e2e:` |
+
+Where the issue text offered "merge or nest" for warnings, they are merged with the hop
+recorded in `source`; there is no nested warning list. `requestId` is **preserved**, not
+re-minted: it names the logical request, and a proxy hop is the same logical request.
+
+`raw` also appears nowhere in a streamed response's chunks; a streaming proxy applies the
+same provenance rules to its `start` chunk's `metadata`.
+
+### Cancellation across a transport
+
+`AbortSignal` is the in-process cancellation mechanism, and the only one every adapter
+must honour. It cannot cross a transport, and the IR deliberately gets no second field for
+it: `metadata.requestId` is already the stable name of a logical request, and a cancel is
+keyed on it.
+
+- **Near side.** `BackendAdapter.cancel?(requestId, reason?)` is how a proxy learns the
+  caller gave up. `Bridge` calls it, once, when the `signal` it passed to `execute` /
+  `executeStream` aborts (or was already aborted when the call started), *in addition to*
+  passing the signal. It is best effort and idempotent; its failure is ignored. A proxy
+  behind a `Router` receives only the signal, and can use `withCancellation()` /
+  `withStreamCancellation()` from `@johnhenry/aimatey-utils` around its own transport call.
+- **Far side.** `createCancellationRegistry()` maps an incoming `{ requestId }` cancel
+  message onto the `AbortController` of the request it is running.
+- **Scope.** A cancel by `requestId` cancels the **whole logical request**, including a
+  fallback attempt in flight, because `requestId` is stable across retries and fallbacks.
+  Per-attempt cancellation is not expressible, by design.
+- **What a proxy owes its caller when the signal fires.** It must still settle: reject (or
+  terminate the stream) promptly, even if the far side has stopped answering. A stream
+  cancelled mid-turn ends with a `done` chunk whose `finishReason` is `'cancelled'` and
+  whose `message` carries the **partial output already delivered**, or throws the abort
+  error. It must not end silently.
+- **The four cases.** *Cancel mid-stream*: as above. *Cancel after completion*: a no-op
+  (`registry.cancel()` returns `false`). *Cancel that never arrives*: the signal still
+  settles the caller, the far side runs to completion and its result is discarded.
+  *Cancel before start*: the near side sends it when the signal is already aborted; the
+  far side drops it unless the registry was given `tombstoneMs`, an explicit opt-in
+  window, because `requestId` is reused across retries and a remembered cancel could abort
+  a legitimate later attempt.
+
 ### IRWarning
 
 Documents transformations and compatibility issues:
@@ -1200,6 +1279,29 @@ const openaiCapabilities: IRCapabilities = {
 `{ type: 'ref' }` media sources and resolves them itself; for every other backend
 (absent or `false`) `Bridge` and `Router` refuse a request that still contains one
 (see [Blob references](#blob-references-sourcetype-ref)).
+
+### Static and discovered capabilities
+
+`AdapterMetadata.capabilities` is read synchronously from a readonly object. It is the
+**static lower bound**: right for an SDK adapter, a placeholder for one whose far side is
+another machine, whose inventory can change while the metadata cannot.
+
+- An adapter whose capabilities can change implements the optional
+  `BackendAdapter.discoverCapabilities(signal?)`, which asks the far side. Its answer
+  **replaces** the static value as the resolved view (it is not merged).
+- `AdapterMetadata.capabilitiesResolved: true` says the static value already is the
+  resolved answer; discovery is then skipped.
+- `resolveCapabilities(adapter, signal?)` in `@johnhenry/aimatey-utils` returns the
+  resolved view. Errors propagate.
+- The synchronous `supportsEmbeddings()` / `supportsDecisions()` guards keep reading static
+  metadata; pass resolved capabilities as their optional second argument to judge by them.
+- `Router` uses discovery when it chooses a backend for `embed()` and `decide()`. The
+  answer is cached per adapter instance for `capabilityCacheDuration`, refreshed by a
+  passing `checkHealth()`, and a discovery that throws falls back to the last answer or the
+  static value (retrying after a few seconds) rather than failing the request. Chat routing
+  by capability keeps using `listModels()`.
+- For an adapter that cannot discover, the supported way to change what it advertises is
+  `Router.replace(name, adapter)`, which keeps the backend's stats and latency history.
 
 ---
 
