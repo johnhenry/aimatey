@@ -1,0 +1,209 @@
+{
+  "metadata": {
+    "provider": "ollama",
+    "scenario": "tools-round-trip",
+    "capturedAt": "2026-10-07T00:24:39.182Z",
+    "description": "Real /api/chat exchanges: tool call, then final answer from the tool result",
+    "tags": [
+      "tools",
+      "ollama",
+      "live"
+    ]
+  },
+  "exchanges": [
+    {
+      "request": {
+        "model": "qwen2.5:3b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "What is the weather in Paris right now? Use the tool."
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "description": "Get the current weather for a city",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "city": {
+                    "type": "string",
+                    "description": "City name"
+                  }
+                },
+                "required": [
+                  "city"
+                ]
+              }
+            }
+          }
+        ],
+        "options": {},
+        "stream": false
+      },
+      "response": {
+        "model": "qwen2.5:3b",
+        "created_at": "2026-10-07T00:23:43.005214128Z",
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_h2u8dr6w",
+              "function": {
+                "index": 0,
+                "name": "get_weather",
+                "arguments": {
+                  "city": "Paris"
+                }
+              }
+            }
+          ]
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 129825070306,
+        "load_duration": 17172142813,
+        "prompt_eval_count": 163,
+        "prompt_eval_cached_count": 0,
+        "prompt_eval_duration": 44982469000,
+        "eval_count": 20,
+        "eval_duration": 67653479999
+      }
+    },
+    {
+      "request": {
+        "model": "qwen2.5:3b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "What is the weather in Paris right now? Use the tool."
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "function": {
+                  "name": "get_weather",
+                  "arguments": {
+                    "city": "Paris"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": "{\"city\":\"Paris\",\"temperature_c\":18,\"conditions\":\"cloudy\"}",
+            "tool_name": "get_weather"
+          }
+        ],
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "description": "Get the current weather for a city",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "city": {
+                    "type": "string",
+                    "description": "City name"
+                  }
+                },
+                "required": [
+                  "city"
+                ]
+              }
+            }
+          }
+        ],
+        "options": {},
+        "stream": false
+      },
+      "response": {
+        "model": "qwen2.5:3b",
+        "created_at": "2026-10-07T00:24:39.164617053Z",
+        "message": {
+          "role": "assistant",
+          "content": "The current weather in Paris is cloudy with a temperature of 18°C."
+        },
+        "done": true,
+        "done_reason": "stop",
+        "total_duration": 56124651109,
+        "load_duration": 5412414,
+        "prompt_eval_count": 215,
+        "prompt_eval_cached_count": 177,
+        "prompt_eval_duration": 9968136000,
+        "eval_count": 17,
+        "eval_duration": 46140886000
+      }
+    }
+  ],
+  "request": {
+    "model": "qwen2.5:3b",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is the weather in Paris right now? Use the tool."
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Get the current weather for a city",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "description": "City name"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      }
+    ],
+    "options": {},
+    "stream": false
+  },
+  "response": {
+    "model": "qwen2.5:3b",
+    "created_at": "2026-10-07T00:23:43.005214128Z",
+    "message": {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_h2u8dr6w",
+          "function": {
+            "index": 0,
+            "name": "get_weather",
+            "arguments": {
+              "city": "Paris"
+            }
+          }
+        }
+      ]
+    },
+    "done": true,
+    "done_reason": "stop",
+    "total_duration": 129825070306,
+    "load_duration": 17172142813,
+    "prompt_eval_count": 163,
+    "prompt_eval_cached_count": 0,
+    "prompt_eval_duration": 44982469000,
+    "eval_count": 20,
+    "eval_duration": 67653479999
+  }
+}
