@@ -50,3 +50,12 @@ export { MODEL_REGISTRY_SEED } from './model-registry-data.js';
 
 // Structured output utilities (Zod integration)
 export * from './structured-output.js';
+
+// Stream contract (termination, authoritative text, resumption)
+export * from './stream-contract.js';
+
+// JSON serializability
+export * from './json.js';
+
+// Media source helpers (blob references)
+export * from './content-sources.js';

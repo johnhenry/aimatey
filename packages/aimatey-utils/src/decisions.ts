@@ -21,6 +21,7 @@ import type {
 } from '@johnhenry/aimatey-types';
 import { ValidationError, ErrorCode } from '@johnhenry/aimatey-errors';
 import { createWarning } from './warnings.js';
+import { assertNoUnresolvedBlobRefs } from './content-sources.js';
 
 // ============================================================================
 // Capability Detection
@@ -365,6 +366,11 @@ function nonLatinRatio(state: unknown): number {
  * - `images` is non-empty and `decisionImages` is not `true` (images are
  *   opt-in) or the count exceeds `decisionLimits.maxImages`.
  *
+ * Always (with or without `capabilities`), it throws an `AdapterError`
+ * (`UNSUPPORTED_FEATURE`) when an image's source is an unresolved blob
+ * reference (`source.type: 'ref'`, #122): a decision request is validated
+ * before its middleware chain, so a transport resolves its handles first.
+ *
  * Warns when:
  * - a question's instructions exceed 2000 characters;
  * - a choice has polar-word keys (`yes`/`no`/`true`/`false`/`good`/`bad`/...),
@@ -467,6 +473,12 @@ export function validateDecisionRequest(
       );
     }
   }
+
+  // An unresolved blob reference is neither data nor a URL: refuse it, as every
+  // chat path does (#122). Unlike chat, a decision request is validated before
+  // its middleware chain runs, so a transport must resolve `images` references
+  // before calling `decide()`.
+  assertNoUnresolvedBlobRefs({ images: request.images }, 'the decision backend', capabilities);
 
   if (capabilities && request.images && request.images.length > 0) {
     if (capabilities.decisionImages !== true) {

@@ -26,7 +26,7 @@ export interface CalibrationBucket {
   /** `[lo, hi)`, except the last bucket, which includes 1. */
   readonly range: [number, number];
   readonly count: number;
-  /** Mean reported confidence of the runs in the bucket (0 when empty). */
+  /** Mean predicted probability of being right of the runs in the bucket (0 when empty). */
   readonly meanConfidence: number;
   /** Fraction of the runs in the bucket that were right (0 when empty). */
   readonly accuracy: number;
@@ -48,7 +48,16 @@ export interface CalibrationReport {
 
 const BUCKETS = 10;
 
-/** What one run contributes: its top-label confidence, whether it was right, and its Brier term. */
+/**
+ * What one run contributes: the predicted probability that its top answer is
+ * right, whether it was, and its Brier term.
+ *
+ * The predicted probability comes from `probabilities` (the mass on the
+ * answer's own label for `choice`, the mass on the rounded level for
+ * `score`, `max(value, 1 - value)` for `noul`). `answer.confidence` is a
+ * *concentration* measure (`1 - H(p)/ln n`), not P(correct), so it is used
+ * only when the answer carries no `probabilities` to derive that from.
+ */
 function measure(
   run: CalibrationRun
 ): { confidence: number; correct: boolean; brier: number } | null {
@@ -57,7 +66,7 @@ function measure(
     case 'noul': {
       const t = truth === true || truth === 1 ? 1 : 0;
       return {
-        confidence: answer.confidence ?? Math.max(answer.value, 1 - answer.value),
+        confidence: Math.max(answer.value, 1 - answer.value),
         correct: (answer.value >= 0.5 ? 1 : 0) === t,
         brier: (answer.value - t) ** 2,
       };
@@ -65,7 +74,9 @@ function measure(
     case 'choice': {
       const correct = answer.value === truth;
       const p = answer.probabilities;
-      const confidence = answer.confidence ?? (p ? Math.max(...Object.values(p)) : undefined);
+      const confidence = p
+        ? (p[String(answer.value)] ?? Math.max(...Object.values(p)))
+        : answer.confidence;
       if (confidence === undefined) {
         return null;
       }
@@ -77,7 +88,7 @@ function measure(
     case 'score': {
       const correct = Math.round(answer.value) === truth;
       const p = answer.probabilities;
-      const confidence = answer.confidence ?? (p ? Math.max(...p) : undefined);
+      const confidence = p ? (p[Math.round(answer.value)] ?? Math.max(...p)) : answer.confidence;
       if (confidence === undefined) {
         return null;
       }
@@ -92,12 +103,18 @@ function measure(
 /**
  * Reliability report over labeled runs.
  *
- * Each run is judged on its top answer. `confidence` is the answer's own
- * `confidence`, else the largest probability, else (for `noul`)
- * `max(value, 1 - value)`. The Brier term is, per run: `noul` -- `(value -
+ * Each run is judged on its top answer. The predicted probability of being
+ * right (the quantity bucketed, reported as `meanConfidence`, and compared
+ * with accuracy for ECE) is derived from `probabilities`: the mass on the
+ * answer's own label for `choice`, the mass on the rounded winning level for
+ * `score`, and `max(value, 1 - value)` for `noul`. The answer's
+ * `confidence` field is a concentration measure (`1 - H(p)/ln n`, see
+ * `decisionConfidence`), not a probability of being right, so it is used
+ * only as a fallback when a `choice` / `score` answer has no
+ * `probabilities`. The Brier term is, per run: `noul` -- `(value -
  * truth)^2`; `choice` / `score` with `probabilities` -- the multi-class
  * Brier score `sum_k (p_k - 1[k = truth])^2`; with only a `confidence` -- `(confidence -
- * correct)^2`. Runs with no confidence of any kind are skipped and counted.
+ * correct)^2`. Runs with neither `probabilities` nor `confidence` (and not a `noul`) are skipped and counted.
  *
  * Use it to pick the `act` / `review` thresholds for `decisionBands()` from
  * the bucket where accuracy meets your bar, rather than trusting defaults.

@@ -29,7 +29,7 @@ import {
   ErrorCode,
   createErrorFromHttpResponse,
 } from '@johnhenry/aimatey-errors';
-import { normalizeSystemMessages } from '@johnhenry/aimatey-utils';
+import { normalizeSystemMessages, requireResolvedContent } from '@johnhenry/aimatey-utils';
 import { getModelCache } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
 import {
@@ -493,7 +493,8 @@ export class GeminiBackendAdapter implements BackendAdapter<GeminiRequest, Gemin
       parts:
         typeof msg.content === 'string'
           ? [{ text: msg.content }]
-          : msg.content.map((c) => {
+          : msg.content.map((rawBlock) => {
+              const c = requireResolvedContent(rawBlock, 'gemini-backend');
               switch (c.type) {
                 case 'text':
                   return { text: c.text };

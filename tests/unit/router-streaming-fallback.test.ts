@@ -397,7 +397,11 @@ describe('Router.executeStream - fallback before commitment', () => {
     expect(chunks.filter((chunk) => chunk.type === 'metadata').length).toBeGreaterThan(32);
   });
 
-  it('delivers a preamble-only stream that never commits', async () => {
+  it('reports a preamble-only stream that never commits as truncated, not as a success', async () => {
+    // Before the termination contract (#126) the silent end was credited as a
+    // success. A stream that stops after its preamble, with no `done` or
+    // `error`, is a cut-off stream: the consumer gets a terminal error and the
+    // backend is charged with the failure.
     const preambleOnly: StreamFn = async function* () {
       yield startChunk('only');
     };
@@ -408,8 +412,11 @@ describe('Router.executeStream - fallback before commitment', () => {
     const chunks = await collect(router.executeStream(createRequest()));
 
     expect(chunks).toHaveLength(1);
-    expect(chunks[0]!.type).toBe('start');
-    expect(router.getBackendStats('only')?.successfulRequests).toBe(1);
+    expect(chunks[0]!.type).toBe('error');
+    expect((chunks[0] as { error: { code: string } }).error.code).toBe('stream-truncated');
+    expect(chunks[0]!.sequence).toBe(0);
+    expect(router.getBackendStats('only')?.successfulRequests).toBe(0);
+    expect(router.getBackendStats('only')?.failedRequests).toBe(1);
   });
 
   it('does not fail over an aborted request', async () => {
