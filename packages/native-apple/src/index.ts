@@ -275,6 +275,7 @@ export class AppleBackend implements BackendAdapter {
           provenance: {
             ...request.metadata.provenance,
             backend: this.metadata.name,
+            locality: 'in-process',
           },
         },
       };
@@ -372,6 +373,7 @@ export class AppleBackend implements BackendAdapter {
           provenance: {
             ...request.metadata.provenance,
             backend: this.metadata.name,
+            locality: 'in-process',
           },
         },
       } as IRStreamChunk;
@@ -491,6 +493,7 @@ export class AppleBackend implements BackendAdapter {
         provenance: {
           ...originalRequest.metadata.provenance,
           backend: this.metadata.name,
+          locality: 'in-process',
         },
       },
     };

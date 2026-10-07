@@ -275,6 +275,7 @@ export class PerplexityBackendAdapter implements BackendAdapter<
         provenance: {
           ...originalRequest.metadata.provenance,
           backend: this.metadata.name,
+          locality: 'external',
           servedModel: response.model,
         },
         custom: {
@@ -385,6 +386,7 @@ export class PerplexityBackendAdapter implements BackendAdapter<
           provenance: {
             ...request.metadata.provenance,
             backend: this.metadata.name,
+            locality: 'external',
           },
         },
       } as IRStreamChunk;

@@ -284,6 +284,7 @@ export class FireworksAIBackendAdapter implements BackendAdapter<
         provenance: {
           ...originalRequest.metadata.provenance,
           backend: this.metadata.name,
+          locality: 'external',
           servedModel: response.model,
         },
         custom: {
@@ -404,6 +405,7 @@ export class FireworksAIBackendAdapter implements BackendAdapter<
           provenance: {
             ...request.metadata.provenance,
             backend: this.metadata.name,
+            locality: 'external',
           },
         },
       } as IRStreamChunk;

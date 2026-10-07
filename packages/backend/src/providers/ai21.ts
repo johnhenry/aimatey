@@ -241,6 +241,7 @@ export class AI21BackendAdapter implements BackendAdapter<AI21Request, AI21Respo
         provenance: {
           ...originalRequest.metadata.provenance,
           backend: this.metadata.name,
+          locality: 'external',
           servedModel: response.model,
         },
         custom: {
@@ -347,6 +348,7 @@ export class AI21BackendAdapter implements BackendAdapter<AI21Request, AI21Respo
           provenance: {
             ...request.metadata.provenance,
             backend: this.metadata.name,
+            locality: 'external',
           },
         },
       } as IRStreamChunk;

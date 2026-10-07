@@ -15,6 +15,7 @@ import type {
   IRChatResponse,
   IRChatStream,
   IRStreamChunk,
+  ProvenanceLocality,
 } from '@johnhenry/aimatey-types';
 import type {
   ModelRunnerBackendConfig,
@@ -49,6 +50,17 @@ export abstract class GenericModelRunnerBackend extends EventEmitter implements 
   protected readonly config: ModelRunnerBackendConfig;
   protected process?: ChildProcess;
   protected isRunning = false;
+  /** True between `start()` spawning the process and it reporting ready. */
+  protected isStarting = false;
+  /**
+   * The link requests cross to reach the runner, for `IRProvenance.locality`.
+   * The runner is a child process this adapter spawned, so it is the same
+   * machine but not the same process: `'same-host'`. Stamped onto every
+   * response and stream chunk that carries provenance, because the subclasses
+   * that build them (`parseResponse`, `executeHttp`, ...) are not this
+   * class's to edit.
+   */
+  protected readonly locality: ProvenanceLocality = 'same-host';
   protected startTime?: number;
   protected requestCount = 0;
   protected restartCount = 0;
@@ -81,6 +93,7 @@ export abstract class GenericModelRunnerBackend extends EventEmitter implements 
     }
 
     this.emit('starting' as any);
+    this.isStarting = true;
 
     try {
       // Discover port if needed (for HTTP communication)
@@ -113,6 +126,8 @@ export abstract class GenericModelRunnerBackend extends EventEmitter implements 
         },
         cause: error instanceof Error ? error : undefined,
       });
+    } finally {
+      this.isStarting = false;
     }
   }
 
@@ -222,23 +237,16 @@ export abstract class GenericModelRunnerBackend extends EventEmitter implements 
    * Execute non-streaming chat completion request.
    */
   async execute(request: IRChatRequest, signal?: AbortSignal): Promise<IRChatResponse> {
-    if (!this.isRunning) {
-      throw new ProviderError({
-        code: ErrorCode.PROVIDER_ERROR,
-        message: 'Model runner is not running. Call start() first.',
-        isRetryable: false,
-        provenance: { backend: this.metadata.name },
-      });
-    }
+    this.assertRunning();
 
     this.requestCount++;
 
     try {
-      if (this.config.communication.type === 'http') {
-        return await this.executeHttp(request, signal);
-      } else {
-        return await this.executeStdio(request, signal);
-      }
+      const response =
+        this.config.communication.type === 'http'
+          ? await this.executeHttp(request, signal)
+          : await this.executeStdio(request, signal);
+      return this.declareHop(response);
     } catch (error) {
       throw new ProviderError({
         code: ErrorCode.PROVIDER_ERROR,
@@ -254,14 +262,7 @@ export abstract class GenericModelRunnerBackend extends EventEmitter implements 
    * Execute streaming chat completion request.
    */
   async *executeStream(request: IRChatRequest, signal?: AbortSignal): IRChatStream {
-    if (!this.isRunning) {
-      throw new ProviderError({
-        code: ErrorCode.PROVIDER_ERROR,
-        message: 'Model runner is not running. Call start() first.',
-        isRetryable: false,
-        provenance: { backend: this.metadata.name },
-      });
-    }
+    this.assertRunning();
 
     this.requestCount++;
 
@@ -277,7 +278,7 @@ export abstract class GenericModelRunnerBackend extends EventEmitter implements 
 
       for await (const chunk of inner) {
         sequence = chunk.sequence + 1;
-        yield chunk;
+        yield this.declareHop(chunk);
       }
     } catch (error) {
       yield {
@@ -289,6 +290,62 @@ export abstract class GenericModelRunnerBackend extends EventEmitter implements 
         },
       } as IRStreamChunk;
     }
+  }
+
+  /**
+   * Refuse a request when the runner is not up.
+   *
+   * A runner still *starting* is not broken, it is loading its model: that is
+   * `MODEL_LOADING` (retryable; a `Router` breaker does not count it), not the
+   * `PROVIDER_ERROR` of a runner nobody started.
+   */
+  private assertRunning(): void {
+    if (this.isRunning) {
+      return;
+    }
+    if (this.isStarting) {
+      throw new ProviderError({
+        code: ErrorCode.MODEL_LOADING,
+        message: 'Model runner is still starting up and loading its model; try again shortly.',
+        isRetryable: true,
+        provenance: { backend: this.metadata.name },
+      });
+    }
+    throw new ProviderError({
+      code: ErrorCode.PROVIDER_ERROR,
+      message: 'Model runner is not running. Call start() first.',
+      isRetryable: false,
+      provenance: { backend: this.metadata.name },
+    });
+  }
+
+  /**
+   * Stamp this adapter's link onto a response or chunk that carries
+   * provenance. Only the near hop is touched: a provenance the subclass built
+   * keeps every other field it set.
+   */
+  private declareHop<T extends object>(value: T): T {
+    const metadata = (value as { metadata?: { provenance?: object } }).metadata;
+    if (!metadata) {
+      return value;
+    }
+    const provenance = metadata.provenance ?? { backend: this.metadata.name };
+    const port = this.port ?? this.config.port;
+    const servedBy =
+      this.config.communication.type === 'http' && port !== undefined
+        ? `localhost:${port}`
+        : undefined;
+    return {
+      ...value,
+      metadata: {
+        ...metadata,
+        provenance: {
+          ...provenance,
+          locality: this.locality,
+          ...(servedBy !== undefined && { servedBy }),
+        },
+      },
+    };
   }
 
   // ==========================================================================

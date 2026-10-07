@@ -232,7 +232,11 @@ export class LiteRtLmBackendAdapter implements BackendAdapter {
           metadata: {
             ...request.metadata,
             warnings: [...(request.metadata.warnings ?? []), ...this.collectWarnings(request)],
-            provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+            provenance: {
+              ...request.metadata.provenance,
+              backend: this.metadata.name,
+              locality: 'in-process',
+            },
           },
         };
       } else if (chunk.type === 'error') {
@@ -250,7 +254,11 @@ export class LiteRtLmBackendAdapter implements BackendAdapter {
       finishReason: 'stop',
       metadata: {
         ...request.metadata,
-        provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+        provenance: {
+          ...request.metadata.provenance,
+          backend: this.metadata.name,
+          locality: 'in-process',
+        },
       },
     };
   }
@@ -276,7 +284,11 @@ export class LiteRtLmBackendAdapter implements BackendAdapter {
         metadata: {
           ...request.metadata,
           warnings: [...(request.metadata.warnings ?? []), ...this.collectWarnings(request)],
-          provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+          provenance: {
+            ...request.metadata.provenance,
+            backend: this.metadata.name,
+            locality: 'in-process',
+          },
         },
       } as IRStreamChunk;
 

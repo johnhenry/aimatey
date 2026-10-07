@@ -330,6 +330,7 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
         provenance: {
           ...originalRequest.metadata.provenance,
           backend: this.metadata.name,
+          locality: 'external',
           servedModel,
         },
         custom: {
@@ -441,6 +442,7 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
           provenance: {
             ...request.metadata.provenance,
             backend: this.metadata.name,
+            locality: 'external',
           },
         },
       } as IRStreamChunk;

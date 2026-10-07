@@ -33,6 +33,7 @@ import {
 } from '@johnhenry/aimatey-errors';
 import { normalizeSystemMessages } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
+import { localityForBaseURL, servedByForBaseURL } from '@johnhenry/aimatey-utils';
 import {
   buildStaticResult,
   applyModelFilter,
@@ -198,7 +199,12 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
           : undefined,
       metadata: {
         ...request.metadata,
-        provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+        provenance: {
+          ...request.metadata.provenance,
+          backend: this.metadata.name,
+          locality: localityForBaseURL(this.baseURL),
+          servedBy: servedByForBaseURL(this.baseURL),
+        },
       },
       raw: json as unknown as Record<string, unknown>,
     };
@@ -227,6 +233,8 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
       headers: this.config.headers,
       signal,
       backendName: this.metadata.name,
+      locality: localityForBaseURL(this.baseURL),
+      servedBy: servedByForBaseURL(this.baseURL),
     });
   }
 
@@ -236,8 +244,10 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
   }
 
   async execute(request: IRChatRequest, signal?: AbortSignal): Promise<IRChatResponse> {
+    let model: string | undefined;
     try {
       const ollamaRequest = this.fromIR(request);
+      model = ollamaRequest.model;
       ollamaRequest.stream = false; // Explicitly disable streaming for non-streaming requests
       const startTime = Date.now();
 
@@ -250,9 +260,12 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
 
       if (!response.ok) {
         const errorBody = await response.text();
-        throw createErrorFromHttpResponse(response.status, response.statusText, errorBody, {
-          backend: this.metadata.name,
-        });
+        throw (
+          this.loadingFromResponse(response.status, errorBody) ??
+          createErrorFromHttpResponse(response.status, response.statusText, errorBody, {
+            backend: this.metadata.name,
+          })
+        );
       }
 
       const data = (await response.json()) as OllamaResponse;
@@ -260,6 +273,10 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
     } catch (error) {
       if (error instanceof NetworkError || error instanceof ProviderError) {
         throw error;
+      }
+      const warming = await this.loadingFromDeadline(error, signal, model);
+      if (warming) {
+        throw warming;
       }
       throw new ProviderError({
         code: ErrorCode.PROVIDER_ERROR,
@@ -273,8 +290,10 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
 
   async *executeStream(request: IRChatRequest, signal?: AbortSignal): IRChatStream {
     let sequence = 0;
+    let model: string | undefined;
     try {
       const ollamaRequest = this.fromIR(request);
+      model = ollamaRequest.model;
       ollamaRequest.stream = true;
 
       // Get effective streaming configuration
@@ -291,9 +310,12 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
 
       if (!response.ok) {
         const errorBody = await response.text();
-        throw createErrorFromHttpResponse(response.status, response.statusText, errorBody, {
-          backend: this.metadata.name,
-        });
+        throw (
+          this.loadingFromResponse(response.status, errorBody) ??
+          createErrorFromHttpResponse(response.status, response.statusText, errorBody, {
+            backend: this.metadata.name,
+          })
+        );
       }
 
       if (!response.body) {
@@ -309,7 +331,12 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
         sequence: sequence++,
         metadata: {
           ...request.metadata,
-          provenance: { ...request.metadata.provenance, backend: this.metadata.name },
+          provenance: {
+            ...request.metadata.provenance,
+            backend: this.metadata.name,
+            locality: localityForBaseURL(this.baseURL),
+            servedBy: servedByForBaseURL(this.baseURL),
+          },
         },
       } as IRStreamChunk;
 
@@ -382,15 +409,95 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
         reader.releaseLock();
       }
     } catch (error) {
+      // A warm-up is reported under its own code so the router can tell it from
+      // a fault; everything else keeps the error's name, as before.
+      const warming =
+        error instanceof ProviderError && error.code === ErrorCode.MODEL_LOADING
+          ? error
+          : await this.loadingFromDeadline(error, signal, model);
       yield {
         type: 'error',
         sequence: sequence++,
         error: {
-          code: error instanceof Error ? error.name : 'UNKNOWN_ERROR',
+          code: warming
+            ? ErrorCode.MODEL_LOADING
+            : error instanceof Error
+              ? error.name
+              : 'UNKNOWN_ERROR',
           message: error instanceof Error ? error.message : String(error),
         },
       } as IRStreamChunk;
     }
+  }
+
+  /**
+   * A 503 whose body says the runner is loading a model: a warm-up, not a fault.
+   * Ollama answers `llm server loading model` while a model is being brought
+   * into memory. Any other 503 (`server busy`, ...) stays an ordinary failure.
+   */
+  private loadingFromResponse(status: number, body: string): ProviderError | undefined {
+    if (status !== 503 || !/loading model|model is loading/i.test(body)) {
+      return undefined;
+    }
+    return new ProviderError({
+      code: ErrorCode.MODEL_LOADING,
+      message: `Ollama is loading model into memory: ${body.trim().slice(0, 200)}`,
+      isRetryable: true,
+      provenance: { backend: this.metadata.name },
+    });
+  }
+
+  /**
+   * A request that outlived its *deadline* while Ollama was still bringing the
+   * model into memory. Ollama does not answer while it loads; the request just
+   * blocks, and a 40 s first token on a 7B model looks exactly like a hung one.
+   * `/api/ps` lists what is resident, so when a deadline expires (a
+   * `TimeoutError` -- the caller's own cancel is an `AbortError` and is never
+   * relabelled) and the model is not on that list, the request died during the
+   * load. If the list cannot be read the failure is left as it is: no guessing.
+   */
+  private async loadingFromDeadline(
+    error: unknown,
+    signal: AbortSignal | undefined,
+    model: string | undefined
+  ): Promise<ProviderError | undefined> {
+    const expired =
+      (error as { name?: string } | undefined)?.name === 'TimeoutError' ||
+      (signal?.reason as { name?: string } | undefined)?.name === 'TimeoutError';
+    if (!expired || !model) {
+      return undefined;
+    }
+
+    try {
+      const response = await fetch(`${this.baseURL}/api/ps`, {
+        headers: this.config.headers,
+        signal: AbortSignal.timeout(2000),
+      });
+      if (!response.ok) {
+        return undefined;
+      }
+      const body = (await response.json()) as { models?: Array<{ name?: string; model?: string }> };
+      if (!Array.isArray(body.models)) {
+        return undefined;
+      }
+      const tagged = (name: string): string => (name.includes(':') ? name : `${name}:latest`);
+      const resident = body.models.some((m) =>
+        [m.name, m.model].some((n) => typeof n === 'string' && tagged(n) === tagged(model))
+      );
+      if (resident) {
+        return undefined;
+      }
+    } catch {
+      return undefined;
+    }
+
+    return new ProviderError({
+      code: ErrorCode.MODEL_LOADING,
+      message: `Ollama did not answer before the deadline and '${model}' is not yet loaded; it is probably still loading`,
+      isRetryable: true,
+      provenance: { backend: this.metadata.name },
+      cause: error instanceof Error ? error : undefined,
+    });
   }
 
   async healthCheck(): Promise<boolean> {
@@ -475,6 +582,8 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
         provenance: {
           ...originalRequest.metadata.provenance,
           backend: this.metadata.name,
+          locality: localityForBaseURL(this.baseURL),
+          servedBy: servedByForBaseURL(this.baseURL),
           servedModel: response.model,
         },
         custom: {

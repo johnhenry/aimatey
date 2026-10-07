@@ -166,11 +166,36 @@ A stream the consumer never finishes or closes keeps its backend "in flight", so
 use a timeout when you cannot guarantee consumers read to the end. The number of
 calls currently running is `getBackendInfo(name).inFlight`.
 
-:::caution[This is not revocation]
-If the answer must not be *delivered* - a revoked device, a rotated credential -
-stop the call with the `AbortSignal` you passed to it. Only the transport can
-make that guarantee. `unregister()` stops *new* work.
-:::
+#### Revoking with `abort`
+
+By default `unregister()` stops *new* work only. If the answer must not be
+*delivered* - a revoked device, a rotated credential - pass `{ abort: true }`:
+
+```typescript
+router.unregister('desktop', { abort: true });                       // cut, now
+await router.unregister('desktop', { abort: true, drain: 5_000 });   // cut, then wait for unwinding
+```
+
+The router owns an `AbortController` per call, linked to the caller's own signal
+(so the caller keeps its control), and `abort` fires every one running against that
+backend - chat, stream, embedding and decision calls alike:
+
+- the adapter's `AbortSignal` aborts with an `AbortError`, and
+  `adapter.cancel?.(requestId, reason)` is called once for the call, for a far side
+  that cannot see a signal (best effort; a throwing or rejecting `cancel()` is ignored);
+- the caller receives that `AbortError` whatever the adapter made of the abort, even
+  an adapter that ignores its signal. A stream ends by throwing it, and nothing the
+  revoked backend yields afterwards is delivered;
+- **it is not failed over.** The router does not answer from another backend a request
+  it was just told to cut; the caller decides whether to retry;
+- calls on other backends are untouched, and the cut calls' late outcomes are not
+  accounted, as for any unregistered backend.
+
+`cancel()` is sent for revocation only. A *caller's* abort is not relayed by the router
+(a proxy behind a router watches the signal itself; `Bridge` sends `cancel()` for a
+direct backend), so no far side is told twice. Whether a transport really stops is still
+the adapter's business; revocation guarantees only that the caller is released and gets
+nothing further.
 
 ---
 
@@ -329,8 +354,8 @@ it. It applies only to that open.
 
 #### Per-backend circuit breaker
 
-`enableCircuitBreaker`, `circuitBreakerThreshold` and `circuitBreakerTimeout` on
-`RouterConfig` are **defaults**. One router often fronts backends that fail very
+`enableCircuitBreaker`, `circuitBreakerThreshold`, `circuitBreakerTimeout` and
+`circuitBreakerWindow` on `RouterConfig` are **defaults**. One router often fronts backends that fail very
 differently - a cloud API that blips for seconds and a LAN peer that is asleep
 overnight - so `register()` takes per-backend overrides; any field you leave out
 inherits the router-wide value:
@@ -352,7 +377,8 @@ router
   .register('local', localModel, { circuitBreaker: { enabled: false } });
 
 router.getBackendInfo('desktop')?.circuitBreaker;
-// { enabled: true, threshold: 2, timeout: 300000 }   -- the effective policy
+// { enabled: true, threshold: 2, timeout: 300000, window: undefined, countAsFailure: fn,
+//   source: { enabled: 'router', threshold: 'register', timeout: 'register', ... } }
 ```
 
 `threshold` must be a positive integer and `timeout` a non-negative number of
@@ -361,9 +387,57 @@ milliseconds; anything else throws from `register()` before the backend is added
 `getBackendInfo()` reports the effective values, so you can see which layer won.
 The overrides survive `replace()` and `clone()`.
 
-This is a threshold-and-timeout policy only. It does not express "this backend
-legitimately takes 40 s to first token, do not count that as a failure", and it
-counts consecutive failures with no notion of how quickly they arrived.
+##### Failure window
+
+By default the breaker counts **consecutive** failures with no notion of elapsed time:
+three refusals in four milliseconds trip it exactly like three failures over three
+minutes, and a success in between resets the count. That is the backward-compatible
+default and stays the behaviour unless you set a `window`.
+
+`window` (milliseconds, per backend or as `RouterConfig.circuitBreakerWindow`) changes
+the question to "`threshold` failures **within** `window`":
+
+```typescript
+router.register('desktop', tunnel, { circuitBreaker: { threshold: 3, window: 10_000 } });
+```
+
+Timestamps of recent failures are kept per backend and pruned to the window. In windowed
+mode a success does *not* reset them (intermittent failure is still failure); they are
+forgotten when the breaker closes or is reset. A failed half-open probe reopens a windowed
+breaker at once.
+
+##### Slow-start tolerance
+
+A desktop loading a 7B model has a legitimate 40 s time-to-first-token that is not a
+failure. No threshold or timeout says so; a *signal* does:
+
+- An adapter that can tell reports `ErrorCode.MODEL_LOADING` (a retryable
+  `ProviderError`). The default `countAsFailure` predicate does not count it toward the
+  breaker, though it still appears in `failedRequests`. The shipped Ollama adapter (a 503
+  "loading model", or a deadline that expired while `/api/ps` shows the model not
+  resident), `native-model-runner` (a request while `start()` is waiting for the process)
+  and `native-node-llamacpp` (a request while another request's load is running) report it.
+- `countAsFailure?: (error) => boolean` replaces the default for one backend. It receives
+  the thrown value, or the `{ code, message }` of an in-band stream error chunk. It
+  *replaces* the default, so one that should still ignore warm-up must say so; a predicate
+  that throws counts the failure.
+
+```typescript
+router.register('desktop', tunnel, {
+  circuitBreaker: { countAsFailure: (e) => (e as { code?: string }).code !== 'PROVIDER_TIMEOUT' },
+});
+```
+
+##### Adapter-declared policy
+
+An adapter distributed as a package can recommend its own policy in
+`AdapterMetadata.circuitBreaker` (`threshold`, `timeout`, `window`, `countAsFailure`;
+never `enabled` - whether breakers run at all is the application's call). Precedence,
+per field: **`register()` option > adapter metadata > `RouterConfig`**.
+`getBackendInfo(name).circuitBreaker.source` reports the layer (`'register' | 'adapter' |
+'router'`) each field came from. The recommendation is read from the adapter currently
+registered, so `replace()` hands the name the replacement's. An invalid recommendation
+throws from `register()`/`replace()` like an invalid override.
 
 ---
 

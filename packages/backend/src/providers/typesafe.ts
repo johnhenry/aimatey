@@ -13,6 +13,7 @@
  * @module
  */
 
+import { localityForBaseURL, servedByForBaseURL } from '@johnhenry/aimatey-utils';
 import type {
   BackendAdapter,
   ApiKeyBackendAdapterConfig,
@@ -146,6 +147,8 @@ export class TypeSafeBackendAdapter implements BackendAdapter<TypeSafeRequest, T
       backendName: this.metadata.name,
       provider: 'typesafe',
       warnings: buildImageDroppedWarning(originalRequest, this.metadata.name, 'Jev'),
+      locality: localityForBaseURL(this.baseURL),
+      servedBy: servedByForBaseURL(this.baseURL),
     });
   }
 
@@ -162,6 +165,8 @@ export class TypeSafeBackendAdapter implements BackendAdapter<TypeSafeRequest, T
       provider: 'typesafe',
       // Jev takes no images: dropped here, with a warning on the response.
       warnings: buildImageDroppedWarning(request, this.metadata.name, 'Jev'),
+      locality: localityForBaseURL(this.baseURL),
+      servedBy: servedByForBaseURL(this.baseURL),
     });
   }
 
