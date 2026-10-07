@@ -12,6 +12,14 @@
 # Configuration:
 #   DELAY_BETWEEN_PACKAGES - seconds between each package (default: 5)
 #   DELAY_BETWEEN_BATCHES  - seconds between batches (default: 30)
+#   VERIFY_TIMEOUT         - minutes to poll the registry after publishing (default: 10)
+#   VERIFY_INTERVAL        - seconds between registry polls (default: 20)
+#
+# Re-running is safe: versions already on the registry are reported as
+# "already published" (not failures), so a re-dispatch only publishes what is
+# missing. After all batches, every package is checked with `npm view`
+# (scripts/verify-published.mjs); the script exits non-zero if any version
+# never appears.
 #
 
 set -e
@@ -19,6 +27,9 @@ set -e
 # Configuration
 DELAY_BETWEEN_PACKAGES=${DELAY_BETWEEN_PACKAGES:-5}
 DELAY_BETWEEN_BATCHES=${DELAY_BETWEEN_BATCHES:-30}
+VERIFY_TIMEOUT=${VERIFY_TIMEOUT:-10}
+VERIFY_INTERVAL=${VERIFY_INTERVAL:-20}
+export VERIFY_TIMEOUT VERIFY_INTERVAL
 DRY_RUN=false
 
 # Parse arguments
@@ -40,6 +51,8 @@ TOTAL=0
 SUCCESS=0
 SKIPPED=0
 FAILED=0
+PUBLISHED_PACKAGES=()
+ALREADY_PUBLISHED=()
 
 # Function to publish a single package
 publish_package() {
@@ -57,10 +70,12 @@ publish_package() {
       echo "$output"
       echo -e "  ${GREEN}✓ Published successfully${NC}"
       SUCCESS=$((SUCCESS + 1))
-    elif echo "$output" | grep -q "cannot publish over the previously published"; then
-      # Version already on the registry — package unchanged this release
-      echo -e "  ${YELLOW}↷ Skipped (version already published)${NC}"
+      PUBLISHED_PACKAGES+=("$pkg")
+    elif echo "$output" | grep -qE "EPUBLISHCONFLICT|cannot publish over (the )?previously published"; then
+      # Version already on the registry — unchanged this release, or a re-run
+      echo -e "  ${YELLOW}↷ Already published (version exists on registry)${NC}"
       SKIPPED=$((SKIPPED + 1))
+      ALREADY_PUBLISHED+=("$pkg")
     else
       echo "$output"
       echo -e "  ${RED}✗ Failed to publish${NC}"
@@ -254,8 +269,24 @@ echo "╚═══════════════════════�
 echo ""
 echo -e "  Total packages: ${BLUE}$TOTAL${NC}"
 echo -e "  Successful:     ${GREEN}$SUCCESS${NC}"
-echo -e "  Skipped:        ${YELLOW}$SKIPPED${NC} (already published)"
+echo -e "  Already pub'd:  ${YELLOW}$SKIPPED${NC}"
 echo -e "  Failed:         ${RED}$FAILED${NC}"
+
+if [ ${#PUBLISHED_PACKAGES[@]} -gt 0 ]; then
+  echo ""
+  echo -e "${GREEN}Newly published:${NC}"
+  for pkg in "${PUBLISHED_PACKAGES[@]}"; do
+    echo "  + $pkg"
+  done
+fi
+
+if [ ${#ALREADY_PUBLISHED[@]} -gt 0 ]; then
+  echo ""
+  echo -e "${YELLOW}Already published (skipped):${NC}"
+  for pkg in "${ALREADY_PUBLISHED[@]}"; do
+    echo "  = $pkg"
+  done
+fi
 
 if [ ${#FAILED_PACKAGES[@]} -gt 0 ]; then
   echo ""
@@ -269,6 +300,19 @@ if [ ${#FAILED_PACKAGES[@]} -gt 0 ]; then
     echo "  npm publish --workspace=$pkg --access public"
   done
   exit 1
+fi
+
+# ============================================================================
+# Post-publish verification: `npm publish` can report success for a version
+# the registry never stores, so confirm everything is really visible.
+# ============================================================================
+if ! $DRY_RUN; then
+  echo ""
+  echo -e "${YELLOW}Verifying versions on the registry (timeout ${VERIFY_TIMEOUT} min)...${NC}"
+  if ! node scripts/verify-published.mjs "${PUBLISHED_PACKAGES[@]}" "${ALREADY_PUBLISHED[@]}"; then
+    echo -e "${RED}Verification failed: see missing packages above.${NC}"
+    exit 1
+  fi
 fi
 
 echo ""
