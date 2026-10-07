@@ -1,5 +1,52 @@
 # @johnhenry/aimatey-middleware
 
+## 0.3.0
+
+### Minor Changes
+
+- 2277ebd: Add decision middleware for `bridge.useDecision()`, exported from the package root and from `@johnhenry/aimatey-middleware/decisions`:
+  - `createDecisionCachingMiddleware`: key is a hash of state, questions, images, model and `parameters.custom`; same caller-scoping (`metadata.principal` / `scopeKey` / `unidentified`) as chat caching; hits carry `metadata.custom.cacheHit`; responses with a `response-malformed`, `capability-emulated` or `capability-unsupported` warning are never cached.
+  - `createDecisionCostTrackingMiddleware`: `usage.cost`, else input/output tokens x registry pricing, else 0 with a warning log; same `onCost` / `CostStorage` / threshold interface as chat.
+  - `createDecisionRetryMiddleware`: the chat retry loop on `next(request)`; never retries a `ValidationError`.
+  - `createDecisionLoggingMiddleware` and `createDecisionOpenTelemetryMiddleware`: per-decision log / span with per-question type, value and confidence; `state` is redacted unless `logState: true`.
+  - `createDecisionValidationMiddleware`: request shape checks, `maxStateBytes`, and `validateDecisionResponse` with `strict` mode.
+
+  Chat internals were generalized to share code with them: `runWithRetry`, `resolvePricing`, `recordCost`, `resolveCacheScope`, `withBypassWarning`, `acquireTracer` and a few others are now exported (marked `@internal`), and `InMemoryCacheStorage` is generic over the cached value (default unchanged). Chat middleware behaviour is unchanged.
+
+### Patch Changes
+
+- 2c15be3: Narrow the decision caching middleware's `DEFAULT_UNCACHEABLE_WARNINGS` and `uncacheableWarnings` option from `string[]` to `WarningCategory[]`, now that `capability-emulated` is a real category. LLM-emulated decision responses are not cached by default.
+- Updated dependencies [291c3a5]
+- Updated dependencies [291c3a5]
+- Updated dependencies [291c3a5]
+- Updated dependencies [f787563]
+- Updated dependencies [bb94242]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [ce029c0]
+- Updated dependencies [ce029c0]
+- Updated dependencies [b74fe24]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [5936850]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [af22382]
+- Updated dependencies [cee0de7]
+- Updated dependencies [cee0de7]
+- Updated dependencies [c115285]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [59f7fbe]
+- Updated dependencies [d28c9a8]
+- Updated dependencies [e501444]
+  - @johnhenry/aimatey-core@0.6.0
+  - @johnhenry/aimatey-types@0.7.0
+  - @johnhenry/aimatey-utils@0.6.0
+  - @johnhenry/aimatey-errors@0.3.0
+
 ## 0.2.4
 
 ### Patch Changes

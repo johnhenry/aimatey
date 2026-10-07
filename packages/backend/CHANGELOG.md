@@ -1,5 +1,66 @@
 # @johnhenry/aimatey-backend
 
+## 0.5.0
+
+### Minor Changes
+
+- ed1278a: Typed-decision backends share one System One client. New `buildSystemOneRequest`, `parseSystemOneResponse`, `postSystemOne` and `decideViaSystemOne` (plus the `SYSTEMONE_DIALECTS` table and `SystemOneDialect` type) handle the `systemone`, `openrouter`, `vercel-evaluate`, `cloudflare` and (unverified) `openai-decisions` wire dialects: `type` present or inferred, `legend` ignored, object or array score probabilities, optional `probabilities`/`confidence` left absent, snake- and camelCase usage, and a missing answer throws a `ProviderError` naming the question. Responses are checked with `validateDecisionResponse` and its findings land on `metadata.warnings`. `TypeSafeBackendAdapter` is refactored onto it with unchanged behavior.
+
+  `OllamaBackendAdapter` gains `decide()` over `/v1/systemone` (base64 images, `parameters.custom.keepAlive`; a `url` image source throws), declares `decisions`, `decisionTypes`, `decisionLimits` (64 questions, 255 options, 26 levels), `decisionImages` and `decisionModels`, and `listModels()` marks decision models (`nimble`, `tev1`, `kev`, `clef`, `strands-decider`, `laya`) with `metadata.kind: 'decision'`; see `isOllamaDecisionModel`.
+
+  New decision-only `SystemOneBackendAdapter` for self-hosted Kev, Strands Decider, `laya[serve]` and Nimble servers, Vercel AI Gateway and OpenRouter.
+
+- 902e408: `decide()` on four more hosted backends, all through the shared System One client. `CloudflareBackendAdapter` answers with Clef / Clef-flash at Workers AI's `/ai/run/@cf/cloudflare/<model>` (derived from `accountId` or an `/ai/v1` `baseURL`; `@cf/cloudflare/clef` aliases map to the short name, other models are rejected; images go as base64 data URLs, at most 4; the `result` envelope and Workers-binding shapes both parse; a `success: false` envelope surfaces as an error). `OpenRouterBackendAdapter` uses `/api/alpha/decisions` (new `decisionsEndpoint: 'systemone'` falls back to `/api/v1/systemone`), passing `parameters.custom.provider` / `trace` / `session_id` / `user` and mapping `id`, `provider` and `usage.cost`. `PerplexityBackendAdapter` uses `/v1/decisions` with `pplx-decider-v1-27b`. `InceptionBackendAdapter` serves Mercury Decide at `<baseURL>/systemone` (unverified native endpoint). Each declares `decisions`, `decisionTypes`, `decisionModels`, `decisionImages` and (Cloudflare, OpenRouter) `decisionLimits`. New `estimateSystemOneCost()` helper and `imageFormat: 'data-url'` option on the client; the `cloudflare` dialect now also sends `model` in the body.
+- 5936850: `TogetherAIBackendAdapter` implements `decide()` for Together's Tev1 models (`together/Tev1-4B-experimental`, `together/Tev1-0.8B-experimental`). Tev1 is not a System One API: each question is one chat-completions call (fixed system prompt, a JSON user message of `state` / `question` / `options`, `temperature: 0`, `logprobs` with `top_logprobs: 24`) and the model answers one letter, A to X. Questions run concurrently, 4 at a time by default (`parameters.custom.concurrency`).
+  - `choice` is native (2 to 24 options; more throws a `ProviderError` naming the question). `noul` and `score` are emulated on the same protocol with neutral option keys (`0`/`1`, `0`..`N-1`) to avoid option-name bias, and each emulated answer carries a warning.
+  - `probabilities` are the softmax of the first token's `top_logprobs` over the valid option letters (letters missing from it get 0), `confidence` is `1 - H(p) / ln(n)`. When Together returns no logprobs the answer has neither, plus a warning.
+  - Capabilities: `decisions`, `decisionTypes: ['choice']`, `decisionsEmulatedTypes: ['noul', 'score']`, `decisionLimits: { maxChoiceOptions: 24 }`, `decisionModels`, `decisionImages: false`. `estimateDecisionCost()` reads the registry ($0.042 per 1M input tokens).
+
+- 63bf805: The Ollama adapter now supports tool calling (#168). `capabilities.tools` is `true`; `request.tools` is forwarded to `/api/chat` as `tools`, `message.tool_calls` becomes IR `tool_use` content with `finishReason: 'tool_calls'` (a call without a server-supplied id gets the deterministic id `call_<index>`), and IR `tool_use` / `tool_result` blocks in the history are sent back as assistant `tool_calls` and `role: 'tool'` messages (with `tool_name` when resolvable). Streamed tool calls are emitted as `tool_use` chunks and assembled on the `done` chunk. `toolChoice: 'none'` withholds the tools; `'required'` and a forced tool name have no Ollama equivalent and add a `parameter-unsupported` warning.
+- 59f7fbe: `OpenAIBackendAdapter.decide()` speaks OpenAI's Decisions API (`POST /v1/decisions`, preview): `input` plus a `questions` array of `choice` / `predicate` / `score`, answers matched by `name`, probabilities as `{ value, probability }` arrays. It is on by default for api.openai.com and opt-in elsewhere with the new `decisions: true` config (`OpenAIBackendAdapterConfig`); the OpenAI-compatible adapters (Groq, LM Studio, OmniRoute, ...) keep not offering `decide()`. Images are sent as `data:` URLs (a `url` source throws), and an object `state` is sent as JSON text. New exports: `buildOpenAIDecisionsRequest`, `parseOpenAIDecisionsResponse`. The API enforces 2 to 255 choices, 2 to 10 levels and 200 questions, declared in `decisionLimits`.
+
+  Removed the never-shipped, unverified `'openai-decisions'` dialect from `SystemOneBackendAdapter` / `SYSTEMONE_DIALECTS` (and the `predicate` / `rubric` answer-type aliases); OpenAI's wire format is not System One, so use `OpenAIBackendAdapter` instead.
+
+### Patch Changes
+
+- a75dfb1: Every shipped adapter now sets `IRProvenance.locality` on the hop it adds (#174). Cloud providers declare `'external'`. The OpenAI-compatible family (including LM Studio and OmniRoute), Ollama and the System One adapters derive it from the resolved base URL: `'same-host'` for loopback or a unix socket, `'external'` otherwise, with `servedBy` set to the URL's `host[:port]`. `native-apple`, `native-laya`, `native-node-llamacpp` and the in-browser adapters declare `'in-process'`; `native-model-runner` stamps `'same-host'` (its runner is a child process) on whatever its subclasses build. The function backend takes an optional `locality` config, since only its author knows what the function does.
+
+  Warm-up signals: Ollama reports `MODEL_LOADING` for a 503 "loading model" and for a deadline that expired while `/api/ps` shows the model not resident (also in-band on a stream); `native-model-runner` reports it for a request that arrives while `start()` is still waiting for the process; `native-node-llamacpp` reports it for a request that arrives while another request's load is running, and no longer loads the model twice in that case.
+
+- 3a3c98b: The Together decision adapter computes `confidence` with the shared `decisionConfidence` from `@johnhenry/aimatey-utils` (same value as before).
+- b74fe24: `TypeSafeBackendAdapter.decide()` now throws a `ProviderError` naming the question when the provider omits an answer, instead of silently skipping it and handing the caller an `answers` map with a hole in it. (The old comment claiming validation happened upstream was wrong; nothing upstream validated.)
+- e853983: `TypeSafeBackendAdapter` maps `usage.output_tokens` and `usage.cost` onto `usage.outputTokens` and `usage.cost` (`usage.details.cost` is kept for one release), sets `response.provider`, declares `decisionTypes`, `decisionLimits` (255 options, 10 levels, 32,000 state tokens, 0 images) and `decisionImages: false`, and tolerates answers without `probabilities` / `confidence`. Images on a request are dropped with a `capability-unsupported` warning rather than silently. Its `jev-1.13.0` model registration moved from the constructor into the registry seed in `@johnhenry/aimatey-utils`, which now also carries the other decision models.
+- 88ce5c7: The IR is documented as JSON, and media content can name a payload by a transport-resolved reference.
+
+  **JSON (#118).** New `JsonValue`, `JsonObject` and `JsonPrimitive` types, and the contract that the IR's free-form bags (`metadata.custom`, `parameters.custom`, tool `input`, warning `details`, `raw`) are JSON-valued, with `undefined` meaning absent everywhere. The bags stay typed `unknown` in this release: tightening them would reject every caller that stores a class instance or an optional `undefined` property. `findNonJsonValues()`, `isJsonSerializable()` and `assertJsonSerializable()` (utils) give a transport one shared answer, with the path of each offender, and are the migration path to typing the bags `JsonValue` at the next major.
+
+  **Blob references (#122) -- breaking for exhaustive consumers.** `ImageContent`, `AudioContent`, `DocumentContent` and `VideoContent` `source` gains a third member, `BlobRefSource` (`{ type: 'ref'; ref: string; mediaType?: string; bytes?: number }`). Code that narrows `source` with `type === 'url' ? ... : source.data` no longer type-checks; handle or reject the `ref` case (`requireResolvedContent()` / `mediaSourceToUrl()` in utils do this in one call). The contract: the transport that minted a handle resolves it before the request reaches a backend; anything that cannot resolve one refuses it with `UNSUPPORTED_FEATURE` -- never drops it, never sends it to a provider, never fetches it. `Bridge` and `Router` enforce it after request middleware (`assertNoUnresolvedBlobRefs()`), `Router` skips a backend that cannot resolve a reference for one that can without counting a failure, the shipped provider adapters refuse a reference handed to them directly, `validateDecisionRequest()` and the System One client reject one in `images`, and a backend that resolves handles itself declares the new `IRCapabilities.blobRefs`.
+
+- Updated dependencies [291c3a5]
+- Updated dependencies [291c3a5]
+- Updated dependencies [f787563]
+- Updated dependencies [bb94242]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [ce029c0]
+- Updated dependencies [b74fe24]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [5936850]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [af22382]
+- Updated dependencies [cee0de7]
+- Updated dependencies [c115285]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [59f7fbe]
+- Updated dependencies [d28c9a8]
+- Updated dependencies [e501444]
+  - @johnhenry/aimatey-types@0.7.0
+  - @johnhenry/aimatey-utils@0.6.0
+  - @johnhenry/aimatey-errors@0.3.0
+
 ## 0.4.0
 
 ### Minor Changes

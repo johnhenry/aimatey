@@ -1,5 +1,0 @@
----
-"@johnhenry/aimatey-core": minor
----
-
-Decisions phase 3a. `Router.decide(request, signal?)` mirrors `embed()`: decision-capable backends tried in fallback-chain order with circuit breaking, per-backend latency/cost stats and `fallbackStrategy` handling; a backend whose `decisionTypes`, `decisionLimits` or `decisionImages` cannot serve the request is skipped (reported through `onWarning`) rather than failed, and `parameters.model` deprioritizes backends whose `decisionModels` lack it. A `Router` now satisfies `supportsDecisions`, so `new Bridge(frontend, router).decide()` works. `Bridge.decideBatch(states, questions, { concurrency, onProgress, onError })` answers many states in input order with bounded concurrency (default: the backend's `decisionLimits.maxConcurrency`, else 4). `Bridge.decide()`/`decideFrom()` now run `validateDecisionRequest` before the middleware chain (throwing `ValidationError`) and `validateDecisionResponse` on the result, merging both sets of warnings into `metadata.warnings`. Chat routing (`selectBackend`, chat fallbacks) no longer picks backends with no chat support, so decision-only backends are never selected for chat.

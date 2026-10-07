@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-native-apple",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "apple native backend for Aimatey",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -37,15 +37,15 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@johnhenry/aimatey-types": "^0.6.0",
-    "@johnhenry/aimatey-errors": "^0.2.3",
-    "@johnhenry/aimatey-utils": "^0.5.0"
+    "@johnhenry/aimatey-types": "^0.7.0",
+    "@johnhenry/aimatey-errors": "^0.3.0",
+    "@johnhenry/aimatey-utils": "^0.6.0"
   },
   "optionalDependencies": {
     "@johnhenry/apple-foundation-models": "^0.0.0"
   },
   "devDependencies": {
-    "@johnhenry/aimatey-testing": "^0.1.5",
+    "@johnhenry/aimatey-testing": "^0.2.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },

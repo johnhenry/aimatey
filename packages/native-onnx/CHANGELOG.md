@@ -1,5 +1,13 @@
 # @johnhenry/aimatey-native-onnx
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [bb94242]
+- Updated dependencies [c115285]
+  - @johnhenry/aimatey-errors@0.3.0
+
 ## 0.1.0
 
 ### Minor Changes

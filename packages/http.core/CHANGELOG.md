@@ -1,5 +1,50 @@
 # @johnhenry/aimatey-http-core
 
+## 0.4.0
+
+### Minor Changes
+
+- c115285: `message` is for developers; `userMessage` is for display (#129).
+  - Every error class accepts an optional `userMessage` (end-user-safe text, shown verbatim) and exposes it as `error.userMessage`; `toJSON()` includes it. It is absent unless the thrower supplies one.
+  - New `toUserMessage(error)` in `@johnhenry/aimatey-errors`: the error's own `userMessage`, else a fixed default sentence for its `code` (`DEFAULT_USER_MESSAGES`, typed `Record<ErrorCode, string>` so a new code cannot ship without one), else its category's, else `GENERIC_USER_MESSAGE`. Total (accepts anything caught, never throws) and it never returns `error.message`; nothing from the error (message, `details`, `cause`, `provenance`, provider bodies) is interpolated into the defaults.
+  - `@johnhenry/aimatey-http-core` error bodies (generic, OpenAI and Anthropic shapes) now carry `userMessage`. `message` is unchanged: the existing 5xx/4xx sanitisation stays, so clients that read it keep working. There is no debug flag to gate it behind, so none was added.
+
+  Breaking changes: none for callers. `BaseErrorOptions` and the `*ErrorOptions` types gain an optional field; a class that implements the `AdapterError` interface from `@johnhenry/aimatey-types` is unaffected because the new member is optional. Adding an `ErrorCode` remains a compile-time change for anyone who switches on it exhaustively; use `toUserMessage` or `error.category` to be insulated.
+
+### Patch Changes
+
+- 88df633: Declare the `@johnhenry/aimatey-utils` dependency both packages already import. It resolved only through workspace hoisting, so a published install could fail.
+- Updated dependencies [291c3a5]
+- Updated dependencies [291c3a5]
+- Updated dependencies [291c3a5]
+- Updated dependencies [f787563]
+- Updated dependencies [bb94242]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [ce029c0]
+- Updated dependencies [ce029c0]
+- Updated dependencies [b74fe24]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [5936850]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [af22382]
+- Updated dependencies [cee0de7]
+- Updated dependencies [cee0de7]
+- Updated dependencies [c115285]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [59f7fbe]
+- Updated dependencies [d28c9a8]
+- Updated dependencies [e501444]
+  - @johnhenry/aimatey-core@0.6.0
+  - @johnhenry/aimatey-types@0.7.0
+  - @johnhenry/aimatey-utils@0.6.0
+  - @johnhenry/aimatey-errors@0.3.0
+
 ## 0.3.2
 
 ### Patch Changes

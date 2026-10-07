@@ -1,5 +1,84 @@
 # @johnhenry/aimatey-core
 
+## 0.6.0
+
+### Minor Changes
+
+- 291c3a5: `Bridge` now calls `BackendAdapter.cancel(requestId)` when the request's `AbortSignal` aborts during `chat`, `chatStream`, `executeIR` or `executeIRStream` (#121). `Router.embed()` and `Router.decide()` judge a backend by `discoverCapabilities()` when it has one, cached per adapter for `capabilityCacheDuration`, refreshed by a passing `checkHealth()`, falling back to static `metadata.capabilities` when discovery fails (#127). Adapters without either method behave exactly as before.
+- bb94242: Circuit breaker shape (#173, follow-up to #128).
+
+  **Failure window.** `circuitBreaker.window` (ms; per backend via `register()`, or `RouterConfig.circuitBreakerWindow`) makes the breaker open when `threshold` failures occur _within_ the window, whatever succeeded in between. Left unset it is exactly the old behaviour: `threshold` consecutive failures with no notion of time. A failed half-open probe reopens a windowed breaker immediately.
+
+  **Warm-up tolerance.** New `ErrorCode.MODEL_LOADING` (provider category, retryable): "this backend is warming up". The default `countAsFailure` predicate does not count it toward the breaker (it still shows in `failedRequests`). `circuitBreaker.countAsFailure?: (error) => boolean` replaces the default per backend; it receives the thrown value, or the `{ code, message }` of an in-band stream error chunk, and a throwing predicate counts the failure.
+
+  **Adapter-declared policy.** `AdapterMetadata.circuitBreaker?: { threshold?, timeout?, window?, countAsFailure? }` is the adapter's recommendation, resolved per field as `register()` option > adapter metadata > `RouterConfig`, and reported in `BackendInfo.circuitBreaker.source`. `enabled` is deliberately not adapter-settable. Invalid values throw `INVALID_PARAMETERS` from `register()`/`replace()`/the constructor.
+
+  Breaking changes:
+  - `BackendInfo.circuitBreaker` (`EffectiveCircuitBreakerPolicy`) gains `window`, `countAsFailure` and `source`; code that builds one by hand must add them.
+  - A backend reporting `MODEL_LOADING` no longer counts toward the breaker. Nothing in the library reported it before, so only adapters that opt in are affected.
+
+  **`unregister(name, { abort: true })`** (#174, option 3 of #117). The router now gives each call its own `AbortController`, linked to the caller's signal (so adapters receive a derived signal rather than the caller's own), and `abort: true` aborts every call in flight on that backend (chat, stream, embed, decide), calls `adapter.cancel?.(requestId, reason)` once for each, and hands the caller an `AbortError` without failing over. Can be combined with `drain`. Without `abort` nothing changes. `cancel()` is sent for revocation only, not for a caller's own abort.
+
+- ce029c0: `Bridge.decide()` and `decideBatch()` accept `options.images` and put them on the `IRDecisionRequest`; a backend without `decisionImages` still rejects them at validation. The decision wrappers (`createTypeSafeClient`, `createDecide`, `createDecisionModel`) no longer refuse image requests when the Bridge's frontend differs from the wrapper's, and the `decide` CLI passes `--image` through the option instead of a middleware.
+- e853983: Add `Bridge.decideFrom(request, options?)`, the decision counterpart of `chat()`: it runs `frontend.decisionToIR()`, the decision middleware, `backend.decide()` and `frontend.decisionFromIR()`, so a TypeSafe- or Laya-shaped call returns the same shape. It throws `UNSUPPORTED_FEATURE` if the frontend lacks the decision hooks or the backend cannot decide. `Bridge.decide()` is unchanged (IR in, IR out). `chat()` and `chatStream()` now throw `UNSUPPORTED_FEATURE` for a frontend with no chat conversion instead of calling an absent method.
+- 07d9bc7: Decisions phase 3a. `Router.decide(request, signal?)` mirrors `embed()`: decision-capable backends tried in fallback-chain order with circuit breaking, per-backend latency/cost stats and `fallbackStrategy` handling; a backend whose `decisionTypes`, `decisionLimits` or `decisionImages` cannot serve the request is skipped (reported through `onWarning`) rather than failed, and `parameters.model` deprioritizes backends whose `decisionModels` lack it. A `Router` now satisfies `supportsDecisions`, so `new Bridge(frontend, router).decide()` works. `Bridge.decideBatch(states, questions, { concurrency, onProgress, onError })` answers many states in input order with bounded concurrency (default: the backend's `decisionLimits.maxConcurrency`, else 4). `Bridge.decide()`/`decideFrom()` now run `validateDecisionRequest` before the middleware chain (throwing `ValidationError`) and `validateDecisionResponse` on the result, merging both sets of warnings into `metadata.warnings`. Chat routing (`selectBackend`, chat fallbacks) no longer picks backends with no chat support, so decision-only backends are never selected for chat.
+- cee0de7: `Bridge.runTools` gains tool-call gating: a `gate` option (`{ action: 'allow' | 'deny' | 'review' }` per call), `onReview` for human-in-the-loop approval and `maxDenials` to end the loop with `status: 'max-denials'`. The result now carries `status` and `denials`. New `createDecisionGate(backend, config?)` approves, denies or flags tool calls from a decision model's P(true) (default thresholds 0.8 / 0.3, with the decision response attached for auditing), and `createDecisionTool(backend, questions)` exposes a decision model to a chat agent as a `ToolDefinition`.
+- 88ce5c7: The IR is documented as JSON, and media content can name a payload by a transport-resolved reference.
+
+  **JSON (#118).** New `JsonValue`, `JsonObject` and `JsonPrimitive` types, and the contract that the IR's free-form bags (`metadata.custom`, `parameters.custom`, tool `input`, warning `details`, `raw`) are JSON-valued, with `undefined` meaning absent everywhere. The bags stay typed `unknown` in this release: tightening them would reject every caller that stores a class instance or an optional `undefined` property. `findNonJsonValues()`, `isJsonSerializable()` and `assertJsonSerializable()` (utils) give a transport one shared answer, with the path of each offender, and are the migration path to typing the bags `JsonValue` at the next major.
+
+  **Blob references (#122) -- breaking for exhaustive consumers.** `ImageContent`, `AudioContent`, `DocumentContent` and `VideoContent` `source` gains a third member, `BlobRefSource` (`{ type: 'ref'; ref: string; mediaType?: string; bytes?: number }`). Code that narrows `source` with `type === 'url' ? ... : source.data` no longer type-checks; handle or reject the `ref` case (`requireResolvedContent()` / `mediaSourceToUrl()` in utils do this in one call). The contract: the transport that minted a handle resolves it before the request reaches a backend; anything that cannot resolve one refuses it with `UNSUPPORTED_FEATURE` -- never drops it, never sends it to a provider, never fetches it. `Bridge` and `Router` enforce it after request middleware (`assertNoUnresolvedBlobRefs()`), `Router` skips a backend that cannot resolve a reference for one that can without counting a failure, the shipped provider adapters refuse a reference handed to them directly, `validateDecisionRequest()` and the System One client reject one in `images`, and a backend that resolves handles itself declares the new `IRCapabilities.blobRefs`.
+
+- 88ce5c7: The `IRChatStream` contract is now written down and enforced: a stream ends with exactly one terminal chunk, the deltas are the text, and a resumed stream continues its numbering.
+
+  **Termination.** An iterator that completed without a `done` or `error` chunk used to look like a finished reply, and `Router` credited it as a success, so the circuit breaker could not open on the failure that most resembles a healthy one. `Bridge` and `Router` now run every backend stream through the new `withTerminationGuard()` (utils), which closes a silent end with an `error` chunk (`code: 'stream-truncated'`, numbered as the next sequence), drops anything after a terminal chunk, and leaves a cancelled request alone.
+
+  **Behaviour change (core).** `Router` now counts a stream that ends without a terminal chunk as a backend failure (it may open the breaker, and a truncation before anything was delivered fails over). A third-party adapter that legitimately ended without `done` must now emit one. `tests/unit/router-streaming-fallback.test.ts` asserted the old behaviour and was updated.
+
+  **Authoritative text.** `StreamContentChunk.accumulated`, when present, MUST equal the running sum of `delta`; `StreamDoneChunk.message`, when present, is authoritative and MUST equal the delta sum (a mismatch is a transport fault, not a model fault); a proxy may drop `accumulated` only from every chunk of a stream. Every shipped backend already satisfied this; `convertChunkMode`'s `transform` option does not, and is documented as such. New in utils: `validateStreamContract()`, `monitorStreamContract()`, `createStreamContractMonitor()`, `getMessageText()`. New in types: `StreamContractViolation`, `StreamContractViolationCode`, and `BridgeConfig.onContractViolation` (opt-in dev/test check; costs nothing when unset).
+
+  **Resumption.** New optional `BaseStreamChunk.resumedFrom?: { sequence: number }` marks the first chunk after an interrupted stream was resumed; its `sequence` must be `resumedFrom.sequence + 1`. Additive. It is not a resume key (a per-stream id is a separate design, shared with cancellation, and is not decided here).
+
+  Documented in `docs/IR-FORMAT.md` and the docs-site IR page.
+
+- e501444: Router: `unregister()` in-flight semantics (#117) and per-backend circuit-breaker policy (#128).
+
+  **`unregister(name, { drain })`.** `unregister()` is not cancellation. A call already handed to the backend runs to its natural end (`execute()` resolves, a stream keeps yielding); no new request is routed to the name; the recovery timer is cancelled. The router now counts calls per backend (`BackendInfo.inFlight`), and `{ drain: true | timeoutMs }` returns a `Promise<UnregisterResult>` (`{ drained, inFlight }`) that settles when they finish. The backend is still removed synchronously. Without `drain` the signature and chaining are unchanged. To stop delivery (revocation), abort with the call's `AbortSignal`; only the transport can guarantee that.
+
+  **`register(name, adapter, { circuitBreaker: { enabled?, threshold?, timeout? } })`.** Per-backend overrides of `enableCircuitBreaker` / `circuitBreakerThreshold` / `circuitBreakerTimeout`, which are now documented as defaults. Overrides survive `replace()` and `clone()`; `getBackendInfo()` reports the effective policy as `BackendInfo.circuitBreaker`. Invalid values (non-integer or non-positive threshold, negative timeout) throw `INVALID_PARAMETERS` before the backend is registered.
+
+  Breaking changes:
+  - **Late outcomes of an unregistered backend are no longer accounted.** Previously an in-flight call wrote its counters, latency and breaker verdict onto the detached state, where nothing could read them; a late failure could also open the breaker of a _different_ backend registered under the same name afterwards. It now does neither.
+  - **`openCircuitBreaker(name, timeoutMs)` honours `timeoutMs` in full.** It used to rest for `min(timeoutMs, circuitBreakerTimeout)` because the elapsed-time check read only the router-wide timeout. A longer `timeoutMs` is no longer capped.
+  - **`BackendInfo` has two new required fields** (`circuitBreaker`, `inFlight`). Code that constructs a `BackendInfo` by hand, or implements the `Router` interface, must add them; `Router.register` and `Router.unregister` gain the overloads above.
+
+### Patch Changes
+
+- Updated dependencies [291c3a5]
+- Updated dependencies [291c3a5]
+- Updated dependencies [f787563]
+- Updated dependencies [bb94242]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [ce029c0]
+- Updated dependencies [b74fe24]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [5936850]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [af22382]
+- Updated dependencies [cee0de7]
+- Updated dependencies [c115285]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [59f7fbe]
+- Updated dependencies [d28c9a8]
+- Updated dependencies [e501444]
+  - @johnhenry/aimatey-types@0.7.0
+  - @johnhenry/aimatey-utils@0.6.0
+  - @johnhenry/aimatey-errors@0.3.0
+
 ## 0.5.0
 
 ### Minor Changes

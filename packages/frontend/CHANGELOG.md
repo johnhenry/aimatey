@@ -1,5 +1,47 @@
 # @johnhenry/aimatey-frontend
 
+## 0.4.0
+
+### Minor Changes
+
+- e853983: `TypeSafeFrontendAdapter` and `LayaFrontendAdapter` now implement `FrontendAdapter` through `decisionToIR` / `decisionFromIR`. **Breaking:** their decision-typed `toIR` / `fromIR` methods are renamed to those, because the chat-typed names on `FrontendAdapter` cannot carry decision types; call sites should use `Bridge.decideFrom()` or the renamed methods. Both accept `images` on the request and omit `probabilities` / `confidence` from converted answers when the IR has none (their native `probabilities` / `confidence` fields are now optional). Laya score answers still get a `legend` built from the original question.
+- 12505e8: Add `VercelDecideFrontendAdapter` (AI SDK `decide()` shapes: `boolean` questions, `{ type: 'boolean', probability }` answers, camelCase usage, `providerMetadata.gateway`) and `OpenRouterDecisionsFrontendAdapter` (`/api/alpha/decisions` shapes: `provider`/`trace`/`session_id`/`user`, `id`/`provider`/`usage.cost` envelope). Both implement the decision hooks only; use them with `Bridge.decideFrom()`. `TypeSafeFrontendAdapter` is now documented as also the Ollama `/v1/systemone` shape.
+- 59f7fbe: Add `OpenAIDecisionsFrontendAdapter`: accepts OpenAI Decisions API (`/v1/decisions`) request bodies (`input` string or `message` items with `input_text` / `input_image` parts, a `questions` array) and returns the `answers[]` response shape with `{ value, probability }` probability arrays and `usage` details. Decision hooks only; drive it with `Bridge.decideFrom()`.
+
+### Patch Changes
+
+- b74fe24: `LayaAnswer.action` is renamed `rl_agent`, matching the name a live `@receptron/laya` response uses (the `act_probability` shape is unchanged). The field is optional and `fromIR` never sets it.
+- 88ce5c7: The IR is documented as JSON, and media content can name a payload by a transport-resolved reference.
+
+  **JSON (#118).** New `JsonValue`, `JsonObject` and `JsonPrimitive` types, and the contract that the IR's free-form bags (`metadata.custom`, `parameters.custom`, tool `input`, warning `details`, `raw`) are JSON-valued, with `undefined` meaning absent everywhere. The bags stay typed `unknown` in this release: tightening them would reject every caller that stores a class instance or an optional `undefined` property. `findNonJsonValues()`, `isJsonSerializable()` and `assertJsonSerializable()` (utils) give a transport one shared answer, with the path of each offender, and are the migration path to typing the bags `JsonValue` at the next major.
+
+  **Blob references (#122) -- breaking for exhaustive consumers.** `ImageContent`, `AudioContent`, `DocumentContent` and `VideoContent` `source` gains a third member, `BlobRefSource` (`{ type: 'ref'; ref: string; mediaType?: string; bytes?: number }`). Code that narrows `source` with `type === 'url' ? ... : source.data` no longer type-checks; handle or reject the `ref` case (`requireResolvedContent()` / `mediaSourceToUrl()` in utils do this in one call). The contract: the transport that minted a handle resolves it before the request reaches a backend; anything that cannot resolve one refuses it with `UNSUPPORTED_FEATURE` -- never drops it, never sends it to a provider, never fetches it. `Bridge` and `Router` enforce it after request middleware (`assertNoUnresolvedBlobRefs()`), `Router` skips a backend that cannot resolve a reference for one that can without counting a failure, the shipped provider adapters refuse a reference handed to them directly, `validateDecisionRequest()` and the System One client reject one in `images`, and a backend that resolves handles itself declares the new `IRCapabilities.blobRefs`.
+
+- Updated dependencies [291c3a5]
+- Updated dependencies [291c3a5]
+- Updated dependencies [f787563]
+- Updated dependencies [bb94242]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [3a3c98b]
+- Updated dependencies [ce029c0]
+- Updated dependencies [b74fe24]
+- Updated dependencies [e853983]
+- Updated dependencies [e853983]
+- Updated dependencies [5936850]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [07d9bc7]
+- Updated dependencies [af22382]
+- Updated dependencies [cee0de7]
+- Updated dependencies [c115285]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [88ce5c7]
+- Updated dependencies [59f7fbe]
+- Updated dependencies [d28c9a8]
+- Updated dependencies [e501444]
+  - @johnhenry/aimatey-types@0.7.0
+  - @johnhenry/aimatey-utils@0.6.0
+  - @johnhenry/aimatey-errors@0.3.0
+
 ## 0.3.1
 
 ### Patch Changes
