@@ -1,6 +1,6 @@
 /**
  * SystemOne client tests: request building and response parsing for every
- * dialect (systemone, openrouter, vercel-evaluate, openai-decisions,
+ * dialect (systemone, openrouter, vercel-evaluate,
  * cloudflare), and the shared POST helper's error mapping.
  *
  * Fixtures are hand-written from the wire shapes documented in
@@ -136,14 +136,6 @@ describe('buildSystemOneRequest', () => {
     expect(questions.urgency.type).toBe('score');
   });
 
-  it("'openai-decisions' renames noul to predicate and score to rubric", () => {
-    const body = buildSystemOneRequest(ir, { dialect: 'openai-decisions' });
-    const questions = body.questions as Record<string, { type: string }>;
-    expect(questions.refund.type).toBe('predicate');
-    expect(questions.urgency.type).toBe('rubric');
-    expect(questions.department.type).toBe('choice');
-  });
-
   it("'cloudflare' sends the short model name in the body as well as the URL", () => {
     const body = buildSystemOneRequest(ir, { dialect: 'cloudflare', model: 'clef' });
     expect(body.model).toBe('clef');
@@ -153,7 +145,6 @@ describe('buildSystemOneRequest', () => {
   it('exposes a data-driven dialect table covering every dialect', () => {
     expect(Object.keys(SYSTEMONE_DIALECTS).sort()).toEqual([
       'cloudflare',
-      'openai-decisions',
       'openrouter',
       'systemone',
       'vercel-evaluate',
@@ -354,23 +345,6 @@ describe('parseSystemOneResponse', () => {
     expect(res.answers.ok).toEqual({ type: 'noul', value: 0.77 });
     expect(res.model).toBe('@cf/cloudflare/clef');
     expect(res.usage?.inputTokens).toBe(12);
-  });
-
-  it("maps OpenAI's predicate/rubric answer types back (unverified dialect)", () => {
-    const res = parseSystemOneResponse(
-      {
-        model: 'm',
-        answers: {
-          department: { type: 'choice', choice: 'billing' },
-          urgency: { type: 'rubric', score: 1 },
-          refund: { type: 'predicate', probability: 0.4 },
-        },
-      },
-      ir,
-      { ...opts, dialect: 'openai-decisions' }
-    );
-    expect(res.answers.urgency).toEqual({ type: 'score', value: 1 });
-    expect(res.answers.refund).toEqual({ type: 'noul', value: 0.4 });
   });
 
   it('retains the raw body and falls back to the request model', () => {

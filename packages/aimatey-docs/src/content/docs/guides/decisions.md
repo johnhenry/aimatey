@@ -143,7 +143,7 @@ Almost every provider speaks the same System One request shape, so aimatey has o
 | `PerplexityBackendAdapter` | `/v1/decisions` | System One-shaped; `pplx-decider-v1-27b`; image encoding unverified | choice, score, noul | yes (unverified) | undeclared |
 | `InceptionBackendAdapter` | assumes `<baseURL>/systemone` (unverified) | Mercury Decide; works through OpenRouter today | choice, score, noul | no | undeclared |
 | `TogetherAIBackendAdapter` | chat-completions letter protocol | **Not System One**: one call per question, the model answers a letter A to X; probabilities from `top_logprobs`. `noul` and `score` are emulated, each with a warning | choice native | no | 2 to 24 options |
-| `SystemOneBackendAdapter` | your `baseURL` | any server that speaks System One; pick `dialect`: `'systemone'`, `'openrouter'`, `'vercel-evaluate'`, `'cloudflare'`, or the unverified `'openai-decisions'` | configurable | configurable | configurable |
+| `SystemOneBackendAdapter` | your `baseURL` | any server that speaks System One; pick `dialect`: `'systemone'`, `'openrouter'`, `'vercel-evaluate'`, or `'cloudflare'` | configurable | configurable | configurable |
 | `LayaBackendAdapter` (`@johnhenry/aimatey-native-laya`) | on-device ONNX (`@receptron/laya`) | no network; one session, so concurrency 1 | choice, score, noul | no | about 20 options, 10 levels, 512 state tokens (English) |
 | `createEmulatedDecisionBackend(chat)` (`@johnhenry/aimatey-patterns`) | any chat backend | one structured-output call; no probabilities; `reasoning` optional; `decisionsEmulated: true` | choice, score, noul | if the chat backend is multimodal | the chat model's |
 
