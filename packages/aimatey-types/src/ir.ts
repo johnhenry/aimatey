@@ -39,9 +39,53 @@ export interface TextContent {
 }
 
 /**
+ * A media payload that is **not carried in the IR** but named by a handle the
+ * originating transport can resolve through its own blob channel (#122).
+ *
+ * Exists for transports that already move large binaries out of band -- a
+ * phone-to-workstation tunnel with a separate upload channel, a chunked
+ * uploader, a content-addressed store -- and would otherwise have to inline the
+ * bytes as base64 (a third larger, and a whole message-sized JSON string) or
+ * smuggle a private scheme through `url`. A private scheme in `url` is worse
+ * than a distinct member: a generic consumer that fetches `source.url` either
+ * recognises the scheme or attempts something undefined (an SSRF shape), where
+ * `type: 'ref'` makes "do not fetch this" checkable at the type level.
+ *
+ * **Who resolves it -- the contract.** `ref` is opaque to this library. Only the
+ * transport that minted the handle can turn it into bytes, so *the transport
+ * must resolve it (replace it with a `url` or `base64` source) before the
+ * request reaches a backend adapter*. Backend adapters may assume they never see
+ * one, with one exception: an adapter that itself sits on the transport and
+ * resolves handles declares `IRCapabilities.blobRefs: true`.
+ *
+ * The rule is enforced, not hoped for: `Bridge` and `Router` call
+ * `assertNoUnresolvedBlobRefs()` (`@johnhenry/aimatey-utils`) after request
+ * middleware has run, and an unresolved `ref` reaching a backend that does not
+ * declare `blobRefs` throws `UNSUPPORTED_FEATURE`. It is never dropped, never
+ * sent to a provider as garbage, and never fetched. Decision requests
+ * (`IRDecisionRequest.images`) follow the same rule.
+ *
+ * `bytes` is deliberately in the type: a consumer deciding whether to accept a
+ * payload should not have to fetch it to learn how large it is.
+ */
+export interface BlobRefSource {
+  readonly type: 'ref';
+
+  /** Opaque handle, meaningful only to the transport that minted it. Never fetched by this library. */
+  readonly ref: string;
+
+  /** Declared media type (e.g. `image/png`), if the transport knows it. */
+  readonly mediaType?: string;
+
+  /** Declared size in bytes, if the transport knows it. */
+  readonly bytes?: number;
+}
+
+/**
  * Image content block.
  *
- * Supports both URLs and base64-encoded images.
+ * Supports URLs, base64-encoded images, and (since #122) transport-resolved
+ * blob references -- see {@link BlobRefSource} for who may resolve a `ref`.
  *
  * @example
  * ```typescript
@@ -76,7 +120,8 @@ export interface ImageContent {
         readonly type: 'base64';
         readonly mediaType: string;
         readonly data: string;
-      };
+      }
+    | BlobRefSource;
 }
 
 /**
@@ -118,7 +163,8 @@ export interface AudioContent {
         readonly type: 'base64';
         readonly mediaType: string;
         readonly data: string;
-      };
+      }
+    | BlobRefSource;
   /** Optional transcript for accessibility and fallback. */
   readonly transcript?: string;
 }
@@ -163,7 +209,8 @@ export interface DocumentContent {
         readonly type: 'base64';
         readonly mediaType: string;
         readonly data: string;
-      };
+      }
+    | BlobRefSource;
   /** Optional filename for display and download purposes. */
   readonly filename?: string;
 }
@@ -207,7 +254,8 @@ export interface VideoContent {
         readonly type: 'base64';
         readonly mediaType: string;
         readonly data: string;
-      };
+      }
+    | BlobRefSource;
   /** Optional poster/thumbnail URL for preview. */
   readonly poster?: string;
 }
@@ -588,6 +636,14 @@ export interface IRCapabilities {
    * Supports video inputs.
    */
   readonly supportsVideo?: boolean;
+
+  /**
+   * Whether the backend itself resolves {@link BlobRefSource} (`source.type:
+   * 'ref'`) media handles. Absent or `false` means it does not, and
+   * `Bridge`/`Router` refuse a request that still contains one with
+   * `UNSUPPORTED_FEATURE` (#122).
+   */
+  readonly blobRefs?: boolean;
 
   /**
    * Supports tool/function calling.
@@ -1429,6 +1485,39 @@ export interface BaseStreamChunk {
    * request that caused it. Hoist the counter above the `try`.
    */
   readonly sequence: number;
+
+  /**
+   * Marks the first chunk delivered after the stream was interrupted and
+   * resumed (#125). Absent on every chunk of a stream that was never
+   * interrupted, so a consumer that has never heard of it sees exactly the
+   * stream it always saw.
+   *
+   * **Resumption does not restart the stream; it continues it.** A resumed
+   * delivery is the *same* `IRChatStream` -- one `start`, one terminal chunk --
+   * with a gap in *time*, never a gap in *numbering*. The chunk carrying this
+   * marker has `sequence === resumedFrom.sequence + 1`: `resumedFrom.sequence`
+   * is the last sequence the consumer had before the interruption, and the
+   * contiguity rule on {@link BaseStreamChunk.sequence} holds straight through
+   * the join. A resumed stream does not renumber from 0, does not repeat the
+   * `start` chunk, and does not replay chunks the consumer already holds -- a
+   * transport that must replay to rebuild its own state de-duplicates by
+   * `sequence` before the stream reaches the IR consumer.
+   *
+   * What the marker is for: a consumer that cares that this reply was recovered
+   * (a UI marking it, a durability layer deciding whether to trust it) no
+   * longer has to carry that fact out of band. What it is deliberately *not*:
+   * a resume key. The identifier a far side uses to find the generation to
+   * replay from is a per-stream id, which this IR does not have;
+   * `IRMetadata.requestId` is stable across retries and fallbacks and cannot
+   * serve. Where a transport needs a key it carries it in its own envelope.
+   *
+   * `validateStreamContract()` in `@johnhenry/aimatey-utils` rejects a marker
+   * whose `sequence` is not `resumedFrom.sequence + 1`.
+   */
+  readonly resumedFrom?: {
+    /** The last `sequence` the consumer held before the interruption. */
+    readonly sequence: number;
+  };
 }
 
 /**
@@ -1474,6 +1563,9 @@ export interface StreamContentChunk extends BaseStreamChunk {
    * Incremental text delta (new content only).
    * ALWAYS present for maximum compatibility.
    * Contains only the text generated in this chunk.
+   *
+   * **The deltas are the text of the stream** (#119). Concatenating every
+   * `delta` of a stream, in order, yields the text the stream delivered.
    */
   readonly delta: string;
 
@@ -1481,6 +1573,23 @@ export interface StreamContentChunk extends BaseStreamChunk {
    * Accumulated text (full content so far).
    * Optional - provided when backend is configured for accumulated mode.
    * Contains all text generated from the start up to and including this chunk.
+   *
+   * **A guarantee, not a hint** (#119). When present, `accumulated` MUST equal
+   * the concatenation of every `delta` up to and including this chunk. It is a
+   * convenience for consumers that replace text rather than append it, and a
+   * consumer may rely on it as a checksum on the deltas. Two consequences:
+   *
+   * - A producer that cannot keep it equal to the running delta sum -- a
+   *   transform applied to one channel and not the other -- must omit it, not
+   *   send a divergent one.
+   * - A proxy may drop `accumulated` (it is a full copy of the reply on every
+   *   chunk, quadratic in the answer's length) but must drop it from **every**
+   *   chunk of the stream, never some. A consumer must always be able to fall
+   *   back to concatenating `delta`s, and one that was reading `accumulated`
+   *   must do so the moment it stops arriving.
+   *
+   * See {@link StreamDoneChunk.message} for which channel wins on a
+   * disagreement.
    */
   readonly accumulated?: string;
 
@@ -1549,6 +1658,26 @@ export interface StreamDoneChunk extends BaseStreamChunk {
   readonly type: 'done';
   readonly finishReason: FinishReason;
   readonly usage?: IRUsage;
+
+  /**
+   * The assembled assistant message -- the producing side's own statement of
+   * what the model produced (#119).
+   *
+   * **Precedence.** When present, `message` is authoritative: its text MUST
+   * equal the concatenation of the stream's `delta`s (and the last
+   * `accumulated`, if any). It is assembled by the side that talked to the
+   * provider, so it is the one account of the reply that is independent of what
+   * survived the wire -- effectively a free checksum on the deltas. A consumer
+   * that finds the two disagree has not found a model fault but a **transport
+   * fault** (a dropped, reordered or corrupted chunk) and should treat the
+   * delta-built text as damaged and `message` as the reply. When `message` is
+   * absent the deltas are all there is, and a consumer builds the reply from
+   * them.
+   *
+   * Optional only for backward compatibility; every shipped backend sets it.
+   * `validateStreamContract()` in `@johnhenry/aimatey-utils` reports a
+   * disagreement, and `BridgeConfig.onContractViolation` surfaces it live.
+   */
   readonly message?: IRMessage;
 }
 
@@ -1582,6 +1711,22 @@ export type IRStreamChunk =
  *
  * Yields IR stream chunks as they arrive from the backend.
  *
+ * **Termination contract** (#126). A stream MUST end with exactly one terminal
+ * chunk -- `done` or `error` -- and nothing after it. An iterator that completes
+ * without one has not finished; it has been cut off (a socket that closed
+ * cleanly mid-answer, a relay that dropped the tail), and to a consumer a
+ * fluent but truncated answer is indistinguishable from a complete one, which
+ * is the worst available failure mode for a chat UI. A stream that cannot
+ * complete says so with an `error` chunk; it does not simply stop.
+ *
+ * The contract is enforced where streams enter the library, not hoped for:
+ * `Bridge` and `Router` run every backend stream through
+ * `withTerminationGuard()` (`@johnhenry/aimatey-utils`), which turns a silent
+ * end into a terminal `error` chunk with `code: 'stream-truncated'`, numbered
+ * as the next sequence, and (in the `Router`) counts it as a backend failure.
+ * A cancelled request (aborted `signal`) is exempt: stopping is not truncation.
+ * `validateStreamContract()` checks the same rule over a recorded stream.
+ *
  * @example
  * ```typescript
  * async function processStream(stream: IRChatStream) {
@@ -1605,3 +1750,82 @@ export type IRStreamChunk =
  * ```
  */
 export type IRChatStream = AsyncGenerator<IRStreamChunk, void, undefined>;
+
+// ============================================================================
+// Stream contract violations
+// ============================================================================
+
+/**
+ * Which rule of the stream contract a stream broke.
+ *
+ * - `missing-terminal` -- the stream ended without a `done` or `error` chunk (#126).
+ * - `chunk-after-terminal` -- a chunk followed the terminal chunk (#126).
+ * - `accumulated-mismatch` -- a chunk's `accumulated` is not the running sum of
+ *   `delta`s (#119).
+ * - `done-message-mismatch` -- `done.message`'s text is not the sum of `delta`s (#119).
+ * - `resumed-sequence-mismatch` -- a `resumedFrom` marker does not continue the
+ *   numbering (#125).
+ */
+export type StreamContractViolationCode =
+  | 'missing-terminal'
+  | 'chunk-after-terminal'
+  | 'accumulated-mismatch'
+  | 'done-message-mismatch'
+  | 'resumed-sequence-mismatch';
+
+/**
+ * A single breach of the `IRChatStream` contract, as reported by
+ * `validateStreamContract()`, `withTerminationGuard()` and
+ * `BridgeConfig.onContractViolation`.
+ */
+export interface StreamContractViolation {
+  readonly code: StreamContractViolationCode;
+  readonly message: string;
+  /** `sequence` of the offending chunk, or of the last chunk seen for `missing-terminal`. */
+  readonly sequence?: number;
+}
+
+// ============================================================================
+// JSON
+// ============================================================================
+
+/**
+ * A JSON primitive.
+ */
+export type JsonPrimitive = string | number | boolean | null;
+
+/**
+ * A value that survives `JSON.stringify` / `JSON.parse` unchanged.
+ *
+ * The IR is **JSON-shaped throughout**: no `Date`, `Map`, `Set`, `Blob`,
+ * `Uint8Array` or function appears in any IR type, so an `IRChatRequest`,
+ * `IRChatResponse` or `IRStreamChunk` can cross any transport as JSON (#118).
+ * The only places the type system does not say so are the free-form bags, which
+ * are `unknown`-valued: `IRMetadata.custom`, `IRParameters.custom`,
+ * `ToolUseContent.input`, `IRWarning.details`/`originalValue`/`transformedValue`,
+ * `StreamErrorChunk.error.details` and the `raw` provider payloads.
+ *
+ * **Contract:** those bags are JSON-valued *by contract*. Putting a `Date`, a
+ * class instance, a function, a `bigint`, a `NaN` or a cycle in one is a caller
+ * bug -- a transport is entitled to fail on it or silently mangle it -- not a
+ * library limitation. They stay typed `unknown` rather than `JsonValue` in this
+ * release because tightening them rejects every existing caller that stores a
+ * class instance or an optional `undefined` property (a breaking change for the
+ * whole ecosystem of 30 adapters and their consumers); `assertJsonSerializable()`
+ * and `findNonJsonValues()` in `@johnhenry/aimatey-utils` give a transport one
+ * shared answer in the meantime, and are the migration path to typing the bags
+ * `JsonValue` at the next major.
+ *
+ * **`undefined` means absent, everywhere in the IR.** `{ a: undefined }` and
+ * `{}` are the same claim; `JSON.stringify` drops the key and nothing in the IR
+ * may depend on telling the two apart. `JsonValue` therefore has no `undefined`
+ * member -- use the optional property (`a?: JsonValue`) to say "may be absent".
+ * (An `undefined` inside an *array* is not absent -- JSON turns it into
+ * `null` -- and `findNonJsonValues()` flags it.)
+ */
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+
+/**
+ * A JSON object: the shape of the IR's free-form bags once tightened.
+ */
+export type JsonObject = { [key: string]: JsonValue };

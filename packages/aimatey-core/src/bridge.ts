@@ -49,6 +49,9 @@ import {
   validateIRChatRequest,
   validateDecisionRequest,
   validateDecisionResponse,
+  assertNoUnresolvedBlobRefs,
+  withTerminationGuard,
+  monitorStreamContract,
   createGenerateObject,
   createStreamObject,
 } from '@johnhenry/aimatey-utils';
@@ -159,6 +162,7 @@ export class Bridge<
       autoRequestId: config.autoRequestId ?? true,
       defaultModel: config.defaultModel,
       routerConfig: config.routerConfig,
+      onContractViolation: config.onContractViolation,
       custom: config.custom,
     };
     this.middlewareStack = new MiddlewareStack();
@@ -242,6 +246,7 @@ export class Bridge<
           // Non-null: chat() and executeIR() both check `backend.execute` exists
           // before reaching this closure -- TS narrowing doesn't survive the
           // closure boundary, so this asserts what the earlier guard verified.
+          this.assertBlobRefsResolved(context.request);
           const response = await this.backend.execute!(context.request, options?.signal);
           this.narrowContextBackend(context, response.metadata.provenance?.backend);
           return response;
@@ -412,14 +417,7 @@ export class Bridge<
       // request rewrites a middleware performed actually reach the backend.
       const irStream = await this.middlewareStack.executeStream(context, () =>
         // Call backend adapter streaming
-        Promise.resolve(
-          this.trackContextBackend(
-            // Non-null: chatStream() and executeIRStream() both check
-            // `backend.executeStream` exists before reaching this point.
-            this.backend.executeStream!(context.request, options?.signal),
-            context
-          )
-        )
+        Promise.resolve(this.dispatchStream(context, options?.signal))
       );
 
       // Step 7: Stamp provenance, then convert IR stream to frontend format.
@@ -428,9 +426,12 @@ export class Bridge<
       // in agreement about who served the request (#68).
       let servedBy: string | undefined;
       const frontendStream = this.requireChatFrontend().fromIRStream(
-        this.captureStreamBackend(this.enrichStream(irStream), (name) => {
-          servedBy = name;
-        })
+        this.captureStreamBackend(
+          this.enrichStream(this.guardStream(irStream, options?.signal)),
+          (name) => {
+            servedBy = name;
+          }
+        )
       );
 
       // Step 8: Yield chunks to caller
@@ -906,6 +907,7 @@ export class Bridge<
       // Non-null: chat() and executeIR() both check `backend.execute` exists
       // before reaching this closure -- TS narrowing doesn't survive the
       // closure boundary, so this asserts what the earlier guard verified.
+      this.assertBlobRefsResolved(context.request);
       const response = await this.backend.execute!(context.request, options?.signal);
       this.narrowContextBackend(context, response.metadata.provenance?.backend);
       return response;
@@ -951,16 +953,10 @@ export class Bridge<
     );
 
     const irStream = await this.middlewareStack.executeStream(context, () =>
-      Promise.resolve(
-        this.trackContextBackend(
-          // Non-null: the guard above already verified this exists.
-          this.backend.executeStream!(context.request, options?.signal),
-          context
-        )
-      )
+      Promise.resolve(this.dispatchStream(context, options?.signal))
     );
 
-    for await (const chunk of this.enrichStream(irStream)) {
+    for await (const chunk of this.enrichStream(this.guardStream(irStream, options?.signal))) {
       if (options?.signal?.aborted) {
         break;
       }
@@ -1543,6 +1539,64 @@ export class Bridge<
     if (selected) {
       context.backend = selected;
     }
+  }
+
+  /**
+   * Refuse a request that still carries an unresolved blob reference (#122).
+   *
+   * Runs after request middleware -- the place a transport resolves its own
+   * handles -- so it checks what the backend would actually receive. A backend
+   * that declares `capabilities.blobRefs` resolves them itself. A {@link Router}
+   * performs the same check against each backend it picks, so a bridge over a
+   * router leaves it to the router.
+   */
+  private assertBlobRefsResolved(request: IRChatRequest): void {
+    if (this.getRouter() !== null) {
+      return;
+    }
+    assertNoUnresolvedBlobRefs(
+      request,
+      this.backend.metadata.name,
+      this.backend.metadata.capabilities
+    );
+  }
+
+  /**
+   * Start the backend's stream for a (post-middleware) streaming context, with
+   * the stream contract applied at the source: a stream that ends without a
+   * terminal chunk is closed with a `stream-truncated` error chunk (#126), and
+   * -- when {@link BridgeConfig.onContractViolation} is set -- text
+   * consistency and resumption are checked as the chunks pass (#119, #125).
+   */
+  private dispatchStream(context: MiddlewareContext, signal?: AbortSignal): IRChatStream {
+    this.assertBlobRefsResolved(context.request);
+    const { onContractViolation } = this.config;
+    // Non-null: chatStream() and executeIRStream() both check
+    // `backend.executeStream` exists before reaching this point.
+    const raw = this.backend.executeStream!(context.request, signal);
+    const watched = onContractViolation ? monitorStreamContract(raw, onContractViolation) : raw;
+    return this.trackContextBackend(
+      withTerminationGuard(watched, {
+        signal,
+        onViolation: onContractViolation,
+        backend: this.backend.metadata.name,
+      }),
+      context
+    );
+  }
+
+  /**
+   * Re-apply the termination guard to what the stream middleware chain handed
+   * back: a middleware that drops or swallows the terminal chunk must not be
+   * able to hand the consumer an unterminated stream. Idempotent for a stream
+   * that already honours the contract.
+   */
+  private guardStream(stream: IRChatStream, signal?: AbortSignal): IRChatStream {
+    return withTerminationGuard(stream, {
+      signal,
+      onViolation: this.config.onContractViolation,
+      backend: this.backend.metadata.name,
+    });
   }
 
   /**

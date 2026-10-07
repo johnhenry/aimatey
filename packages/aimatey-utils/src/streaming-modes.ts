@@ -196,7 +196,11 @@ export async function* convertStreamMode(
  * @param chunk Source content chunk
  * @param targetMode Target streaming mode
  * @param state Accumulator state (updated in place)
- * @param transform Optional transform function
+ * @param transform Optional transform function. Applied to `accumulated` only, so
+ *   a transform that changes the text makes `accumulated` stop equalling the sum of
+ *   the `delta`s -- which the stream contract (`StreamContentChunk.accumulated`)
+ *   forbids. Use it for display-only streams that never reach a contract checker,
+ *   or not at all.
  * @returns Converted content chunk
  */
 export function convertChunkMode(

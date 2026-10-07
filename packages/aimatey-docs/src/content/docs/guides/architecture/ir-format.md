@@ -69,12 +69,22 @@ interface ImageContent {
   type: 'image';
   source:
     | { type: 'url'; url: string }
-    | { type: 'base64'; mediaType: string; data: string };
+    | { type: 'base64'; mediaType: string; data: string }
+    | { type: 'ref'; ref: string; mediaType?: string; bytes?: number };
 }
 ```
 
 `AudioContent`, `DocumentContent` and `VideoContent` follow the same
 `{ type, source }` shape.
+
+A `ref` source names a payload a transport moves over its own blob channel; the
+handle is opaque and is never fetched. **The transport must resolve it to a `url`
+or `base64` source before the request reaches a backend.** Anything that cannot
+resolve one refuses it with `UNSUPPORTED_FEATURE` - it is never dropped and never
+sent to a provider as data. `Bridge` and `Router` enforce this after request
+middleware has run (`assertNoUnresolvedBlobRefs()`); a backend that resolves
+handles itself declares `capabilities.blobRefs: true`. Decision requests follow
+the same rule, and must be resolved before `decide()` is called.
 
 ### Tool Use Content
 
@@ -258,6 +268,26 @@ interface StreamDoneChunk {
 `StreamMetadataChunk` (`usage` / `metadata` updates) and `StreamErrorChunk`
 (`error: { code, message, details? }`) complete the union.
 
+### Stream contract
+
+- **Sequence.** `sequence` starts at 0 and increases by exactly 1 per chunk, across
+  every chunk type, through the terminal chunk. `validateChunkSequence()` checks it.
+- **Termination.** A stream ends with exactly one `done` or `error` chunk. An
+  iterator that completes without one has been cut off, not finished. `Bridge` and
+  `Router` apply `withTerminationGuard()`, which closes it with an `error` chunk
+  (`code: 'stream-truncated'`, next sequence); the router counts that as a backend
+  failure. A cancelled request is exempt.
+- **Authoritative text.** The `delta`s, concatenated, are the text. `accumulated`,
+  when present, MUST equal the running sum of the deltas (a proxy may drop it, but
+  from every chunk or none). `done.message`, when present, is authoritative: it
+  MUST equal the delta sum, and a disagreement is a transport fault, not a model
+  fault. `validateStreamContract()` checks all of this; set
+  `BridgeConfig.onContractViolation` to have the bridge check live.
+- **Resumption.** A resumed stream is the same stream: numbering continues, `start`
+  is not repeated. The first chunk after the join may carry
+  `resumedFrom: { sequence }` (the last sequence the consumer held); its own
+  `sequence` must be `resumedFrom.sequence + 1`.
+
 ### Streaming Modes
 
 **Delta mode (default)** - each chunk carries only the new text:
@@ -291,6 +321,17 @@ for await (const chunk of stream) {
   }
 }
 ```
+
+## Serialization
+
+The IR is JSON-shaped throughout - no `Date`, `Map`, `Blob`, `Uint8Array` or
+function appears in any IR type - so it can cross any transport as JSON. The
+free-form bags (`metadata.custom`, `parameters.custom`, tool `input`, warning
+`details`, `raw`) are typed `unknown` but are JSON-valued **by contract**; `undefined`
+means absent everywhere. `JsonValue` is the type of such a value, and
+`assertJsonSerializable()` / `findNonJsonValues()` in `@johnhenry/aimatey-utils` check it
+(with the path of each offender) so a transport does not hand-write its own walker.
+The bags move to `JsonValue` at the next major.
 
 ## Tools & Function Calling
 

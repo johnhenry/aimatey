@@ -30,7 +30,7 @@ import {
   ErrorCode,
   createErrorFromHttpResponse,
 } from '@johnhenry/aimatey-errors';
-import { normalizeSystemMessages } from '@johnhenry/aimatey-utils';
+import { normalizeSystemMessages, requireResolvedContent } from '@johnhenry/aimatey-utils';
 import { getModelCache } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
 import { getModelPricingInfo } from '@johnhenry/aimatey-utils';
@@ -917,7 +917,8 @@ export class OpenAIBackendAdapter implements BackendAdapter<OpenAIRequest, OpenA
     if (otherBlocks.length > 0 || toolUses.length > 0) {
       const content: OpenAIMessageContent =
         otherBlocks.length > 0
-          ? otherBlocks.map((block) => {
+          ? otherBlocks.map((rawBlock) => {
+              const block = requireResolvedContent(rawBlock, 'openai-backend');
               switch (block.type) {
                 case 'text':
                   return { type: 'text' as const, text: block.text };

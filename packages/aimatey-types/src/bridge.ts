@@ -17,7 +17,7 @@ import type {
 } from './adapters.js';
 import type { Router, RouterConfig } from './router.js';
 import type { Middleware, StreamingMiddleware } from './middleware.js';
-import type { IRChatRequest, IRChatResponse } from './ir.js';
+import type { IRChatRequest, IRChatResponse, StreamContractViolation } from './ir.js';
 
 // ============================================================================
 // Bridge Configuration
@@ -60,6 +60,21 @@ export interface BridgeConfig {
    * @default true
    */
   readonly autoRequestId?: boolean;
+
+  /**
+   * Called when a streamed response breaks the `IRChatStream` contract
+   * (#126, #119, #125): it ended without a terminal chunk (the bridge then
+   * synthesizes a `stream-truncated` error chunk), `accumulated` or
+   * `done.message` disagrees with the sum of the deltas, or a resumption marker
+   * does not continue the numbering.
+   *
+   * Setting it is the dev/test-mode switch: the text-consistency checks cost a
+   * string comparison per chunk, so they run only when a callback is supplied.
+   * The termination guard always runs; this callback is merely told when it
+   * fired. A callback that throws is ignored -- a diagnostic hook must not be
+   * able to fail a stream.
+   */
+  readonly onContractViolation?: (violation: StreamContractViolation) => void;
 
   /**
    * Custom configuration options.
