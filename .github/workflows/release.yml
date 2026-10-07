@@ -4,7 +4,8 @@ on:
   release:
     types: [published]
   # Manual trigger from the Actions tab (publishes whatever versions are on
-  # the selected branch; changeset-versioned packages skip nothing)
+  # the selected branch; versions already on the registry are skipped, so a
+  # re-dispatch only publishes what is missing)
   workflow_dispatch:
 
 permissions:
@@ -21,7 +22,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '26'
           cache: 'npm'
 
       - name: Install dependencies
@@ -52,7 +53,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '26'
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
 
@@ -72,3 +73,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           DELAY_BETWEEN_PACKAGES: '2'
           DELAY_BETWEEN_BATCHES: '5'
+          # Post-publish `npm view` polling; the script exits non-zero (and
+          # so fails this job) if any published version never appears.
+          VERIFY_TIMEOUT: '10'
+          VERIFY_INTERVAL: '20'
