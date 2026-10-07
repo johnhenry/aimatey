@@ -1,28 +1,41 @@
 name: Release
 
+# Publish model: main is the release branch. See johnhenry/workflows' README.
+# On every push to main, changesets/action either opens/updates the
+# "Version Packages" PR (when changesets are pending) or, when that PR has just
+# been merged, runs scripts/staggered-publish.sh. Versions already on the
+# registry are skipped, so re-runs are safe. The action creates a git tag and a
+# GitHub Release per published package; nobody creates those by hand.
 on:
-  release:
-    types: [published]
-  # Manual trigger from the Actions tab (publishes whatever versions are on
-  # the selected branch; versions already on the registry are skipped, so a
-  # re-dispatch only publishes what is missing)
-  workflow_dispatch:
+  push:
+    branches: [main]
+  # Re-run from the Actions tab: publishes whatever versions are missing.
+  workflow_dispatch: {}
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write # version-bump commit, tags, GitHub Releases
+  pull-requests: write # the "Version Packages" PR
+  id-token: write # npm provenance / trusted publishing
 
 jobs:
-  validate:
-    name: Validate Release
+  release:
+    name: Version PR or Publish
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # changesets diffs against the base branch
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '26'
+          registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
 
       - name: Install dependencies
@@ -42,44 +55,22 @@ jobs:
       - name: Run tests
         run: npm test
 
-  publish-npm:
-    name: Publish to NPM
-    runs-on: ubuntu-latest
-    # id-token: write lets npm publish through trusted publishing (each
-    # package trusts this repo's release.yml) and sign provenance.
-    # NPM_TOKEN below is only a fallback until it's removed.
-    permissions:
-      contents: read
-      id-token: write
-    needs: validate
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Version PR or publish
+        uses: changesets/action@v1
         with:
-          node-version: '26'
-          registry-url: 'https://registry.npmjs.org'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build project
-        run: npm run build
-
-      - name: Publish to NPM (workspaces, dependency order)
-        # The root package is private; publish every workspace via the
-        # staggered script. npm auth comes from setup-node's registry-url
-        # + NODE_AUTH_TOKEN. Shorter delays than local defaults — CI runners
-        # rarely trip npm rate limits.
-        run: ./scripts/staggered-publish.sh
+          version: npm run version-packages
+          # The root package is private; the staggered script publishes every
+          # workspace in dependency order, then verifies each version on the
+          # registry (exits non-zero if one never appears).
+          publish: ./scripts/staggered-publish.sh
+          title: 'chore: version packages'
+          commit: 'chore: version packages'
+          createGithubReleases: true
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
           DELAY_BETWEEN_PACKAGES: '2'
           DELAY_BETWEEN_BATCHES: '5'
-          # Post-publish `npm view` polling; the script exits non-zero (and
-          # so fails this job) if any published version never appears.
           VERIFY_TIMEOUT: '10'
           VERIFY_INTERVAL: '20'
