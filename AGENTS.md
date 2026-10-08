@@ -128,9 +128,11 @@ history across all packages (it keeps its own `[Unreleased]` /
 no single number describes 23 independently-versioned packages); each
 package's own `readme.md`/`CHANGELOG.md` records its specific version
 history. Releases use [Changesets](https://github.com/changesets/changesets)
-(`npm run changeset` → `npm run version-packages` → `npm run release`, i.e.
-`turbo run build && changeset publish`) for normal releases. A separate
-`npm run release:staggered` (`scripts/staggered-publish.sh`) exists because
+(`npm run changeset` in the PR → merge → the "Version Packages" PR opened by
+`changesets/action` → merge → publish by `scripts/staggered-publish.sh`, which prints
+`New tag:` lines so the action creates per-package tags + Releases; see
+`docs/PUBLISHING.md`, including the required repo setting "Allow GitHub Actions to
+create and approve pull requests"). The staggered script is what CI runs, because
 Changesets' own `changeset publish` does not throttle -- publishing all 23
 packages at once previously hit npm rate limits -- but its batch order is a
 **hardcoded** 11-batch list in the script, not derived from the workspace
