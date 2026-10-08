@@ -76,7 +76,7 @@ publish_package() {
       echo "New tag:  $pkg@$version"
       SUCCESS=$((SUCCESS + 1))
       PUBLISHED_PACKAGES+=("$pkg")
-    elif echo "$output" | grep -qE "EPUBLISHCONFLICT|cannot publish over (the )?previously published"; then
+    elif echo "$output" | grep -qE "EPUBLISHCONFLICT|E409|previously staged version|cannot publish over (the )?previously published"; then
       # Version already on the registry — unchanged this release, or a re-run
       echo -e "  ${YELLOW}↷ Already published (version exists on registry)${NC}"
       SKIPPED=$((SKIPPED + 1))
