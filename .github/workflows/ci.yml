@@ -75,9 +75,6 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Test release scripts
-        run: node --test scripts/verify-published.test.mjs
-
       - name: Generate coverage report
         if: matrix.node-version == 26
         run: npm run test:coverage

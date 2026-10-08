@@ -12,14 +12,11 @@
 # Configuration:
 #   DELAY_BETWEEN_PACKAGES - seconds between each package (default: 5)
 #   DELAY_BETWEEN_BATCHES  - seconds between batches (default: 30)
-#   VERIFY_TIMEOUT         - minutes to poll the registry after publishing (default: 10)
-#   VERIFY_INTERVAL        - seconds between registry polls (default: 20)
 #
 # Re-running is safe: versions already on the registry are reported as
 # "already published" (not failures), so a re-dispatch only publishes what is
-# missing. After all batches, every package is checked with `npm view`
-# (scripts/verify-published.mjs); the script exits non-zero if any version
-# never appears.
+# missing. Registry verification happens in the release workflow, right after
+# this script (johnhenry/workflows' verify-published action).
 #
 
 set -e
@@ -30,9 +27,6 @@ PROVENANCE="${GITHUB_ACTIONS:+--provenance}"
 # Configuration
 DELAY_BETWEEN_PACKAGES=${DELAY_BETWEEN_PACKAGES:-5}
 DELAY_BETWEEN_BATCHES=${DELAY_BETWEEN_BATCHES:-30}
-VERIFY_TIMEOUT=${VERIFY_TIMEOUT:-10}
-VERIFY_INTERVAL=${VERIFY_INTERVAL:-20}
-export VERIFY_TIMEOUT VERIFY_INTERVAL
 DRY_RUN=false
 
 # Parse arguments
@@ -311,19 +305,6 @@ if [ ${#FAILED_PACKAGES[@]} -gt 0 ]; then
     echo "  npm publish --workspace=$pkg --access public $PROVENANCE"
   done
   exit 1
-fi
-
-# ============================================================================
-# Post-publish verification: `npm publish` can report success for a version
-# the registry never stores, so confirm everything is really visible.
-# ============================================================================
-if ! $DRY_RUN; then
-  echo ""
-  echo -e "${YELLOW}Verifying versions on the registry (timeout ${VERIFY_TIMEOUT} min)...${NC}"
-  if ! node scripts/verify-published.mjs "${PUBLISHED_PACKAGES[@]}" "${ALREADY_PUBLISHED[@]}"; then
-    echo -e "${RED}Verification failed: see missing packages above.${NC}"
-    exit 1
-  fi
 fi
 
 echo ""
