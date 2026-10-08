@@ -63,11 +63,12 @@ no-cancel concurrency, missing `id-token: write`, Node pin not matching
 
 ## Verification
 
-After the last batch `staggered-publish.sh` polls
-`npm view <name>@<version> version` for every package (version read from its
-`package.json`) until it appears, or `VERIFY_TIMEOUT` minutes pass (default 10,
-polling every `VERIFY_INTERVAL` seconds, default 20). It prints a table and
-exits non-zero, failing the job, if any version never appears.
+After the publish step the release workflow runs the shared
+`johnhenry/workflows/.github/actions/verify-published@v1` action (with
+`from-workspaces: true`). It polls `npm view <name>@<version> version` for every
+workspace package (version read from its `package.json`) until it appears, or 10
+minutes pass (polling every 20 seconds). It prints a table and fails the job if
+any version never appears. It only runs when changesets actually published.
 
 ## Re-running / recovering
 
@@ -83,13 +84,10 @@ report success for a version the registry never stores (seen with
 
 ```bash
 npm run release:staggered:dry-run                  # no publish, no verification
-node --test scripts/verify-published.test.mjs      # verification logic, mocked npm
-node scripts/verify-published.mjs @johnhenry/aimatey-core   # check one package
 ```
 
 Script configuration (environment): `DELAY_BETWEEN_PACKAGES` (5),
-`DELAY_BETWEEN_BATCHES` (30), `VERIFY_TIMEOUT` (10, minutes),
-`VERIFY_INTERVAL` (20, seconds).
+`DELAY_BETWEEN_BATCHES` (30).
 
 ## Adding a new package
 
