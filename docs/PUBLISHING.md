@@ -20,9 +20,25 @@ cause a publish. The root package is private; every workspace is published by
 3. **Merge the Version Packages PR.** That push to `main` is the release: the
    same workflow runs again, finds no pending changesets, and runs the
    `publish` command, `./scripts/staggered-publish.sh`.
-4. **Tags and Releases are by-products.** After a successful publish the action
-   pushes a git tag and creates a GitHub Release for each published package
-   (`createGithubReleases: true`).
+4. **Tags and Releases are by-products.** Because publishing goes through
+   `scripts/staggered-publish.sh` rather than `changeset publish`, the script
+   itself prints a `New tag:  <name>@<version>` line and creates the local tag
+   for every package it newly publishes; the action parses those lines, pushes
+   the tags and creates one GitHub Release per package
+   (`createGithubReleases: true`). Skipped or failed packages emit no tag line.
+
+**One-time repository requirement.** `changesets/action` opens the Version Packages
+PR with `GITHUB_TOKEN`, which needs both `permissions: pull-requests: write` on the job
+(already set in the workflow) and the repo setting *Settings > Actions > General >
+"Allow GitHub Actions to create and approve pull requests"*. Without the setting the run
+fails at `creating pull request` ("GitHub Actions is not permitted to create or approve
+pull requests"). Check / enable:
+
+```bash
+gh api repos/johnhenry/aimatey/actions/permissions/workflow
+gh api -X PUT repos/johnhenry/aimatey/actions/permissions/workflow \
+  -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true
+```
 
 Pushes to `main` with no pending changesets and no new versions publish
 nothing: every package is reported as already published and the run is green.
