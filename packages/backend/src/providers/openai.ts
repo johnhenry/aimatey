@@ -460,6 +460,22 @@ export class OpenAIBackendAdapter implements BackendAdapter<OpenAIRequest, OpenA
         } as IRStreamChunk;
       };
 
+      // Terminal error chunk; retryable only where StreamError says so
+      const streamFailure = (
+        code: (typeof ErrorCode)[keyof typeof ErrorCode],
+        message: string,
+        details: Record<string, unknown> = {}
+      ): IRStreamChunk =>
+        ({
+          type: 'error',
+          sequence: sequence++,
+          error: {
+            code,
+            message,
+            details: { ...details, retryable: code === ErrorCode.STREAM_INTERRUPTED },
+          },
+        }) as IRStreamChunk;
+
       // Yield start chunk
       yield {
         type: 'start',
@@ -483,13 +499,20 @@ export class OpenAIBackendAdapter implements BackendAdapter<OpenAIRequest, OpenA
       try {
         while (true) {
           const { done, value } = await reader.read();
-          if (done) {
-            break;
-          }
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+          let lines: string[];
+          const streamEnded = done;
+          if (done) {
+            // Flush a final line that arrived without a trailing newline so a
+            // bare `data: [DONE]` is not mistaken for a truncated stream.
+            buffer += decoder.decode();
+            lines = buffer.trim() ? [buffer] : [];
+            buffer = '';
+          } else {
+            buffer += decoder.decode(value, { stream: true });
+            lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+          }
 
           for (const line of lines) {
             // Skip empty lines
@@ -509,9 +532,42 @@ export class OpenAIBackendAdapter implements BackendAdapter<OpenAIRequest, OpenA
                 continue;
               }
 
+              let chunk: OpenAIStreamChunk & { error?: unknown };
               try {
-                const chunk: OpenAIStreamChunk = JSON.parse(data);
+                chunk = JSON.parse(data);
+              } catch (parseError) {
+                // A garbled frame means the content can no longer be trusted
+                // to be complete: fail the stream instead of skipping it.
+                yield streamFailure(
+                  ErrorCode.STREAM_PARSE_ERROR,
+                  `Failed to parse SSE chunk from ${this.metadata.name}: ${
+                    parseError instanceof Error ? parseError.message : String(parseError)
+                  }`,
+                  { data: data.slice(0, 200) }
+                );
+                return;
+              }
 
+              // In-stream error event: `data: {"error":{"message":...}}`
+              if (chunk && typeof chunk === 'object' && chunk.error) {
+                const err = chunk.error as Record<string, unknown> | string;
+                const details: Record<string, unknown> =
+                  typeof err === 'object' ? { type: err.type, code: err.code } : {};
+                const message =
+                  typeof err === 'string'
+                    ? err
+                    : typeof err.message === 'string'
+                      ? err.message
+                      : JSON.stringify(err);
+                yield streamFailure(
+                  ErrorCode.PROVIDER_ERROR,
+                  `${this.metadata.name} stream error: ${message}`,
+                  details
+                );
+                return;
+              }
+
+              try {
                 // Final usage chunk (stream_options.include_usage) has empty choices
                 if (chunk.usage) {
                   usage = {
@@ -596,9 +652,9 @@ export class OpenAIBackendAdapter implements BackendAdapter<OpenAIRequest, OpenA
                 if (choice.finish_reason && !finishReasonReceived) {
                   finishReasonReceived = this.mapFinishReason(choice.finish_reason);
                 }
-              } catch (parseError) {
-                // Log parse errors but continue streaming
-                console.warn('Failed to parse SSE chunk:', data, parseError);
+              } catch (processError) {
+                // Chunk was valid JSON but unusable; keep streaming
+                console.warn('Failed to process SSE chunk:', data, processError);
                 continue;
               }
             } else if (line.startsWith('event:')) {
@@ -610,11 +666,25 @@ export class OpenAIBackendAdapter implements BackendAdapter<OpenAIRequest, OpenA
               }
             }
           }
+
+          if (streamEnded) {
+            break;
+          }
         }
 
-        // If stream ended without a [DONE] sentinel, yield the done chunk
+        // Stream ended without a [DONE] sentinel. A finish_reason means the
+        // model completed (some compatible servers omit the sentinel); with
+        // neither, the connection was cut short and the output is incomplete.
         if (!doneYielded) {
-          yield buildDoneChunk();
+          if (finishReasonReceived) {
+            yield buildDoneChunk();
+          } else {
+            yield streamFailure(
+              ErrorCode.STREAM_INTERRUPTED,
+              `${this.metadata.name} stream ended before completion (no finish_reason or [DONE])`,
+              { partialLength: contentBuffer.length }
+            );
+          }
         }
       } finally {
         reader.releaseLock();
