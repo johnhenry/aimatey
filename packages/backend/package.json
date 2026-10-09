@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-backend",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Backend provider adapters for Aimatey - Universal AI Adapter System",
   "type": "module",
   "main": "./dist/cjs/index.js",
