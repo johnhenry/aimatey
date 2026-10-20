@@ -13,7 +13,6 @@ import {
   CloudflareBackendAdapter,
   DeepInfraBackendAdapter,
   FireworksAIBackendAdapter,
-  OpenRouterBackendAdapter,
   TogetherAIBackendAdapter,
   XAIBackendAdapter,
 } from '@johnhenry/aimatey-backend';
@@ -32,7 +31,6 @@ const ADAPTERS: Array<[string, () => { metadata: { capabilities: { tools?: boole
   ],
   ['DeepInfra', () => new DeepInfraBackendAdapter({ apiKey: 'test-key' })],
   ['Fireworks', () => new FireworksAIBackendAdapter({ apiKey: 'test-key' })],
-  ['OpenRouter', () => new OpenRouterBackendAdapter({ apiKey: 'test-key' })],
   ['Together AI', () => new TogetherAIBackendAdapter({ apiKey: 'test-key' })],
   ['xAI', () => new XAIBackendAdapter({ apiKey: 'test-key' })],
 ];
