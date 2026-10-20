@@ -1,0 +1,1539 @@
+{
+  "$comment": "Hand-maintained source of truth for status, successors, defaults, capabilities and pricing. scripts/generate.mjs layers live provider lists and OpenRouter metadata UNDER these values (overrides always win) and writes catalog.json. Cite sources per provider; bump verifiedOn and pricingAsOf when you re-verify. Prices are USD per 1M tokens. Dates are ISO. A model whose retiresOn/deprecatedOn has passed is promoted to retired/deprecated by the generator.",
+  "providers": {
+    "anthropic": {
+      "label": "Anthropic",
+      "verifiedOn": "2026-10-20",
+      "sources": [
+        "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "https://platform.claude.com/docs/en/about-claude/model-deprecations",
+        "https://platform.claude.com/docs/en/about-claude/pricing"
+      ],
+      "recommended": {
+        "default": "claude-sonnet-5-5",
+        "fast": "claude-haiku-5-5",
+        "best": "claude-opus-5-5"
+      },
+      "modelDefaults": {
+        "capabilities": {
+          "tools": true,
+          "vision": true,
+          "json": true,
+          "streaming": true
+        },
+        "pricingAsOf": "2026-10-20"
+      },
+      "models": {
+        "claude-fable-5-1": {
+          "name": "Claude Fable 5.1",
+          "family": "claude-fable",
+          "status": "current",
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "pricing": {
+            "inputPer1M": 10,
+            "outputPer1M": 50,
+            "cachedInputPer1M": 0.25
+          },
+          "retiresNoSoonerThan": "2027-09-01",
+          "notes": "Most capable; for demanding reasoning and long-horizon agentic work."
+        },
+        "claude-opus-5-5": {
+          "name": "Claude Opus 5.5",
+          "family": "claude-opus",
+          "status": "current",
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "pricing": {
+            "inputPer1M": 4,
+            "outputPer1M": 20,
+            "cachedInputPer1M": 0.2
+          },
+          "retiresNoSoonerThan": "2027-09-22"
+        },
+        "claude-sonnet-5-5": {
+          "name": "Claude Sonnet 5.5",
+          "family": "claude-sonnet",
+          "status": "current",
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "pricing": {
+            "inputPer1M": 2,
+            "outputPer1M": 10,
+            "cachedInputPer1M": 0.1
+          },
+          "retiresNoSoonerThan": "2027-09-28"
+        },
+        "claude-haiku-5-5": {
+          "name": "Claude Haiku 5.5",
+          "family": "claude-haiku",
+          "status": "current",
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "pricing": {
+            "inputPer1M": 0.1,
+            "outputPer1M": 0.5,
+            "cachedInputPer1M": 0.01
+          },
+          "pricingNote": "Prompts over 100,000 tokens bill at 0.50 / 2.50 (cached 0.05).",
+          "retiresNoSoonerThan": "2027-10-07"
+        },
+        "claude-fable-5": {
+          "name": "Claude Fable 5",
+          "family": "claude-fable",
+          "status": "legacy",
+          "successor": "claude-fable-5-1",
+          "contextWindow": 1000000,
+          "pricing": {
+            "inputPer1M": 10,
+            "outputPer1M": 50,
+            "cachedInputPer1M": 1
+          },
+          "retiresNoSoonerThan": "2027-06-09"
+        },
+        "claude-opus-5": {
+          "name": "Claude Opus 5",
+          "family": "claude-opus",
+          "status": "legacy",
+          "successor": "claude-opus-5-5",
+          "contextWindow": 1000000,
+          "pricing": {
+            "inputPer1M": 5,
+            "outputPer1M": 25,
+            "cachedInputPer1M": 0.5
+          },
+          "retiresNoSoonerThan": "2027-07-24"
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5",
+          "family": "claude-sonnet",
+          "status": "legacy",
+          "successor": "claude-sonnet-5-5",
+          "contextWindow": 1000000,
+          "pricing": {
+            "inputPer1M": 2,
+            "outputPer1M": 10,
+            "cachedInputPer1M": 0.2
+          },
+          "retiresNoSoonerThan": "2027-06-30"
+        },
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8",
+          "family": "claude-opus",
+          "status": "legacy",
+          "successor": "claude-opus-5-5",
+          "contextWindow": 1000000,
+          "pricing": {
+            "inputPer1M": 5,
+            "outputPer1M": 25,
+            "cachedInputPer1M": 0.5
+          },
+          "retiresNoSoonerThan": "2027-05-28"
+        },
+        "claude-opus-4-7": {
+          "name": "Claude Opus 4.7",
+          "family": "claude-opus",
+          "status": "legacy",
+          "successor": "claude-opus-5-5",
+          "contextWindow": 1000000,
+          "pricing": {
+            "inputPer1M": 5,
+            "outputPer1M": 25,
+            "cachedInputPer1M": 0.5
+          },
+          "retiresNoSoonerThan": "2027-04-16"
+        },
+        "claude-opus-4-6": {
+          "name": "Claude Opus 4.6",
+          "family": "claude-opus",
+          "status": "legacy",
+          "successor": "claude-opus-5-5",
+          "contextWindow": 1000000,
+          "pricing": {
+            "inputPer1M": 5,
+            "outputPer1M": 25,
+            "cachedInputPer1M": 0.5
+          },
+          "retiresNoSoonerThan": "2027-02-05"
+        },
+        "claude-opus-4-5-20251101": {
+          "name": "Claude Opus 4.5",
+          "family": "claude-opus",
+          "status": "legacy",
+          "successor": "claude-opus-5-5",
+          "pricing": {
+            "inputPer1M": 5,
+            "outputPer1M": 25,
+            "cachedInputPer1M": 0.5
+          },
+          "retiresNoSoonerThan": "2026-11-24"
+        },
+        "claude-sonnet-4-6": {
+          "name": "Claude Sonnet 4.6",
+          "family": "claude-sonnet",
+          "status": "legacy",
+          "successor": "claude-sonnet-5-5",
+          "contextWindow": 1000000,
+          "pricing": {
+            "inputPer1M": 3,
+            "outputPer1M": 15,
+            "cachedInputPer1M": 0.3
+          },
+          "retiresNoSoonerThan": "2027-02-17"
+        },
+        "claude-haiku-4-5-20251001": {
+          "name": "Claude Haiku 4.5",
+          "family": "claude-haiku",
+          "status": "legacy",
+          "successor": "claude-haiku-5-5",
+          "pricing": {
+            "inputPer1M": 1,
+            "outputPer1M": 5,
+            "cachedInputPer1M": 0.1
+          },
+          "retiresNoSoonerThan": "2026-10-15",
+          "notes": "Listed as legacy on the models overview; the deprecations table shows Active with retirement not sooner than 2026-10-15, which has just passed."
+        },
+        "claude-sonnet-4-5-20250929": {
+          "name": "Claude Sonnet 4.5",
+          "family": "claude-sonnet",
+          "status": "deprecated",
+          "deprecatedOn": "2026-09-30",
+          "retiresOn": "2026-11-30",
+          "successor": "claude-sonnet-5-5",
+          "pricing": {
+            "inputPer1M": 3,
+            "outputPer1M": 15,
+            "cachedInputPer1M": 0.3
+          }
+        },
+        "claude-opus-4-1-20250805": {
+          "name": "Claude Opus 4.1",
+          "family": "claude-opus",
+          "status": "retired",
+          "deprecatedOn": "2026-06-05",
+          "retiresOn": "2026-08-05",
+          "successor": "claude-opus-4-8",
+          "pricing": {
+            "inputPer1M": 15,
+            "outputPer1M": 75,
+            "cachedInputPer1M": 1.5
+          }
+        },
+        "claude-opus-4-20250514": {
+          "name": "Claude Opus 4",
+          "family": "claude-opus",
+          "status": "retired",
+          "deprecatedOn": "2026-04-14",
+          "retiresOn": "2026-06-15",
+          "successor": "claude-opus-4-8",
+          "pricing": {
+            "inputPer1M": 15,
+            "outputPer1M": 75,
+            "cachedInputPer1M": 1.5
+          }
+        },
+        "claude-sonnet-4-20250514": {
+          "name": "Claude Sonnet 4",
+          "family": "claude-sonnet",
+          "status": "retired",
+          "deprecatedOn": "2026-04-14",
+          "retiresOn": "2026-06-15",
+          "successor": "claude-sonnet-5-5",
+          "pricing": {
+            "inputPer1M": 3,
+            "outputPer1M": 15,
+            "cachedInputPer1M": 0.3
+          }
+        },
+        "claude-3-7-sonnet-20250219": {
+          "name": "Claude Sonnet 3.7",
+          "family": "claude-sonnet",
+          "status": "retired",
+          "deprecatedOn": "2025-10-28",
+          "retiresOn": "2026-02-19",
+          "successor": "claude-sonnet-5-5"
+        },
+        "claude-3-5-haiku-20241022": {
+          "name": "Claude Haiku 3.5",
+          "family": "claude-haiku",
+          "status": "retired",
+          "deprecatedOn": "2025-12-19",
+          "retiresOn": "2026-02-19",
+          "successor": "claude-haiku-4-5-20251001",
+          "pricing": {
+            "inputPer1M": 0.8,
+            "outputPer1M": 4,
+            "cachedInputPer1M": 0.08
+          }
+        },
+        "claude-3-haiku-20240307": {
+          "name": "Claude Haiku 3",
+          "family": "claude-haiku",
+          "status": "retired",
+          "deprecatedOn": "2026-02-19",
+          "retiresOn": "2026-04-20",
+          "successor": "claude-haiku-4-5-20251001"
+        },
+        "claude-3-5-sonnet-20241022": {
+          "name": "Claude Sonnet 3.5 (v2)",
+          "family": "claude-sonnet",
+          "status": "retired",
+          "deprecatedOn": "2025-08-13",
+          "retiresOn": "2025-10-28",
+          "successor": "claude-sonnet-5-5"
+        },
+        "claude-3-5-sonnet-20240620": {
+          "name": "Claude Sonnet 3.5",
+          "family": "claude-sonnet",
+          "status": "retired",
+          "deprecatedOn": "2025-08-13",
+          "retiresOn": "2025-10-28",
+          "successor": "claude-sonnet-5-5"
+        },
+        "claude-3-opus-20240229": {
+          "name": "Claude Opus 3",
+          "family": "claude-opus",
+          "status": "retired",
+          "deprecatedOn": "2025-06-30",
+          "retiresOn": "2026-01-05",
+          "successor": "claude-opus-4-8"
+        }
+      }
+    },
+    "aws-bedrock": {
+      "label": "AWS Bedrock",
+      "verifiedOn": "2026-10-20",
+      "sources": [
+        "https://platform.claude.com/docs/en/about-claude/models/overview (Amazon Bedrock ID row)"
+      ],
+      "recommended": {
+        "default": "anthropic.claude-sonnet-5-5",
+        "fast": "anthropic.claude-haiku-5-5",
+        "best": "anthropic.claude-opus-5-5"
+      },
+      "limits": {
+        "unsupportedTools": true
+      },
+      "modelDefaults": {
+        "capabilities": {
+          "tools": false,
+          "vision": true,
+          "json": true,
+          "streaming": true
+        },
+        "pricingAsOf": "2026-10-20"
+      },
+      "notes": "Only the Claude 5.x ids published in Anthropic's Bedrock ID row are listed. Bedrock sets its own lifecycle dates and offers global.* / regional inference-profile prefixes; the live listModels() result is authoritative for what an account can invoke. Non-Anthropic Bedrock models (Amazon Nova etc.) are not verified here.",
+      "models": {
+        "anthropic.claude-fable-5-1": {
+          "name": "Claude Fable 5.1 (Bedrock)",
+          "family": "claude-fable",
+          "status": "current",
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "pricing": {
+            "inputPer1M": 10,
+            "outputPer1M": 50,
+            "cachedInputPer1M": 0.25
+          }
+        },
+        "anthropic.claude-opus-5-5": {
+          "name": "Claude Opus 5.5 (Bedrock)",
+          "family": "claude-opus",
+          "status": "current",
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "pricing": {
+            "inputPer1M": 4,
+            "outputPer1M": 20,
+            "cachedInputPer1M": 0.2
+          }
+        },
+        "anthropic.claude-sonnet-5-5": {
+          "name": "Claude Sonnet 5.5 (Bedrock)",
+          "family": "claude-sonnet",
+          "status": "current",
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "pricing": {
+            "inputPer1M": 2,
+            "outputPer1M": 10,
+            "cachedInputPer1M": 0.1
+          }
+        },
+        "anthropic.claude-haiku-5-5": {
+          "name": "Claude Haiku 5.5 (Bedrock)",
+          "family": "claude-haiku",
+          "status": "current",
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "pricing": {
+            "inputPer1M": 0.1,
+            "outputPer1M": 0.5,
+            "cachedInputPer1M": 0.01
+          },
+          "pricingNote": "Anthropic first-party prices; Bedrock may differ."
+        }
+      }
+    },
+    "openai": {
+      "label": "OpenAI",
+      "verifiedOn": "2026-10-20",
+      "sources": [
+        "https://developers.openai.com/api/docs/models",
+        "https://developers.openai.com/api/docs/pricing",
+        "https://developers.openai.com/api/docs/deprecations"
+      ],
+      "recommended": {
+        "default": "gpt-6.1-sol",
+        "fast": "gpt-6-luna",
+        "best": "gpt-6-astra"
+      },
+      "limits": {
+        "maxTools": 128
+      },
+      "modelDefaults": {
+        "capabilities": {
+          "tools": true,
+          "vision": true,
+          "json": true,
+          "streaming": true,
+          "maxTools": 128
+        },
+        "pricingAsOf": "2026-10-20"
+      },
+      "notes": "maxTools 128 is the API's own rejection threshold (\"maximum 128\"), observed in clawser #411, not a documented table value.",
+      "models": {
+        "gpt-6-astra": {
+          "name": "GPT-6 Astra",
+          "family": "gpt-6",
+          "status": "current",
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000,
+          "pricing": {
+            "inputPer1M": 10,
+            "outputPer1M": 50,
+            "cachedInputPer1M": 1
+          },
+          "notes": "Flagship for complex reasoning."
+        },
+        "gpt-6.1-sol": {
+          "name": "GPT-6.1 Sol",
+          "family": "gpt-6",
+          "status": "current",
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000,
+          "pricing": {
+            "inputPer1M": 2,
+            "outputPer1M": 10,
+            "cachedInputPer1M": 0.1
+          },
+          "notes": "Near-Astra performance at lower cost."
+        },
+        "gpt-6-luna": {
+          "name": "GPT-6 Luna",
+          "family": "gpt-6",
+          "status": "current",
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000,
+          "pricing": {
+            "inputPer1M": 0.1,
+            "outputPer1M": 0.5,
+            "cachedInputPer1M": 0.01
+          },
+          "notes": "Most efficient; the documented replacement for gpt-4o-mini / gpt-4.1."
+        },
+        "gpt-6-sol": {
+          "name": "GPT-6 Sol",
+          "family": "gpt-6",
+          "status": "legacy",
+          "successor": "gpt-6.1-sol",
+          "pricing": {
+            "inputPer1M": 2,
+            "outputPer1M": 10,
+            "cachedInputPer1M": 0.2
+          }
+        },
+        "gpt-5.6-sol": {
+          "name": "GPT-5.6 Sol",
+          "family": "gpt-5",
+          "status": "legacy",
+          "successor": "gpt-6.1-sol",
+          "pricing": {
+            "inputPer1M": 4,
+            "outputPer1M": 20,
+            "cachedInputPer1M": 0.4
+          }
+        },
+        "gpt-5.6-terra": {
+          "name": "GPT-5.6 Terra",
+          "family": "gpt-5",
+          "status": "legacy",
+          "successor": "gpt-6.1-sol",
+          "pricing": {
+            "inputPer1M": 2,
+            "outputPer1M": 12,
+            "cachedInputPer1M": 0.2
+          }
+        },
+        "gpt-5.6-luna": {
+          "name": "GPT-5.6 Luna",
+          "family": "gpt-5",
+          "status": "legacy",
+          "successor": "gpt-6-luna",
+          "pricing": {
+            "inputPer1M": 0.2,
+            "outputPer1M": 1.2,
+            "cachedInputPer1M": 0.02
+          }
+        },
+        "gpt-5.5": {
+          "name": "GPT-5.5",
+          "family": "gpt-5",
+          "status": "legacy",
+          "successor": "gpt-6.1-sol",
+          "pricing": {
+            "inputPer1M": 5,
+            "outputPer1M": 30,
+            "cachedInputPer1M": 0.5
+          }
+        },
+        "gpt-5.4": {
+          "name": "GPT-5.4",
+          "family": "gpt-5",
+          "status": "legacy",
+          "successor": "gpt-6.1-sol",
+          "pricing": {
+            "inputPer1M": 2.5,
+            "outputPer1M": 15,
+            "cachedInputPer1M": 0.25
+          }
+        },
+        "gpt-5.4-mini": {
+          "name": "GPT-5.4 mini",
+          "family": "gpt-5",
+          "status": "legacy",
+          "successor": "gpt-6-luna",
+          "pricing": {
+            "inputPer1M": 0.75,
+            "outputPer1M": 4.5,
+            "cachedInputPer1M": 0.075
+          }
+        },
+        "gpt-5.2": {
+          "name": "GPT-5.2",
+          "family": "gpt-5",
+          "status": "legacy",
+          "successor": "gpt-6.1-sol",
+          "pricing": {
+            "inputPer1M": 1.75,
+            "outputPer1M": 14,
+            "cachedInputPer1M": 0.175
+          }
+        },
+        "gpt-5.4-nano": {
+          "name": "GPT-5.4 nano",
+          "family": "gpt-5",
+          "status": "deprecated",
+          "deprecatedOn": "2026-10-01",
+          "retiresOn": "2027-04-01",
+          "successor": "gpt-6-luna",
+          "pricing": {
+            "inputPer1M": 0.2,
+            "outputPer1M": 1.25,
+            "cachedInputPer1M": 0.02
+          }
+        },
+        "gpt-5.1": {
+          "name": "GPT-5.1",
+          "family": "gpt-5",
+          "status": "deprecated",
+          "deprecatedOn": "2026-10-01",
+          "retiresOn": "2027-04-01",
+          "successor": "gpt-6-sol",
+          "pricing": {
+            "inputPer1M": 1.25,
+            "outputPer1M": 10,
+            "cachedInputPer1M": 0.125
+          }
+        },
+        "gpt-5.3-codex": {
+          "name": "GPT-5.3 Codex",
+          "family": "gpt-5",
+          "status": "deprecated",
+          "deprecatedOn": "2026-10-01",
+          "retiresOn": "2027-04-01",
+          "successor": "gpt-6-sol"
+        },
+        "gpt-5": {
+          "name": "GPT-5",
+          "family": "gpt-5",
+          "status": "deprecated",
+          "deprecatedOn": "2026-06-11",
+          "retiresOn": "2026-12-11",
+          "successor": "gpt-5.6-sol",
+          "pricing": {
+            "inputPer1M": 1.25,
+            "outputPer1M": 10,
+            "cachedInputPer1M": 0.125
+          }
+        },
+        "gpt-5-mini": {
+          "name": "GPT-5 mini",
+          "family": "gpt-5",
+          "status": "deprecated",
+          "deprecatedOn": "2026-06-11",
+          "retiresOn": "2026-12-11",
+          "successor": "gpt-5.6-terra",
+          "pricing": {
+            "inputPer1M": 0.25,
+            "outputPer1M": 2,
+            "cachedInputPer1M": 0.025
+          }
+        },
+        "gpt-5-nano": {
+          "name": "GPT-5 nano",
+          "family": "gpt-5",
+          "status": "deprecated",
+          "deprecatedOn": "2026-06-11",
+          "retiresOn": "2026-12-11",
+          "successor": "gpt-5.6-luna",
+          "pricing": {
+            "inputPer1M": 0.05,
+            "outputPer1M": 0.4,
+            "cachedInputPer1M": 0.005
+          }
+        },
+        "gpt-5-pro": {
+          "name": "GPT-5 Pro",
+          "family": "gpt-5",
+          "status": "deprecated",
+          "deprecatedOn": "2026-06-11",
+          "retiresOn": "2026-12-11",
+          "successor": "gpt-5.6-sol"
+        },
+        "o3": {
+          "name": "o3",
+          "family": "o-series",
+          "status": "deprecated",
+          "deprecatedOn": "2026-06-11",
+          "retiresOn": "2026-12-11",
+          "successor": "gpt-5.6-sol",
+          "pricing": {
+            "inputPer1M": 2,
+            "outputPer1M": 8,
+            "cachedInputPer1M": 0.5
+          }
+        },
+        "o3-pro": {
+          "name": "o3-pro",
+          "family": "o-series",
+          "status": "deprecated",
+          "deprecatedOn": "2026-06-11",
+          "retiresOn": "2026-12-11",
+          "successor": "gpt-5.6-sol",
+          "pricing": {
+            "inputPer1M": 20,
+            "outputPer1M": 80
+          }
+        },
+        "o4-mini": {
+          "name": "o4-mini",
+          "family": "o-series",
+          "status": "deprecated",
+          "deprecatedOn": "2026-06-11",
+          "retiresOn": "2026-10-23",
+          "successor": "gpt-5.6-terra",
+          "pricing": {
+            "inputPer1M": 1.1,
+            "outputPer1M": 4.4,
+            "cachedInputPer1M": 0.275
+          }
+        },
+        "o3-mini": {
+          "name": "o3-mini",
+          "family": "o-series",
+          "status": "legacy",
+          "successor": "gpt-6-luna",
+          "pricing": {
+            "inputPer1M": 1.1,
+            "outputPer1M": 4.4,
+            "cachedInputPer1M": 0.55
+          },
+          "notes": "Not on the deprecations page as of 2026-10-20; successor is the nearest current small model (inference)."
+        },
+        "gpt-4o": {
+          "name": "GPT-4o",
+          "family": "gpt-4",
+          "status": "deprecated",
+          "deprecatedOn": "2026-10-14",
+          "retiresOn": "2027-01-14",
+          "successor": "gpt-6-luna",
+          "pricing": {
+            "inputPer1M": 2.5,
+            "outputPer1M": 10,
+            "cachedInputPer1M": 1.25
+          }
+        },
+        "gpt-4o-mini": {
+          "name": "GPT-4o mini",
+          "family": "gpt-4",
+          "status": "deprecated",
+          "deprecatedOn": "2026-10-14",
+          "retiresOn": "2027-01-14",
+          "successor": "gpt-6-luna",
+          "pricing": {
+            "inputPer1M": 0.15,
+            "outputPer1M": 0.6,
+            "cachedInputPer1M": 0.075
+          }
+        },
+        "gpt-4.1": {
+          "name": "GPT-4.1",
+          "family": "gpt-4",
+          "status": "deprecated",
+          "deprecatedOn": "2026-10-14",
+          "retiresOn": "2027-01-14",
+          "successor": "gpt-6-luna",
+          "pricing": {
+            "inputPer1M": 2,
+            "outputPer1M": 8,
+            "cachedInputPer1M": 0.5
+          }
+        },
+        "gpt-4.1-mini": {
+          "name": "GPT-4.1 mini",
+          "family": "gpt-4",
+          "status": "deprecated",
+          "deprecatedOn": "2026-10-14",
+          "retiresOn": "2027-01-14",
+          "successor": "gpt-6-luna",
+          "pricing": {
+            "inputPer1M": 0.4,
+            "outputPer1M": 1.6,
+            "cachedInputPer1M": 0.1
+          }
+        },
+        "gpt-4.1-nano": {
+          "name": "GPT-4.1 nano",
+          "family": "gpt-4",
+          "status": "legacy",
+          "successor": "gpt-6-luna",
+          "pricing": {
+            "inputPer1M": 0.1,
+            "outputPer1M": 0.4,
+            "cachedInputPer1M": 0.025
+          },
+          "notes": "Not on the deprecations page as of 2026-10-20; the sibling 4.1 models were deprecated 2026-10-14."
+        }
+      }
+    },
+    "gemini": {
+      "label": "Google Gemini",
+      "verifiedOn": "2026-10-20",
+      "sources": [
+        "https://ai.google.dev/gemini-api/docs/models",
+        "https://ai.google.dev/gemini-api/docs/models/gemini-4-argon",
+        "https://ai.google.dev/gemini-api/docs/pricing",
+        "https://ai.google.dev/gemini-api/docs/deprecations"
+      ],
+      "recommended": {
+        "default": "gemini-3.8-flash",
+        "fast": "gemini-3.5-flash-lite",
+        "best": "gemini-4-argon"
+      },
+      "modelDefaults": {
+        "capabilities": {
+          "tools": true,
+          "vision": true,
+          "json": true,
+          "streaming": true
+        },
+        "pricingAsOf": "2026-10-20"
+      },
+      "notes": "Gemini's list endpoint returns ids as models/<id>; the catalog and mergeLiveModels use the bare id.",
+      "models": {
+        "gemini-4-argon": {
+          "name": "Gemini 4 Argon",
+          "family": "gemini-4",
+          "status": "current",
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536,
+          "pricing": {
+            "inputPer1M": 2,
+            "outputPer1M": 10,
+            "cachedInputPer1M": 0.1
+          },
+          "pricingNote": "Doubles on 2026-12-01 (input 4 / output 20 / cache 0.20). Not on the free tier. Output can reach 1,048,576 with long decode.",
+          "pricingEffectiveUntil": "2026-11-30"
+        },
+        "gemini-3.8-flash": {
+          "name": "Gemini 3.8 Flash",
+          "family": "gemini-3",
+          "status": "current",
+          "pricing": {
+            "inputPer1M": 0.75,
+            "outputPer1M": 3.75,
+            "cachedInputPer1M": 0.075
+          },
+          "pricingNote": "Doubles on 2027-01-01 (1.50 / 7.50 / 0.15).",
+          "pricingEffectiveUntil": "2026-12-31"
+        },
+        "gemini-3.6-flash": {
+          "name": "Gemini 3.6 Flash",
+          "family": "gemini-3",
+          "status": "legacy",
+          "successor": "gemini-3.8-flash",
+          "pricing": {
+            "inputPer1M": 0.75,
+            "outputPer1M": 3.75,
+            "cachedInputPer1M": 0.075
+          },
+          "pricingNote": "Doubles on 2027-01-01.",
+          "pricingEffectiveUntil": "2026-12-31"
+        },
+        "gemini-3.5-flash-lite": {
+          "name": "Gemini 3.5 Flash-Lite",
+          "family": "gemini-3",
+          "status": "current",
+          "pricing": {
+            "inputPer1M": 0.3,
+            "outputPer1M": 2.5
+          }
+        },
+        "gemini-3.7-flash": {
+          "name": "Gemini 3.7 Flash",
+          "family": "gemini-3",
+          "status": "retired",
+          "successor": "gemini-3.8-flash",
+          "notes": "Already shut down; requests auto-route to the successor."
+        },
+        "gemini-3.5-flash": {
+          "name": "Gemini 3.5 Flash",
+          "family": "gemini-3",
+          "status": "retired",
+          "successor": "gemini-3.6-flash",
+          "notes": "Already shut down; requests auto-route to the successor."
+        },
+        "gemini-2.5-flash": {
+          "name": "Gemini 2.5 Flash",
+          "family": "gemini-2.5",
+          "status": "legacy",
+          "successor": "gemini-3.8-flash",
+          "pricing": {
+            "inputPer1M": 0.3,
+            "outputPer1M": 2.5
+          },
+          "notes": "Access limited to accounts that already used 2.5 models."
+        },
+        "gemini-2.5-flash-lite": {
+          "name": "Gemini 2.5 Flash-Lite",
+          "family": "gemini-2.5",
+          "status": "legacy",
+          "successor": "gemini-3.5-flash-lite",
+          "pricing": {
+            "inputPer1M": 0.1,
+            "outputPer1M": 0.4
+          },
+          "notes": "Access limited to accounts that already used 2.5 models."
+        },
+        "gemini-2.5-pro": {
+          "name": "Gemini 2.5 Pro",
+          "family": "gemini-2.5",
+          "status": "legacy",
+          "successor": "gemini-4-argon",
+          "notes": "Access limited to accounts that already used 2.5 models. Price not captured (tiered by prompt size)."
+        }
+      }
+    },
+    "xai": {
+      "label": "xAI (Grok)",
+      "verifiedOn": "2026-10-20",
+      "sources": ["https://docs.x.ai/docs/models"],
+      "recommended": {
+        "default": "grok-4.7",
+        "fast": "grok-4.3",
+        "best": "grok-4.7"
+      },
+      "limits": {
+        "maxTools": 128
+      },
+      "modelDefaults": {
+        "capabilities": {
+          "tools": true,
+          "vision": true,
+          "json": true,
+          "streaming": true
+        },
+        "pricingAsOf": "2026-10-20"
+      },
+      "notes": "Prices are the under-200k-prompt tier; at 200k or more the whole request bills at about 2x. maxTools 128 carried over from clawser's #411 table (unverified against xAI docs).",
+      "models": {
+        "grok-4.7": {
+          "name": "Grok 4.7",
+          "family": "grok-4",
+          "status": "current",
+          "contextWindow": 500000,
+          "pricing": {
+            "inputPer1M": 2,
+            "outputPer1M": 6,
+            "cachedInputPer1M": 0.5
+          }
+        },
+        "grok-4.6": {
+          "name": "Grok 4.6",
+          "family": "grok-4",
+          "status": "legacy",
+          "successor": "grok-4.7",
+          "contextWindow": 500000,
+          "pricing": {
+            "inputPer1M": 2,
+            "outputPer1M": 6,
+            "cachedInputPer1M": 0.5
+          }
+        },
+        "grok-4.5": {
+          "name": "Grok 4.5",
+          "family": "grok-4",
+          "status": "legacy",
+          "successor": "grok-4.7",
+          "contextWindow": 500000,
+          "pricing": {
+            "inputPer1M": 2,
+            "outputPer1M": 6,
+            "cachedInputPer1M": 0.3
+          }
+        },
+        "grok-4.3": {
+          "name": "Grok 4.3",
+          "family": "grok-4",
+          "status": "current",
+          "contextWindow": 1000000,
+          "pricing": {
+            "inputPer1M": 1.25,
+            "outputPer1M": 2.5,
+            "cachedInputPer1M": 0.2
+          }
+        },
+        "grok-4.20-0309-reasoning": {
+          "name": "Grok 4.20 (reasoning)",
+          "family": "grok-4",
+          "status": "legacy",
+          "successor": "grok-4.3",
+          "contextWindow": 1000000,
+          "pricing": {
+            "inputPer1M": 1.25,
+            "outputPer1M": 2.5,
+            "cachedInputPer1M": 0.2
+          }
+        },
+        "grok-4.20-0309-non-reasoning": {
+          "name": "Grok 4.20 (non-reasoning)",
+          "family": "grok-4",
+          "status": "legacy",
+          "successor": "grok-4.3",
+          "contextWindow": 1000000,
+          "pricing": {
+            "inputPer1M": 1.25,
+            "outputPer1M": 2.5,
+            "cachedInputPer1M": 0.2
+          }
+        },
+        "grok-build-0.1": {
+          "name": "Grok Build 0.1",
+          "family": "grok-build",
+          "status": "current",
+          "contextWindow": 256000,
+          "pricing": {
+            "inputPer1M": 1,
+            "outputPer1M": 2,
+            "cachedInputPer1M": 0.2
+          }
+        },
+        "grok-3": {
+          "name": "Grok 3",
+          "family": "grok-3",
+          "status": "retired",
+          "retiresOn": "2026-05-15",
+          "successor": "grok-4.3",
+          "notes": "Named in xAI's 2026-05-15 retirement list (replacement: grok-4.3 with no reasoning effort), per the 2026-09-03 registry pass."
+        },
+        "grok-2-latest": {
+          "name": "Grok 2",
+          "family": "grok-2",
+          "status": "retired",
+          "successor": "grok-4.3",
+          "notes": "Absent from xAI's current models table (docs.x.ai, 2026-10-20). Retirement is inferred from absence, not an announcement; the live list settles it."
+        }
+      }
+    },
+    "mistral": {
+      "label": "Mistral AI",
+      "verifiedOn": "2026-10-20",
+      "sources": [
+        "https://docs.mistral.ai/getting-started/models/models_overview/",
+        "https://docs.mistral.ai/getting-started/changelog",
+        "carried from packages/aimatey-utils model registry, first-party pass of 2026-09-03 (ids, context, prices)"
+      ],
+      "recommended": {
+        "default": "mistral-medium-3-5",
+        "fast": "mistral-small-2603",
+        "best": "mistral-medium-3-5"
+      },
+      "modelDefaults": {
+        "capabilities": {
+          "tools": true,
+          "vision": true,
+          "json": true,
+          "streaming": true
+        },
+        "pricingAsOf": "2026-09-03"
+      },
+      "notes": "Mistral's overview page did not expose API ids or prices in this pass; ids, context and prices are from the 2026-09-03 first-party registry pass (pricingAsOf reflects that). The -latest aliases are not pinned here because their targets are not documented.",
+      "models": {
+        "mistral-medium-3-5": {
+          "name": "Mistral Medium 3.5",
+          "family": "mistral-medium",
+          "status": "current",
+          "contextWindow": 262144,
+          "pricing": {
+            "inputPer1M": 1.5,
+            "outputPer1M": 7.5
+          }
+        },
+        "mistral-small-2603": {
+          "name": "Mistral Small 4",
+          "family": "mistral-small",
+          "status": "current",
+          "contextWindow": 262144,
+          "pricing": {
+            "inputPer1M": 0.15,
+            "outputPer1M": 0.6
+          }
+        },
+        "mistral-large-2512": {
+          "name": "Mistral Large 3",
+          "family": "mistral-large",
+          "status": "legacy",
+          "successor": "mistral-large-4",
+          "contextWindow": 262144,
+          "pricing": {
+            "inputPer1M": 0.5,
+            "outputPer1M": 1.5
+          }
+        },
+        "mistral-large-4": {
+          "name": "Mistral Large 4 (public preview)",
+          "family": "mistral-large",
+          "status": "current",
+          "contextWindow": 1048576,
+          "notes": "Public preview since October 2026, 1M context, introductory pricing; price not captured."
+        },
+        "mistral-large-2411": {
+          "name": "Mistral Large 2.1",
+          "family": "mistral-large",
+          "status": "deprecated",
+          "successor": "mistral-large-2512",
+          "contextWindow": 128000,
+          "pricing": {
+            "inputPer1M": 2,
+            "outputPer1M": 6
+          }
+        },
+        "mistral-medium-2505": {
+          "name": "Mistral Medium 3",
+          "family": "mistral-medium",
+          "status": "deprecated",
+          "successor": "mistral-medium-3-5",
+          "contextWindow": 128000,
+          "pricing": {
+            "inputPer1M": 0.4,
+            "outputPer1M": 2
+          }
+        },
+        "mistral-small-2501": {
+          "name": "Mistral Small 3",
+          "family": "mistral-small",
+          "status": "deprecated",
+          "successor": "mistral-small-2603",
+          "contextWindow": 32000,
+          "pricing": {
+            "inputPer1M": 0.1,
+            "outputPer1M": 0.3
+          }
+        }
+      }
+    },
+    "deepseek": {
+      "label": "DeepSeek",
+      "verifiedOn": "2026-10-20",
+      "sources": [
+        "https://api-docs.deepseek.com/quick_start/pricing",
+        "https://api-docs.deepseek.com/updates"
+      ],
+      "recommended": {
+        "default": "deepseek-flash",
+        "fast": "deepseek-flash",
+        "best": "deepseek-v4-pro"
+      },
+      "modelDefaults": {
+        "capabilities": {
+          "tools": true,
+          "vision": false,
+          "json": true,
+          "streaming": true
+        },
+        "pricingAsOf": "2026-10-20"
+      },
+      "notes": "Prices are the peak-hours rate (the higher of DeepSeek's two tiers; off-peak is half). OpenRouter slugs such as deepseek/deepseek-chat do not map to DeepSeek's current ids, so OpenRouter pricing is not used.",
+      "models": {
+        "deepseek-flash": {
+          "name": "DeepSeek V4.1 Flash",
+          "family": "deepseek-v4",
+          "status": "current",
+          "contextWindow": 1000000,
+          "maxOutputTokens": 384000,
+          "capabilities": {
+            "vision": true
+          },
+          "pricing": {
+            "inputPer1M": 0.3,
+            "outputPer1M": 1.2,
+            "cachedInputPer1M": 0.006
+          }
+        },
+        "deepseek-v4-pro": {
+          "name": "DeepSeek V4 Pro",
+          "family": "deepseek-v4",
+          "status": "current",
+          "contextWindow": 1000000,
+          "maxOutputTokens": 384000,
+          "pricing": {
+            "inputPer1M": 1.32,
+            "outputPer1M": 3.96,
+            "cachedInputPer1M": 0.044
+          }
+        },
+        "deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash (retired name)",
+          "family": "deepseek-v4",
+          "status": "retired",
+          "successor": "deepseek-flash",
+          "notes": "Still accepted; served by deepseek-flash and billed at the Flash price."
+        },
+        "deepseek-v4-flash-vision-exp": {
+          "name": "DeepSeek V4 Flash vision (retired name)",
+          "family": "deepseek-v4",
+          "status": "retired",
+          "successor": "deepseek-flash",
+          "notes": "Still accepted; served by deepseek-flash."
+        },
+        "deepseek-chat": {
+          "name": "DeepSeek Chat",
+          "family": "deepseek",
+          "status": "legacy",
+          "successor": "deepseek-flash",
+          "notes": "Not listed on the 2026-10-20 pricing or updates pages; status is inferred, the live list settles it."
+        },
+        "deepseek-reasoner": {
+          "name": "DeepSeek Reasoner",
+          "family": "deepseek",
+          "status": "legacy",
+          "successor": "deepseek-v4-pro",
+          "notes": "Not listed on the 2026-10-20 pricing or updates pages; status is inferred, the live list settles it."
+        }
+      },
+      "openrouterPricing": false
+    },
+    "moonshot": {
+      "label": "Moonshot (Kimi)",
+      "verifiedOn": "2026-10-20",
+      "sources": [
+        "https://platform.kimi.ai/docs/models",
+        "https://platform.kimi.ai/docs/pricing/chat"
+      ],
+      "recommended": {
+        "default": "kimi-k3",
+        "fast": "kimi-k2.6",
+        "best": "kimi-k3"
+      },
+      "modelDefaults": {
+        "capabilities": {
+          "tools": true,
+          "vision": true,
+          "json": true,
+          "streaming": true
+        }
+      },
+      "notes": "Pricing tables did not render in the fetched page, so no prices are recorded (the missing-pricing check warns). OpenRouter prices are deliberately not used for this provider (its kimi-k3 rate looks inconsistent with first-party).",
+      "models": {
+        "kimi-k3": {
+          "name": "Kimi K3",
+          "family": "kimi-k3",
+          "status": "current",
+          "contextWindow": 1000000
+        },
+        "kimi-k2.7-code": {
+          "name": "Kimi K2.7 Code",
+          "family": "kimi-k2",
+          "status": "current",
+          "contextWindow": 256000
+        },
+        "kimi-k2.7-code-highspeed": {
+          "name": "Kimi K2.7 Code (high speed)",
+          "family": "kimi-k2",
+          "status": "current",
+          "contextWindow": 256000
+        },
+        "kimi-k2.6": {
+          "name": "Kimi K2.6",
+          "family": "kimi-k2",
+          "status": "current",
+          "contextWindow": 256000
+        },
+        "kimi-k2.5": {
+          "name": "Kimi K2.5",
+          "family": "kimi-k2",
+          "status": "retired",
+          "retiresOn": "2026-08-31",
+          "successor": "kimi-k3"
+        },
+        "moonshot-v1-128k": {
+          "name": "Moonshot v1 128k",
+          "family": "moonshot-v1",
+          "status": "retired",
+          "retiresOn": "2026-08-31",
+          "successor": "kimi-k3",
+          "notes": "The moonshot-v1 series was discontinued 2026-08-31."
+        }
+      },
+      "openrouterPricing": false
+    },
+    "groq": {
+      "label": "Groq",
+      "verifiedOn": "2026-10-20",
+      "sources": [
+        "https://console.groq.com/docs/models",
+        "https://console.groq.com/docs/deprecations"
+      ],
+      "recommended": {
+        "default": "openai/gpt-oss-120b",
+        "fast": "openai/gpt-oss-20b",
+        "best": "openai/gpt-oss-120b"
+      },
+      "limits": {
+        "maxTools": 128
+      },
+      "modelDefaults": {
+        "capabilities": {
+          "tools": true,
+          "vision": false,
+          "json": true,
+          "streaming": true
+        },
+        "pricingAsOf": "2026-10-20"
+      },
+      "notes": "maxTools 128 carried over from clawser's #411 table (unverified against Groq docs).",
+      "models": {
+        "openai/gpt-oss-120b": {
+          "name": "GPT OSS 120B",
+          "family": "gpt-oss",
+          "status": "current",
+          "contextWindow": 131072,
+          "maxOutputTokens": 65536,
+          "pricing": {
+            "inputPer1M": 0.15,
+            "outputPer1M": 0.6
+          }
+        },
+        "openai/gpt-oss-20b": {
+          "name": "GPT OSS 20B",
+          "family": "gpt-oss",
+          "status": "current",
+          "contextWindow": 131072,
+          "maxOutputTokens": 65536,
+          "pricing": {
+            "inputPer1M": 0.075,
+            "outputPer1M": 0.3
+          }
+        },
+        "llama-3.3-70b-versatile": {
+          "name": "Llama 3.3 70B Versatile",
+          "family": "llama-3",
+          "status": "deprecated",
+          "retiresOn": "2026-08-16",
+          "successor": "openai/gpt-oss-120b",
+          "contextWindow": 131072,
+          "maxOutputTokens": 32768,
+          "notes": "Deprecations page: shutdown 08/16/26 (past), yet the models page still listed it on 2026-10-20 (pricing 'Contact Sales'). Kept deprecated, not retired, until a live list confirms."
+        },
+        "llama-3.1-8b-instant": {
+          "name": "Llama 3.1 8B Instant",
+          "family": "llama-3",
+          "status": "deprecated",
+          "retiresOn": "2026-08-16",
+          "successor": "openai/gpt-oss-20b",
+          "contextWindow": 131072,
+          "notes": "Same date conflict as llama-3.3-70b-versatile."
+        },
+        "mixtral-8x7b-32768": {
+          "name": "Mixtral 8x7B",
+          "family": "mixtral",
+          "status": "retired",
+          "notes": "Long gone from Groq's model list; retirement date not recorded on the current docs."
+        }
+      }
+    },
+    "openrouter": {
+      "label": "OpenRouter",
+      "verifiedOn": "2026-10-20",
+      "sources": ["https://openrouter.ai/api/v1/models (public, fetched 2026-10-20)"],
+      "recommended": {
+        "default": "anthropic/claude-sonnet-5.5",
+        "fast": "anthropic/claude-haiku-5.5",
+        "best": "anthropic/claude-opus-5.5"
+      },
+      "limits": {
+        "maxTools": 128
+      },
+      "modelDefaults": {
+        "capabilities": {
+          "tools": true,
+          "vision": true,
+          "json": true,
+          "streaming": true
+        },
+        "pricingAsOf": "2026-10-20"
+      },
+      "notes": "OpenRouter hosts hundreds of models; only recommended ones are curated here. Everything else comes from the live list (mergeLiveModels) and the generator's OpenRouter pass. maxTools 128 carried over from clawser's #411 table.",
+      "models": {
+        "anthropic/claude-opus-5.5": {
+          "name": "Anthropic: Claude Opus 5.5",
+          "family": "claude-opus",
+          "status": "current",
+          "contextWindow": 1000000,
+          "pricing": {
+            "inputPer1M": 4,
+            "outputPer1M": 20
+          }
+        },
+        "anthropic/claude-sonnet-5.5": {
+          "name": "Anthropic: Claude Sonnet 5.5",
+          "family": "claude-sonnet",
+          "status": "current",
+          "contextWindow": 1000000,
+          "pricing": {
+            "inputPer1M": 2,
+            "outputPer1M": 10
+          }
+        },
+        "anthropic/claude-haiku-5.5": {
+          "name": "Anthropic: Claude Haiku 5.5",
+          "family": "claude-haiku",
+          "status": "current",
+          "contextWindow": 1000000,
+          "pricing": {
+            "inputPer1M": 0.1,
+            "outputPer1M": 0.5
+          }
+        },
+        "anthropic/claude-sonnet-4-6": {
+          "name": "Anthropic: Claude Sonnet 4.6",
+          "family": "claude-sonnet",
+          "status": "legacy",
+          "successor": "anthropic/claude-sonnet-5.5"
+        }
+      }
+    },
+    "perplexity": {
+      "label": "Perplexity",
+      "recommended": {},
+      "limits": {
+        "unsupportedTools": true
+      },
+      "notes": "Not verified against first-party docs in this pass; models come from the live list. Perplexity's chat models do not take tool definitions.",
+      "models": {}
+    },
+    "together": {
+      "label": "Together AI",
+      "recommended": {},
+      "notes": "Not verified in this pass; models come from the live list (needs a key).",
+      "models": {}
+    },
+    "fireworks": {
+      "label": "Fireworks AI",
+      "recommended": {},
+      "notes": "Not verified in this pass; models come from the live list (needs a key).",
+      "models": {}
+    },
+    "cohere": {
+      "label": "Cohere",
+      "recommended": {},
+      "notes": "Not verified in this pass; models come from the live list (needs a key).",
+      "models": {}
+    },
+    "ai21": {
+      "label": "AI21 Labs",
+      "recommended": {},
+      "notes": "Not verified in this pass; models come from the live list (needs a key).",
+      "models": {}
+    },
+    "anyscale": {
+      "label": "Anyscale",
+      "recommended": {},
+      "notes": "Not verified in this pass. clawser's old default (Llama-2-70b-chat-hf) is a 2023 model.",
+      "models": {}
+    },
+    "cerebras": {
+      "label": "Cerebras",
+      "recommended": {},
+      "notes": "Not verified in this pass; models come from the live list (needs a key).",
+      "models": {}
+    },
+    "dashscope": {
+      "label": "Alibaba DashScope",
+      "recommended": {},
+      "notes": "Not verified in this pass; models come from the live list (needs a key).",
+      "models": {}
+    },
+    "deepinfra": {
+      "label": "DeepInfra",
+      "recommended": {},
+      "notes": "Not verified in this pass; models come from the live list (needs a key).",
+      "models": {}
+    },
+    "github-models": {
+      "label": "GitHub Models",
+      "recommended": {},
+      "notes": "Not verified in this pass; models come from the live list (needs a token).",
+      "models": {}
+    },
+    "huggingface": {
+      "label": "Hugging Face",
+      "recommended": {},
+      "notes": "Not verified in this pass; models come from the live list (needs a token).",
+      "models": {}
+    },
+    "inception": {
+      "label": "Inception",
+      "recommended": {},
+      "notes": "Not verified in this pass; models come from the live list (needs a key).",
+      "models": {}
+    },
+    "nvidia": {
+      "label": "NVIDIA NIM",
+      "recommended": {},
+      "notes": "Not verified in this pass; models come from the live list (needs a key).",
+      "models": {}
+    },
+    "omniroute": {
+      "label": "OmniRoute",
+      "recommended": {
+        "default": "auto"
+      },
+      "notes": "Routing gateway; 'auto' is the gateway's own selector, not a catalog model.",
+      "models": {}
+    },
+    "replicate": {
+      "label": "Replicate",
+      "recommended": {},
+      "limits": {
+        "unsupportedTools": true
+      },
+      "notes": "Not verified in this pass.",
+      "models": {}
+    },
+    "sambanova": {
+      "label": "SambaNova",
+      "recommended": {},
+      "notes": "Not verified in this pass; models come from the live list (needs a key).",
+      "models": {}
+    },
+    "azure-openai": {
+      "label": "Azure OpenAI",
+      "recommended": {},
+      "limits": {
+        "maxTools": 128,
+        "unsupportedTools": true
+      },
+      "notes": "Models are per-deployment names chosen by the account; nothing to curate. maxTools carried over from clawser #411.",
+      "models": {}
+    },
+    "cloudflare": {
+      "label": "Cloudflare Workers AI",
+      "recommended": {},
+      "limits": {
+        "unsupportedTools": true
+      },
+      "notes": "Not verified in this pass; models come from the live list (needs a token + account id).",
+      "models": {}
+    },
+    "ollama": {
+      "label": "Ollama (local)",
+      "local": true,
+      "recommended": {},
+      "notes": "Models are whatever the user pulled; clawser lists them from /api/tags.",
+      "models": {}
+    },
+    "lmstudio": {
+      "label": "LM Studio (local)",
+      "local": true,
+      "recommended": {},
+      "notes": "Models are whatever is loaded; listed from /models.",
+      "models": {}
+    },
+    "chrome-ai": {
+      "label": "Chrome AI (on-device)",
+      "local": true,
+      "recommended": {
+        "default": "gemini-nano"
+      },
+      "limits": {
+        "contextTokens": 4096,
+        "unsupportedTools": true
+      },
+      "notes": "Chrome's Prompt API reports about 6k for Gemini Nano; 4096 is the conservative figure clawser budgets against (#411).",
+      "models": {
+        "gemini-nano": {
+          "name": "Gemini Nano (Chrome built-in)",
+          "family": "gemini-nano",
+          "status": "current",
+          "contextWindow": 4096,
+          "capabilities": {
+            "tools": false,
+            "vision": false,
+            "json": false,
+            "streaming": true
+          }
+        }
+      }
+    },
+    "litert-lm": {
+      "label": "LiteRT-LM (on-device, WebGPU)",
+      "local": true,
+      "recommended": {
+        "default": "gemma-4-E2B-it-litert-lm"
+      },
+      "limits": {
+        "contextTokens": 4096,
+        "unsupportedTools": true
+      },
+      "notes": "LiteRT's Gemma web build ships a 4k context (#411).",
+      "models": {
+        "gemma-4-E2B-it-litert-lm": {
+          "name": "Gemma 4 E2B (LiteRT-LM)",
+          "family": "gemma-4",
+          "status": "current",
+          "contextWindow": 4096,
+          "capabilities": {
+            "tools": false,
+            "vision": false,
+            "json": false,
+            "streaming": true
+          }
+        }
+      }
+    }
+  }
+}

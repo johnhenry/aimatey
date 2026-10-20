@@ -2,7 +2,7 @@
 #
 # Staggered Publish Script for aimatey Monorepo
 #
-# Publishes all 25 packages to npm in dependency order with delays
+# Publishes all 26 packages to npm in dependency order with delays
 # to avoid rate limiting.
 #
 # Usage:
@@ -56,7 +56,7 @@ publish_package() {
   local pkg=$1
   TOTAL=$((TOTAL + 1))
 
-  echo -e "${BLUE}[$TOTAL/25]${NC} Publishing ${YELLOW}$pkg${NC}..."
+  echo -e "${BLUE}[$TOTAL/26]${NC} Publishing ${YELLOW}$pkg${NC}..."
 
   if $DRY_RUN; then
     echo "  → Would run: npm publish --workspace=$pkg --access public $PROVENANCE"
@@ -124,7 +124,7 @@ echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║       aimatey Staggered Publish Script                      ║"
 echo "║                                                              ║"
-echo "║  Publishing 25 packages in dependency order                  ║"
+echo "║  Publishing 26 packages in dependency order                  ║"
 echo "║  Delay between packages: ${DELAY_BETWEEN_PACKAGES}s                              ║"
 echo "║  Delay between batches: ${DELAY_BETWEEN_BATCHES}s                               ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
@@ -157,6 +157,7 @@ wait_between "$DELAY_BETWEEN_BATCHES"
 # ============================================================================
 publish_batch "Core Utilities" \
   "@johnhenry/aimatey-utils" \
+  "@johnhenry/aimatey-models" \
   "@johnhenry/aimatey-testing"
 
 wait_between "$DELAY_BETWEEN_BATCHES"

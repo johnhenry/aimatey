@@ -129,6 +129,20 @@ jobs:
       - name: Run integration tests
         run: npm test -- tests/integration/
 
+  models-catalog:
+    name: Model Catalog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      # Structural checks only here (generated files match overrides.json, defaults exist and are
+      # current, successors resolve). The pricingAsOf staleness limit is enforced by the weekly
+      # models-refresh workflow, so an overdue refresh never blocks unrelated PRs.
+      - run: node packages/aimatey-models/scripts/generate.mjs --check
+      - run: node packages/aimatey-models/scripts/check.mjs --max-age 36500
+
   workflow-lint:
     name: Workflow Lint
     uses: johnhenry/workflows/.github/workflows/workflow-lint.yml@v1
@@ -136,7 +150,7 @@ jobs:
   all-checks:
     name: All Checks Passed
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test, build, integration, workflow-lint]
+    needs: [lint, typecheck, test, build, integration, models-catalog, workflow-lint]
     steps:
       - name: All checks passed
         run: echo "All CI checks passed successfully!"

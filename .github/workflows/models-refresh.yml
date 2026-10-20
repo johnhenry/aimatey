@@ -1,0 +1,111 @@
+name: Refresh model catalog
+
+# Weekly + manual. Regenerates packages/aimatey-models from provider list-models
+# endpoints (repo secrets; providers without a secret are skipped), OpenRouter's
+# public /api/v1/models and data/overrides.json, then opens a PR with a readable
+# diff. This is NOT a publish workflow: the PR is merged by a person and ships
+# through the normal release.yml (Changesets) flow.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: models-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Regenerate catalog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+
+      - name: Regenerate from live sources
+        working-directory: packages/aimatey-models
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+        run: node scripts/generate.mjs --live --diff-out "$RUNNER_TEMP/diff.md"
+
+      - name: Checks (reported in the PR, do not block it)
+        id: checks
+        working-directory: packages/aimatey-models
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+        run: |
+          set +e
+          node scripts/check.mjs --live > "$RUNNER_TEMP/check.txt" 2>&1
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/check.txt"
+
+      - name: Open or update the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK_EXIT: ${{ steps.checks.outputs.exit }}
+        run: |
+          if git diff --quiet -- packages/aimatey-models; then
+            echo "Catalog unchanged."; exit 0
+          fi
+          branch=automation/models-refresh
+          day=$(date -u +%F)
+          {
+            echo "---"
+            echo "'@johnhenry/aimatey-models': patch"
+            echo "---"
+            echo
+            echo "Refresh model catalog ($day)."
+          } > ".changeset/models-refresh-$day.md"
+          {
+            cat "$RUNNER_TEMP/diff.md"
+            echo
+            if [ "$CHECK_EXIT" != "0" ]; then
+              echo "### Checks FAILED (fix data/overrides.json before merging)"
+            else
+              echo "### Checks passed"
+            fi
+            echo '```'
+            cat "$RUNNER_TEMP/check.txt"
+            echo '```'
+          } > "$RUNNER_TEMP/body.md"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add -A packages/aimatey-models .changeset
+          git commit -m "chore(models): refresh model catalog $day"
+          git push --force origin "$branch"
+          if gh pr view "$branch" >/dev/null 2>&1; then
+            gh pr edit "$branch" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr create --head "$branch" --base main --title "chore(models): refresh model catalog $day" --body-file "$RUNNER_TEMP/body.md"
+          fi
+
+      - name: Fail the run if the checks failed
+        if: steps.checks.outputs.exit != '0'
+        run: |
+          echo "Model catalog checks failed (stale pricingAsOf, missing default, or a recommended id absent from a live list). See the PR body."
+          exit 1

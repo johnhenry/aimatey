@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- New package `aimatey-models` (`@johnhenry/aimatey-models`): a data-only model catalog (status with dates
+  and successor, recommended defaults, capabilities, context limits, pricing with `pricingAsOf`) with
+  `mergeLiveModels`, `successorOf` and `isDeprecated`, a generator, staleness checks, and a weekly
+  GitHub Action that opens a refresh PR. See `packages/aimatey-models/readme.md`
 - Structured/schema-constrained output: `responseFormat` on `IRChatRequest`, with native
   mapping for OpenAI/Anthropic/Gemini and best-effort prompt-injection fallback for every
   other backend

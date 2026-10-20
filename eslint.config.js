@@ -23,6 +23,7 @@ export default tseslint.config(
       '**/*.cjs',
       '**/*.mjs',
       '**/coverage/**',
+      'packages/aimatey-models/src/catalog-data.ts',
       'eslint.config.js',
     ],
   },

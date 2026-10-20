@@ -1,0 +1,71 @@
+{
+  "name": "@johnhenry/aimatey-models",
+  "version": "0.0.0",
+  "description": "Data-only model catalog for ai.matey: status, successors, recommended defaults, capabilities, context limits and pricing per provider",
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./catalog.json": "./data/catalog.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "data/catalog.json",
+    "readme.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "npm run build:esm && npm run build:cjs && npm run build:types",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:types": "tsc -p tsconfig.types.json",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "generate": "node scripts/generate.mjs",
+    "generate:live": "node scripts/generate.mjs --live",
+    "check": "node scripts/check.mjs",
+    "check:fresh": "node scripts/generate.mjs --check",
+    "test": "vitest run"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "keywords": [
+    "ai",
+    "llm",
+    "models",
+    "pricing",
+    "catalog",
+    "ai-matey"
+  ],
+  "author": "Aimatey",
+  "license": "MIT",
+  "homepage": "https://github.com/johnhenry/aimatey#readme",
+  "bugs": {
+    "url": "https://github.com/johnhenry/aimatey/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnhenry/aimatey.git",
+    "directory": "packages/aimatey-models"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}
