@@ -35,8 +35,10 @@ import {
   buildStructuredOutputFallbackMessages,
   extractStructuredOutputJSON,
   buildResponseFormatFallbackWarning,
-  buildToolsUnsupportedWarning,
   estimateTokens,
+  buildStreamDoneMessage,
+  safeParseJSON,
+  type StreamedToolCall,
 } from '../shared.js';
 import { buildImageDroppedWarning, decideViaSystemOne } from '../decisions/systemone-client.js';
 
@@ -50,8 +52,9 @@ export type OpenRouterMessageContent =
 
 export interface OpenRouterMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: OpenRouterMessageContent;
+  content: OpenRouterMessageContent | null;
   name?: string;
+  tool_call_id?: string;
   tool_calls?: Array<{
     id: string;
     type: 'function';
@@ -74,6 +77,11 @@ export interface OpenRouterRequest {
   stop?: string[];
   stream?: boolean;
   seed?: number;
+  tools?: Array<{
+    type: 'function';
+    function: { name: string; description?: string; parameters: Record<string, unknown> };
+  }>;
+  tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
   // OpenRouter-specific parameters
   transforms?: string[]; // Model-specific transformations
   route?: 'fallback'; // Fallback to alternative models
@@ -111,9 +119,16 @@ export interface OpenRouterStreamChunk {
     delta: {
       role?: 'assistant';
       content?: string;
+      tool_calls?: Array<{
+        index: number;
+        id?: string;
+        type?: 'function';
+        function?: { name?: string; arguments?: string };
+      }>;
     };
-    finish_reason: 'stop' | 'length' | 'content_filter' | null;
+    finish_reason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | null;
   }>;
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
 }
 
 export interface OpenRouterConfig extends ApiKeyBackendAdapterConfig {
@@ -164,7 +179,7 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
       capabilities: {
         streaming: true,
         multiModal: true, // Vision models available
-        tools: false, // Function calling
+        tools: true, // Function calling (OpenAI-compatible tools / tool_calls)
         structuredOutput: 'fallback',
         maxContextTokens: 128000,
         systemMessageStrategy: 'in-messages',
@@ -209,25 +224,9 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
       this.metadata.capabilities.supportsMultipleSystemMessages
     );
 
-    const openrouterMessages: OpenRouterMessage[] = messages.map((msg) => ({
-      role: msg.role,
-      content:
-        typeof msg.content === 'string'
-          ? msg.content
-          : msg.content.map((block) => {
-              if (block.type === 'text') {
-                return { type: 'text', text: block.text };
-              } else if (block.type === 'image') {
-                return {
-                  type: 'image_url',
-                  image_url: {
-                    url: mediaSourceToUrl(block.source, 'openrouter-backend'),
-                  },
-                };
-              }
-              return { type: 'text', text: JSON.stringify(block) };
-            }),
-    }));
+    const openrouterMessages: OpenRouterMessage[] = messages.flatMap((msg) =>
+      this.convertMessage(msg)
+    );
 
     const openrouterRequest: OpenRouterRequest = {
       // claude-3-haiku is retired on Anthropic's own API (Apr 2026) and EOL
@@ -246,6 +245,23 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
       stream: request.stream || false,
     };
 
+    if (request.tools?.length) {
+      openrouterRequest.tools = request.tools.map((tool) => ({
+        type: 'function' as const,
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters as unknown as Record<string, unknown>,
+        },
+      }));
+      if (request.toolChoice !== undefined) {
+        openrouterRequest.tool_choice =
+          typeof request.toolChoice === 'string'
+            ? request.toolChoice
+            : { type: 'function', function: { name: request.toolChoice.name } };
+      }
+    }
+
     // Add seed if provided
     if (request.parameters?.seed !== undefined) {
       openrouterRequest.seed = request.parameters.seed;
@@ -263,6 +279,59 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
     }
 
     return openrouterRequest;
+  }
+
+  /**
+   * Convert one IR message to OpenRouter message(s). Tool results become separate role:'tool'
+   * messages (one per tool_use id); tool_use blocks become the assistant message's tool_calls.
+   */
+  private convertMessage(msg: IRMessage): OpenRouterMessage[] {
+    if (typeof msg.content === 'string') {
+      return [{ role: msg.role, content: msg.content }];
+    }
+    const out: OpenRouterMessage[] = [];
+    for (const block of msg.content) {
+      if (block.type === 'tool_result') {
+        out.push({
+          role: 'tool',
+          tool_call_id: block.toolUseId,
+          content:
+            typeof block.content === 'string'
+              ? block.content
+              : block.content.map((text) => text.text).join(''),
+        });
+      }
+    }
+    const toolUses = msg.content.filter((block) => block.type === 'tool_use');
+    const rest = msg.content.filter(
+      (block) => block.type !== 'tool_result' && block.type !== 'tool_use'
+    );
+    if (rest.length > 0 || toolUses.length > 0) {
+      const message: OpenRouterMessage = {
+        role: msg.role,
+        content: rest.map((block) => {
+          if (block.type === 'text') {
+            return { type: 'text' as const, text: block.text };
+          } else if (block.type === 'image') {
+            return {
+              type: 'image_url' as const,
+              image_url: { url: mediaSourceToUrl(block.source, 'openrouter-backend') },
+            };
+          }
+          return { type: 'text' as const, text: JSON.stringify(block) };
+        }),
+      };
+      if (toolUses.length > 0) {
+        message.tool_calls = toolUses.map((block) => ({
+          id: block.id,
+          type: 'function' as const,
+          function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
+        }));
+        if (rest.length === 0) message.content = '';
+      }
+      out.push(message);
+    }
+    return out;
   }
 
   /**
@@ -286,14 +355,28 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
     const rawContent =
       typeof choice.message.content === 'string'
         ? choice.message.content
-        : choice.message.content.map((c: any) => (c.type === 'text' ? c.text : '')).join('');
+        : (choice.message.content ?? []).map((c: any) => (c.type === 'text' ? c.text : '')).join('');
 
-    const message: IRMessage = {
-      role: choice.message.role === 'assistant' ? 'assistant' : 'user',
-      content: originalRequest.responseFormat
-        ? extractStructuredOutputJSON(rawContent)
-        : rawContent,
-    };
+    const text = originalRequest.responseFormat
+      ? extractStructuredOutputJSON(rawContent)
+      : rawContent;
+    const toolCalls = choice.message.tool_calls ?? [];
+    const role = choice.message.role === 'assistant' ? 'assistant' : 'user';
+    const message: IRMessage =
+      toolCalls.length > 0
+        ? {
+            role,
+            content: [
+              ...(text ? [{ type: 'text' as const, text }] : []),
+              ...toolCalls.map((call) => ({
+                type: 'tool_use' as const,
+                id: call.id,
+                name: call.function.name,
+                input: safeParseJSON(call.function.arguments),
+              })),
+            ],
+          }
+        : { role, content: text };
 
     const finishReasonMap: Record<string, FinishReason> = {
       stop: 'stop',
@@ -306,7 +389,6 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
       ...(originalRequest.responseFormat
         ? [buildResponseFormatFallbackWarning(this.metadata.name)]
         : []),
-      ...(originalRequest.tools?.length ? [buildToolsUnsupportedWarning(this.metadata.name)] : []),
     ];
 
     // OpenRouter routes to whichever upstream provider it picked, so the model that answered
@@ -433,6 +515,20 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
         });
       }
       let contentBuffer = '';
+      let finishReason: FinishReason | undefined;
+      let usage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
+      const toolCallsByIndex = new Map<number, StreamedToolCall>();
+      let doneYielded = false;
+      const buildDone = (): IRStreamChunk => {
+        doneYielded = true;
+        return {
+          type: 'done',
+          sequence: sequence++,
+          finishReason: finishReason ?? (toolCallsByIndex.size > 0 ? 'tool_calls' : 'stop'),
+          usage,
+          message: buildStreamDoneMessage(contentBuffer, [...toolCallsByIndex.values()]),
+        } as IRStreamChunk;
+      };
 
       yield {
         type: 'start',
@@ -474,6 +570,13 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
 
             try {
               const chunk = JSON.parse(data) as OpenRouterStreamChunk;
+              if (chunk.usage) {
+                usage = {
+                  promptTokens: chunk.usage.prompt_tokens,
+                  completionTokens: chunk.usage.completion_tokens,
+                  totalTokens: chunk.usage.total_tokens,
+                };
+              }
               const delta = chunk.choices[0]?.delta?.content;
 
               if (delta) {
@@ -493,24 +596,50 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
                 yield contentChunk;
               }
 
-              if (chunk.choices[0]?.finish_reason) {
+              for (const toolCallDelta of chunk.choices[0]?.delta?.tool_calls ?? []) {
+                let toolCall = toolCallsByIndex.get(toolCallDelta.index);
+                if (!toolCall) {
+                  toolCall = {
+                    id: toolCallDelta.id ?? `call_${toolCallDelta.index}`,
+                    name: toolCallDelta.function?.name ?? '',
+                    args: '',
+                    index: toolCallDelta.index,
+                  };
+                  toolCallsByIndex.set(toolCallDelta.index, toolCall);
+                } else {
+                  if (toolCallDelta.id) toolCall.id = toolCallDelta.id;
+                  if (toolCallDelta.function?.name) toolCall.name = toolCallDelta.function.name;
+                }
+                const inputDelta = toolCallDelta.function?.arguments ?? '';
+                toolCall.args += inputDelta;
+                yield {
+                  type: 'tool_use',
+                  sequence: sequence++,
+                  id: toolCall.id,
+                  name: toolCall.name,
+                  inputDelta,
+                  index: toolCall.index,
+                } as IRStreamChunk;
+              }
+
+              // The done chunk waits for [DONE] (or the end of the body) so the trailing
+              // usage-only chunk OpenRouter sends after finish_reason is included.
+              if (chunk.choices[0]?.finish_reason && !finishReason) {
                 const finishReasonMap: Record<string, FinishReason> = {
                   stop: 'stop',
                   length: 'length',
+                  tool_calls: 'tool_calls',
                   content_filter: 'stop',
                 };
-
-                yield {
-                  type: 'done',
-                  sequence: sequence++,
-                  finishReason: finishReasonMap[chunk.choices[0].finish_reason] || 'stop',
-                  message: { role: 'assistant', content: contentBuffer },
-                } as IRStreamChunk;
+                finishReason = finishReasonMap[chunk.choices[0].finish_reason] || 'stop';
               }
             } catch (parseError) {
               console.warn('Failed to parse SSE chunk:', data, parseError);
             }
           }
+        }
+        if (!doneYielded && finishReason) {
+          yield buildDone();
         }
       } finally {
         reader.releaseLock();
