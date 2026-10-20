@@ -6,3 +6,5 @@ package-lock.json
 pnpm-lock.yaml
 yarn.lock
 .DS_Store
+packages/aimatey-models/src/catalog-data.ts
+packages/aimatey-models/data/catalog.json

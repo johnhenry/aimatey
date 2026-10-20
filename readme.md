@@ -32,6 +32,7 @@ Provider-agnostic interface for AI APIs. Write once, run anywhere.
 | Serve an OpenAI-compatible HTTP API | [`http`](./packages/http) (`@johnhenry/aimatey-http`) plus [`http.core`](./packages/http.core) -- framework adapters for Express/Fastify/Hono/Koa/Node/Deno |
 | Use it from React | [`react-core`](./packages/react-core) first (`useChat`/`useCompletion`); `react-hooks`, `react-stream`, `react-nextjs` add more |
 | Drop in as an OpenAI/Anthropic SDK replacement | [`wrapper`](./packages/wrapper) (`@johnhenry/aimatey-wrapper`) |
+| Know which models are current/deprecated, their successors, context limits and prices | [`aimatey-models`](./packages/aimatey-models) (`@johnhenry/aimatey-models`) -- data-only catalog, refreshed weekly |
 | Call MCP tools from the agentic tool loop | [`mcp`](./packages/mcp) (`@johnhenry/aimatey-mcp`) |
 | Use a validated production pattern (routing, batching, failover) | [`patterns`](./packages/patterns) (`@johnhenry/aimatey-patterns`) |
 | Run a local model (llama.cpp, Apple Foundation Models, Laya) | `native-node-llamacpp` / `native-apple` / `native-laya` / `native-model-runner` |
@@ -462,6 +463,7 @@ registerModels([
 | [`@johnhenry/aimatey-types`](./packages/aimatey-types) | TypeScript type definitions | [README](./packages/aimatey-types/readme.md) |
 | [`@johnhenry/aimatey-errors`](./packages/aimatey-errors) | Error classes and utilities | [README](./packages/aimatey-errors/readme.md) |
 | [`@johnhenry/aimatey-utils`](./packages/aimatey-utils) | Shared utility functions (incl. `validateDecisionRequest` / `validateDecisionResponse`) | [README](./packages/aimatey-utils/readme.md) |
+| [`@johnhenry/aimatey-models`](./packages/aimatey-models) | Data-only model catalog: status, successors, recommended defaults, capabilities, context limits, pricing (`pricingAsOf`); `mergeLiveModels`, `successorOf`, `isDeprecated` | [README](./packages/aimatey-models/readme.md) |
 | [`@johnhenry/aimatey-testing`](./packages/aimatey-testing) | Testing utilities and mocks (incl. `createMockDecisionBackend`, `calibrationReport`, `fitTemperature`, `nameInvariance`, `createDecisionCapture`) | [README](./packages/aimatey-testing/readme.md) |
 | [`@johnhenry/aimatey-cli`](./packages/cli) | CLI and conversion utilities (incl. `ai-matey decide` and decision routes on `proxy`) | [README](./packages/cli/readme.md) |
 | [`@johnhenry/aimatey-patterns`](./packages/patterns) | Production integration patterns (incl. decision escalation, neutral keys, ensemble, screening, calibration, emulation) | [README](./packages/patterns/readme.md) |

@@ -89,6 +89,16 @@ npm run release:staggered:dry-run                  # no publish, no verification
 Script configuration (environment): `DELAY_BETWEEN_PACKAGES` (5),
 `DELAY_BETWEEN_BATCHES` (30).
 
+## Model catalog refresh
+
+`@johnhenry/aimatey-models` is refreshed by `.github/workflows/models-refresh.yml` (weekly and on
+dispatch). It is not a publish workflow: it regenerates `packages/aimatey-models`, adds a patch
+changeset and opens a PR with the diff. Merging that PR to `main` publishes through the normal
+Changesets flow above. Repo secrets `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
+`XAI_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY`, `GROQ_API_KEY` and
+`TOGETHER_API_KEY` are optional; providers without one are skipped. PRs opened with `GITHUB_TOKEN`
+do not trigger CI by themselves: push an empty commit or close and reopen the PR to run it.
+
 ## Adding a new package
 
 Create `packages/<name>/` with a `package.json` (`name`, `version`,
