@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-models",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Data-only model catalog for ai.matey: status, successors, recommended defaults, capabilities, context limits and pricing per provider",
   "type": "module",
   "main": "./dist/cjs/index.js",
