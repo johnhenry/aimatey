@@ -327,7 +327,9 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
           type: 'function' as const,
           function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
         }));
-        if (rest.length === 0) message.content = '';
+        if (rest.length === 0) {
+          message.content = '';
+        }
       }
       out.push(message);
     }
@@ -355,7 +357,9 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
     const rawContent =
       typeof choice.message.content === 'string'
         ? choice.message.content
-        : (choice.message.content ?? []).map((c: any) => (c.type === 'text' ? c.text : '')).join('');
+        : (choice.message.content ?? [])
+            .map((c: any) => (c.type === 'text' ? c.text : ''))
+            .join('');
 
     const text = originalRequest.responseFormat
       ? extractStructuredOutputJSON(rawContent)
@@ -516,7 +520,9 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
       }
       let contentBuffer = '';
       let finishReason: FinishReason | undefined;
-      let usage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
+      let usage:
+        | { promptTokens: number; completionTokens: number; totalTokens: number }
+        | undefined;
       const toolCallsByIndex = new Map<number, StreamedToolCall>();
       let doneYielded = false;
       const buildDone = (): IRStreamChunk => {
@@ -607,8 +613,12 @@ export class OpenRouterBackendAdapter implements BackendAdapter<
                   };
                   toolCallsByIndex.set(toolCallDelta.index, toolCall);
                 } else {
-                  if (toolCallDelta.id) toolCall.id = toolCallDelta.id;
-                  if (toolCallDelta.function?.name) toolCall.name = toolCallDelta.function.name;
+                  if (toolCallDelta.id) {
+                    toolCall.id = toolCallDelta.id;
+                  }
+                  if (toolCallDelta.function?.name) {
+                    toolCall.name = toolCallDelta.function.name;
+                  }
                 }
                 const inputDelta = toolCallDelta.function?.arguments ?? '';
                 toolCall.args += inputDelta;
