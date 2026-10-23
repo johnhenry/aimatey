@@ -150,6 +150,27 @@ for await (const chunk of bridge.chatStream({
 await backend.dispose();
 ```
 
+### Abort and load progress
+
+```typescript
+const backend = new LiteRtLmBackendAdapter({
+  model: MODEL_URL,
+  fetchModel: true, // adapter downloads the bundle: byte progress + cancellable download
+  onProgress: ({ stage, loaded, total }) => showProgress(stage, loaded, total),
+});
+
+await backend.preload({ signal }); // optional: load ahead of the first request
+```
+
+- `stage` is `download` (bytes fetched, `total` from Content-Length or Blob size), `compile`,
+  `loading` (download + compile as one step, when `fetchModel` is off), then `ready`.
+- Aborting a request's `signal` stops `execute`/`executeStream` immediately with a
+  `STREAM_CANCELLED` error and calls `conversation.cancel()` even if the model has not yielded a token.
+- During load, abort stops waiting at once. With `fetchModel` the download is cancelled when the last
+  waiter leaves; the runtime cannot interrupt compilation, so a compile in progress finishes in the
+  background and the engine stays cached for the next call. Without `fetchModel` the runtime owns the
+  download, so abort takes effect after the runtime finishes loading (the engine stays cached).
+
 ### Requirements & notes
 
 - **WebGPU** (Chrome 113+, Safari 17.4+, Firefox 121+). Browser only — no Node.js.
