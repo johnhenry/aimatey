@@ -42,6 +42,7 @@ const ADAPTERS: Array<[string, () => any]> = [
   ['DeepInfra', () => new DeepInfraBackendAdapter({ apiKey: 'k' })],
   ['Inception', () => new InceptionBackendAdapter({ apiKey: 'k' })],
   ['AI21', () => new AI21BackendAdapter({ apiKey: 'k' })],
+  ['Hugging Face', () => new HuggingFaceBackendAdapter({ apiKey: 'k' })],
 ];
 
 function makeRequest(overrides: Partial<IRChatRequest> = {}): IRChatRequest {
@@ -337,7 +338,6 @@ describe('adapters whose provider cannot take tools stay false', () => {
   it.each([
     ['Anyscale', () => new AnyscaleBackendAdapter({ apiKey: 'k' })],
     ['GitHub Models', () => new GitHubModelsBackendAdapter({ apiKey: 'k' })],
-    ['Hugging Face', () => new HuggingFaceBackendAdapter({ apiKey: 'k' })],
   ])('%s', (_name, make) => {
     expect(make().metadata.capabilities.tools).toBe(false);
   });
