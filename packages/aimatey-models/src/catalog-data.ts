@@ -2084,9 +2084,46 @@ export const CATALOG: ModelCatalog = {
     },
     "cohere": {
       "label": "Cohere",
-      "notes": "Not verified in this pass; models come from the live list (needs a key).",
-      "recommended": {},
-      "models": {}
+      "verifiedOn": "2026-10-23",
+      "sources": [
+        "https://docs.cohere.com/docs/models",
+        "https://docs.cohere.com/docs/tool-use-overview"
+      ],
+      "notes": "Only the models used for recommendations are curated; others come from the live list. command-a-plus-05-2026 is the model Cohere's v2 tool-use docs use in their examples. Pricing is not published on the docs pages, so none is recorded.",
+      "recommended": {
+        "default": "command-a-plus-05-2026",
+        "fast": "command-r7b-12-2024"
+      },
+      "models": {
+        "command-a-plus-05-2026": {
+          "id": "command-a-plus-05-2026",
+          "name": "Command A+",
+          "family": "command-a",
+          "status": "current",
+          "contextWindow": 128000,
+          "maxOutputTokens": 64000,
+          "capabilities": {
+            "tools": true,
+            "streaming": true,
+            "vision": true,
+            "json": true
+          }
+        },
+        "command-r7b-12-2024": {
+          "id": "command-r7b-12-2024",
+          "name": "Command R7B",
+          "family": "command-r",
+          "status": "current",
+          "contextWindow": 128000,
+          "maxOutputTokens": 4000,
+          "capabilities": {
+            "tools": true,
+            "streaming": true,
+            "vision": false,
+            "json": true
+          }
+        }
+      }
     },
     "ai21": {
       "label": "AI21 Labs",
@@ -2126,9 +2163,30 @@ export const CATALOG: ModelCatalog = {
     },
     "huggingface": {
       "label": "Hugging Face",
-      "notes": "Not verified in this pass; models come from the live list (needs a token).",
-      "recommended": {},
-      "models": {}
+      "verifiedOn": "2026-10-23",
+      "sources": [
+        "https://huggingface.co/docs/inference-providers/tasks/chat-completion",
+        "https://router.huggingface.co/v1/models"
+      ],
+      "notes": "Router model list (2026-10-23) shows Qwen/Qwen3.5-9B with tool support on ovhcloud and deepinfra, 262144 context. Only recommended models are curated; the rest come from the live list. Pricing varies by routed provider, so none is recorded.",
+      "recommended": {
+        "default": "Qwen/Qwen3.5-9B"
+      },
+      "models": {
+        "Qwen/Qwen3.5-9B": {
+          "id": "Qwen/Qwen3.5-9B",
+          "name": "Qwen3.5 9B",
+          "family": "qwen3.5",
+          "status": "current",
+          "contextWindow": 262144,
+          "capabilities": {
+            "tools": true,
+            "streaming": true,
+            "vision": false,
+            "json": true
+          }
+        }
+      }
     },
     "inception": {
       "label": "Inception",

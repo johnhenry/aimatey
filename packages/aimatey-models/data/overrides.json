@@ -850,7 +850,9 @@
     "xai": {
       "label": "xAI (Grok)",
       "verifiedOn": "2026-10-20",
-      "sources": ["https://docs.x.ai/docs/models"],
+      "sources": [
+        "https://docs.x.ai/docs/models"
+      ],
       "recommended": {
         "default": "grok-4.7",
         "fast": "grok-4.3",
@@ -1288,7 +1290,9 @@
     "openrouter": {
       "label": "OpenRouter",
       "verifiedOn": "2026-10-20",
-      "sources": ["https://openrouter.ai/api/v1/models (public, fetched 2026-10-20)"],
+      "sources": [
+        "https://openrouter.ai/api/v1/models (public, fetched 2026-10-20)"
+      ],
       "recommended": {
         "default": "anthropic/claude-sonnet-5.5",
         "fast": "anthropic/claude-haiku-5.5",
@@ -1369,9 +1373,46 @@
     },
     "cohere": {
       "label": "Cohere",
-      "recommended": {},
-      "notes": "Not verified in this pass; models come from the live list (needs a key).",
-      "models": {}
+      "verifiedOn": "2026-10-23",
+      "sources": [
+        "https://docs.cohere.com/docs/models",
+        "https://docs.cohere.com/docs/tool-use-overview"
+      ],
+      "recommended": {
+        "default": "command-a-plus-05-2026",
+        "fast": "command-r7b-12-2024"
+      },
+      "modelDefaults": {
+        "capabilities": {
+          "tools": true,
+          "streaming": true
+        }
+      },
+      "notes": "Only the models used for recommendations are curated; others come from the live list. command-a-plus-05-2026 is the model Cohere's v2 tool-use docs use in their examples. Pricing is not published on the docs pages, so none is recorded.",
+      "models": {
+        "command-a-plus-05-2026": {
+          "name": "Command A+",
+          "family": "command-a",
+          "status": "current",
+          "contextWindow": 128000,
+          "maxOutputTokens": 64000,
+          "capabilities": {
+            "vision": true,
+            "json": true
+          }
+        },
+        "command-r7b-12-2024": {
+          "name": "Command R7B",
+          "family": "command-r",
+          "status": "current",
+          "contextWindow": 128000,
+          "maxOutputTokens": 4000,
+          "capabilities": {
+            "vision": false,
+            "json": true
+          }
+        }
+      }
     },
     "ai21": {
       "label": "AI21 Labs",
@@ -1411,9 +1452,33 @@
     },
     "huggingface": {
       "label": "Hugging Face",
-      "recommended": {},
-      "notes": "Not verified in this pass; models come from the live list (needs a token).",
-      "models": {}
+      "verifiedOn": "2026-10-23",
+      "sources": [
+        "https://huggingface.co/docs/inference-providers/tasks/chat-completion",
+        "https://router.huggingface.co/v1/models"
+      ],
+      "recommended": {
+        "default": "Qwen/Qwen3.5-9B"
+      },
+      "modelDefaults": {
+        "capabilities": {
+          "tools": true,
+          "streaming": true
+        }
+      },
+      "notes": "Router model list (2026-10-23) shows Qwen/Qwen3.5-9B with tool support on ovhcloud and deepinfra, 262144 context. Only recommended models are curated; the rest come from the live list. Pricing varies by routed provider, so none is recorded.",
+      "models": {
+        "Qwen/Qwen3.5-9B": {
+          "name": "Qwen3.5 9B",
+          "family": "qwen3.5",
+          "status": "current",
+          "contextWindow": 262144,
+          "capabilities": {
+            "vision": false,
+            "json": true
+          }
+        }
+      }
     },
     "inception": {
       "label": "Inception",
