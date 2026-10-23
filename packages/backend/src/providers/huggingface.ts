@@ -1,8 +1,10 @@
 /**
  * Hugging Face Backend Adapter
  *
- * Adapts Universal IR to Hugging Face Inference API.
- * Access thousands of models through Hugging Face's unified API.
+ * Adapts Universal IR to Hugging Face's OpenAI-compatible chat completions API,
+ * served by the Inference Providers router (`https://router.huggingface.co/v1`) and by
+ * dedicated Inference Endpoints (text-generation-inference's Messages API).
+ * Supports streaming and native tool calling.
  *
  * @module
  */
@@ -18,73 +20,124 @@ import type {
   IRChatStream,
   IRMessage,
   IRStreamChunk,
+  FinishReason,
 } from '@johnhenry/aimatey-types';
 import {
   AdapterConversionError,
   NetworkError,
   ProviderError,
+  StreamError,
   ErrorCode,
   createErrorFromHttpResponse,
   AdapterError,
 } from '@johnhenry/aimatey-errors';
-import { normalizeRepetitionPenalty } from '@johnhenry/aimatey-utils';
+import { normalizeSystemMessages } from '@johnhenry/aimatey-utils';
+import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
 import {
   buildStructuredOutputFallbackMessages,
   extractStructuredOutputJSON,
   buildResponseFormatFallbackWarning,
+  buildStreamDoneMessage,
+  buildOpenAICompatToolFields,
+  buildOpenAICompatResponseMessage,
+  convertIRMessageToOpenAICompat,
+  openAICompatContentToText,
+  ToolCallAssembler,
+  type OpenAICompatToolFields,
   streamErrorDetails,
 } from '../shared.js';
 
+/** The Inference Providers router: OpenAI-compatible, one token for every provider behind it. */
+const DEFAULT_BASE_URL = 'https://router.huggingface.co/v1';
+
+/** The retired text-generation host. A `baseURL` set to it is mapped to the router. */
+const LEGACY_BASE_URL = 'https://api-inference.huggingface.co';
+
 /**
- * Hugging Face API message format.
+ * Resolve the chat-completions base URL.
+ *
+ * - unset, or the retired `https://api-inference.huggingface.co` host: the router.
+ * - a bare origin, such as a dedicated Inference Endpoint
+ *   (`https://xyz.endpoints.huggingface.cloud`): `/v1` is appended, because
+ *   text-generation-inference serves chat completions at `<endpoint>/v1/chat/completions`.
+ * - anything with a path (`.../v1`, a proxy prefix): used as given.
+ */
+function resolveBaseURL(baseURL: string | undefined): string {
+  if (!baseURL) {
+    return DEFAULT_BASE_URL;
+  }
+  const trimmed = baseURL.replace(/\/+$/, '');
+  try {
+    const url = new URL(trimmed);
+    if (url.origin === LEGACY_BASE_URL) {
+      return DEFAULT_BASE_URL;
+    }
+    if (url.pathname === '' || url.pathname === '/') {
+      return `${url.origin}/v1`;
+    }
+  } catch {
+    // Not a parseable URL: use it unchanged and let fetch report it.
+  }
+  return trimmed;
+}
+
+/**
+ * Hugging Face chat message (OpenAI-compatible).
  */
 export interface HuggingFaceMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | null;
+  tool_call_id?: string;
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: { name: string; arguments: string };
+  }>;
 }
 
 /**
- * Hugging Face API request.
+ * Hugging Face chat completions request.
  */
-export interface HuggingFaceRequest {
-  inputs:
-    | string
-    | {
-        past_user_inputs?: string[];
-        generated_responses?: string[];
-        text: string;
-      };
-  parameters?: {
-    temperature?: number;
-    max_new_tokens?: number;
-    top_p?: number;
-    top_k?: number;
-    repetition_penalty?: number;
-    do_sample?: boolean;
-    return_full_text?: boolean;
-  };
-  options?: {
-    wait_for_model?: boolean;
-    use_cache?: boolean;
-  };
+export interface HuggingFaceRequest extends OpenAICompatToolFields {
+  model: string;
+  messages: HuggingFaceMessage[];
+  temperature?: number;
+  max_tokens?: number;
+  top_p?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
+  seed?: number;
+  stop?: string[];
+  stream?: boolean;
+  stream_options?: { include_usage?: boolean };
 }
 
 /**
- * Hugging Face API response.
+ * Hugging Face chat completions response.
  */
 export interface HuggingFaceResponse {
-  generated_text?: string;
-  conversation?: {
-    past_user_inputs: string[];
-    generated_responses: string[];
+  id?: string;
+  object?: string;
+  created?: number;
+  model?: string;
+  choices: Array<{
+    index: number;
+    message: HuggingFaceMessage;
+    finish_reason: string | null;
+  }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
   };
-  error?: string;
 }
 
 /**
- * Backend adapter for Hugging Face Inference API.
+ * Backend adapter for Hugging Face chat completions.
  *
- * Supports text generation models from Hugging Face Hub.
+ * Talks to the Inference Providers router (`https://router.huggingface.co/v1`), which is
+ * OpenAI-compatible: real SSE streaming, usage, and native tool calling. Authenticate with a
+ * Hugging Face token that has the "Inference Providers" permission.
  *
  * @example Basic Usage
  * ```typescript
@@ -97,22 +150,20 @@ export interface HuggingFaceResponse {
  *
  * @example With Specific Model
  * ```typescript
- * const adapter = new HuggingFaceBackendAdapter({
- *   apiKey: process.env.HUGGINGFACE_API_KEY,
- * });
- *
  * const response = await adapter.execute({
  *   messages: [{ role: 'user', content: 'Hello!' }],
  *   parameters: {
- *     model: 'mistralai/Mixtral-8x7B-Instruct-v0.1',
+ *     // Optionally pin a provider: 'Qwen/Qwen3-32B:cerebras'
+ *     model: 'meta-llama/Llama-3.1-8B-Instruct',
  *   },
  * });
  * ```
  *
- * @example With Inference Endpoints
+ * @example With a dedicated Inference Endpoint
  * ```typescript
  * const adapter = new HuggingFaceBackendAdapter({
  *   apiKey: process.env.HUGGINGFACE_API_KEY,
+ *   // `/v1` is appended when the URL has no path.
  *   baseURL: 'https://your-endpoint.aws.endpoints.huggingface.cloud',
  * });
  * ```
@@ -127,27 +178,27 @@ export class HuggingFaceBackendAdapter implements BackendAdapter<
 
   constructor(config: ApiKeyBackendAdapterConfig) {
     this.config = config;
-    this.baseURL = config.baseURL || 'https://api-inference.huggingface.co';
+    this.baseURL = resolveBaseURL(config.baseURL);
 
     this.metadata = {
       name: 'huggingface-backend',
-      version: '1.0.0',
+      version: '2.0.0',
       provider: 'Hugging Face',
       capabilities: {
-        streaming: false, // Hugging Face Inference API doesn't support streaming in the same way
-        multiModal: false, // Text-only for standard inference
-        tools: false, // Uses the legacy text-generation endpoint (prompt string), not chat completions (#207)
+        streaming: true,
+        multiModal: false, // Text-only here
+        tools: true, // Router chat completions: tools / tool_choice / tool_calls
         structuredOutput: 'fallback',
         maxContextTokens: 4096, // Varies by model
         systemMessageStrategy: 'in-messages',
         supportsMultipleSystemMessages: false,
         supportsTemperature: true,
         supportsTopP: true,
-        supportsTopK: true,
-        supportsSeed: false,
-        supportsFrequencyPenalty: false,
-        supportsPresencePenalty: false,
-        maxStopSequences: 0,
+        supportsTopK: false,
+        supportsSeed: true,
+        supportsFrequencyPenalty: true,
+        supportsPresencePenalty: true,
+        maxStopSequences: 4,
       },
       config: {
         baseURL: this.baseURL,
@@ -160,32 +211,14 @@ export class HuggingFaceBackendAdapter implements BackendAdapter<
    */
   async execute(request: IRChatRequest, signal?: AbortSignal): Promise<IRChatResponse> {
     try {
-      // Convert IR to Hugging Face format
       const hfRequest = this.fromIR(request);
-
-      // Make HTTP request
       const startTime = Date.now();
-      const response = await this.makeRequest(
-        // Meta's Llama repos require accepting a gated license on HF, which
-        // breaks a default that's supposed to "just work". Qwen3.5-9B is
-        // ungated (Apache 2.0) and matches the ~8B-class lite tier other
-        // aggregator adapters in this file default to.
-        request.parameters?.model || this.config.defaultModel || 'Qwen/Qwen3.5-9B',
-        hfRequest,
-        signal
-      );
-
-      // Convert response to IR
-      const irResponse = this.toIR(response, request, Date.now() - startTime);
-
-      return irResponse;
+      const response = await this.makeRequest(hfRequest, signal);
+      return this.toIR(response, request, Date.now() - startTime);
     } catch (error) {
-      // Re-throw adapter errors
       if (error instanceof AdapterError) {
         throw error;
       }
-
-      // Wrap unknown errors
       throw new ProviderError({
         code: ErrorCode.PROVIDER_ERROR,
         message: `Hugging Face request failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -199,45 +232,141 @@ export class HuggingFaceBackendAdapter implements BackendAdapter<
   }
 
   /**
-   * Execute streaming chat completion request.
+   * Execute streaming chat completion request (SSE).
    */
-  async *executeStream(request: IRChatRequest, _signal?: AbortSignal): IRChatStream {
-    // Hugging Face Inference API doesn't support streaming in the standard way
-    // We'll simulate it by making a regular request and yielding chunks
-
+  async *executeStream(request: IRChatRequest, signal?: AbortSignal): IRChatStream {
     let sequence = 0;
 
     yield {
       type: 'start',
       sequence: sequence++,
-      metadata: request.metadata,
+      metadata: {
+        ...request.metadata,
+        provenance: {
+          ...request.metadata.provenance,
+          backend: this.metadata.name,
+          locality: 'external',
+        },
+      },
     } as IRStreamChunk;
 
     try {
-      const response = await this.execute(request, _signal);
+      const hfRequest = this.fromIR(request);
+      hfRequest.stream = true;
+      hfRequest.stream_options = { include_usage: true };
 
-      // Yield content as single chunk
-      const content =
-        typeof response.message.content === 'string'
-          ? response.message.content
-          : response.message.content
-              .filter((c) => c.type === 'text')
-              .map((c) => (c as { text: string }).text)
-              .join('');
+      const streamingConfig = mergeStreamingConfig(this.config.streaming);
+      const effectiveMode = getEffectiveStreamMode(request.streamMode, undefined, streamingConfig);
+      const includeBoth = streamingConfig.includeBoth || effectiveMode === 'accumulated';
 
-      yield {
-        type: 'content',
-        sequence: sequence++,
-        delta: content,
-        role: 'assistant',
-      } as IRStreamChunk;
+      const response = await this.post(hfRequest, signal);
 
+      if (!response.body) {
+        throw new StreamError({
+          code: ErrorCode.STREAM_ERROR,
+          message: 'No response body',
+          provenance: { backend: this.metadata.name },
+        });
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let contentBuffer = '';
+      let finishReason: string | null = null;
+      let usage: NonNullable<IRChatResponse['usage']> | undefined;
+      const toolAssembler = new ToolCallAssembler();
+
+      const handleLine = function* (line: string): Generator<IRStreamChunk, void, undefined> {
+        if (!line.startsWith('data:')) {
+          return;
+        }
+        const data = line.slice(5).trim();
+        if (!data || data === '[DONE]') {
+          return;
+        }
+        let chunk: any;
+        try {
+          chunk = JSON.parse(data);
+        } catch {
+          throw new StreamError({
+            code: ErrorCode.STREAM_ERROR,
+            message: `Malformed Hugging Face stream event: ${data.slice(0, 200)}`,
+            provenance: { backend: 'huggingface-backend' },
+          });
+        }
+        if (chunk.error) {
+          const detail =
+            typeof chunk.error === 'string' ? chunk.error : (chunk.error.message ?? 'stream error');
+          throw new StreamError({
+            code: ErrorCode.STREAM_ERROR,
+            message: `Hugging Face stream error: ${detail}`,
+            provenance: { backend: 'huggingface-backend' },
+          });
+        }
+        if (chunk.usage) {
+          usage = {
+            promptTokens: chunk.usage.prompt_tokens,
+            completionTokens: chunk.usage.completion_tokens,
+            totalTokens: chunk.usage.total_tokens,
+          };
+        }
+        const choice = chunk.choices?.[0];
+        const text = choice?.delta?.content;
+        if (text) {
+          contentBuffer += text;
+          const contentChunk = {
+            type: 'content',
+            sequence: sequence++,
+            delta: text,
+            role: 'assistant',
+            ...(includeBoth && { accumulated: contentBuffer }),
+          } as IRStreamChunk;
+          yield contentChunk;
+        }
+        for (const toolChunk of toolAssembler.ingest(choice?.delta?.tool_calls, () => sequence++)) {
+          yield toolChunk;
+        }
+        if (choice?.finish_reason) {
+          finishReason = choice.finish_reason;
+        }
+      };
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            yield* handleLine(line.trim());
+          }
+        }
+        if (buffer.trim()) {
+          yield* handleLine(buffer.trim());
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      if (!finishReason) {
+        throw new StreamError({
+          code: ErrorCode.STREAM_ERROR,
+          message: 'Hugging Face stream ended before a finish_reason arrived',
+          provenance: { backend: this.metadata.name },
+        });
+      }
+
+      const message: IRMessage = buildStreamDoneMessage(contentBuffer, toolAssembler.calls);
       yield {
         type: 'done',
         sequence: sequence++,
-        finishReason: response.finishReason,
-        usage: response.usage,
-        message: response.message,
+        finishReason: this.mapFinishReason(finishReason),
+        ...(usage && { usage }),
+        message,
       } as IRStreamChunk;
     } catch (error) {
       yield {
@@ -257,14 +386,13 @@ export class HuggingFaceBackendAdapter implements BackendAdapter<
    */
   async healthCheck(): Promise<boolean> {
     try {
-      // Simple test request
-      const response = await fetch(this.baseURL, {
+      const response = await fetch(`${this.baseURL}/models`, {
         method: 'GET',
         headers: this.getHeaders(),
         signal: AbortSignal.timeout(5000),
       });
-      // HF returns various status codes, 200 or 404 are both "healthy"
-      return response.status === 200 || response.status === 404;
+      // Dedicated endpoints may not serve /models; 404 still means the host is up.
+      return response.ok || response.status === 404;
     } catch {
       return false;
     }
@@ -274,76 +402,58 @@ export class HuggingFaceBackendAdapter implements BackendAdapter<
    * Estimate cost for Hugging Face.
    */
   estimateCost(request: IRChatRequest): Promise<number | null> {
-    // Hugging Face Inference API is free for public models (with rate limits)
-    // Inference Endpoints are charged separately
     const estimatedTokens = this.estimateTokens(request);
 
-    // If using a private Inference Endpoint, estimate ~$0.06 per 1000 tokens
-    if (this.baseURL !== 'https://api-inference.huggingface.co') {
+    // Dedicated Inference Endpoint: estimate ~$0.06 per 1000 tokens.
+    if (this.baseURL !== DEFAULT_BASE_URL) {
       return Promise.resolve((estimatedTokens / 1000) * 0.06);
     }
 
-    // Free tier
+    // Router usage is billed per provider; no flat rate to estimate.
     return Promise.resolve(0);
   }
 
   // ==========================================================================
-  // Private Helper Methods
+  // Conversion
   // ==========================================================================
 
   /**
-   * Convert IR request to Hugging Face format.
+   * Convert IR request to Hugging Face chat completions format.
    *
    * Public method for testing and debugging - see what will be sent to Hugging Face.
    */
   public fromIR(request: IRChatRequest): HuggingFaceRequest {
     try {
-      // Convert messages to prompt text
-      const prompt = this.messagesToPrompt(
-        buildStructuredOutputFallbackMessages(request.messages, request.responseFormat)
+      const { messages } = normalizeSystemMessages(
+        buildStructuredOutputFallbackMessages(request.messages, request.responseFormat),
+        this.metadata.capabilities.systemMessageStrategy,
+        this.metadata.capabilities.supportsMultipleSystemMessages
       );
 
-      const temperature = request.parameters?.temperature;
-
-      // `temperature: 0` is the IR/OpenAI spelling of "decode greedily". Hugging
-      // Face spells the same intent as `do_sample: false` with the sampling
-      // knobs *absent*, and rejects the literal zero:
-      // text-generation-inference validates `temperature.unwrap_or(1.0) <= 0.0
-      // -> ValidationError::Temperature` ("`temperature` must be strictly
-      // positive") unconditionally, before and independently of `do_sample`
-      // (`router/src/validation.rs`). So `do_sample: false` does not excuse the
-      // zero -- the request never reaches the model.
-      //
-      // `top_p`/`top_k` have to go with it. They are not merely redundant under
-      // `do_sample: false`; TGI's server *promotes* them back to sampling:
-      //
-      //   has_warpers = (temperature != 1.0) or (top_k != 0) or (top_p < 1.0) ...
-      //   sampling    = do_sample or has_warpers
-      //   self.choice = Sampling(...) if sampling else Greedy()
-      //
-      // (`server/text_generation_server/utils/tokens.py`, and the same per-request
-      // promotion in the batched `HeterogeneousNextTokenChooser`.) Leaving either
-      // one in the payload would silently override the `do_sample: false` we just
-      // set and sample anyway. Omitting all three lets TGI's own defaults
-      // (temperature 1.0, top_p 1.0, top_k 0) collapse `has_warpers` to false, so
-      // `do_sample: false` decides, and the request decodes greedily as asked.
-      const greedy = temperature === 0;
+      // Text-only: flatten content parts to a string.
+      const hfMessages: HuggingFaceMessage[] = messages
+        .flatMap((msg) => convertIRMessageToOpenAICompat(msg, this.metadata.name))
+        .map((msg) => ({
+          ...msg,
+          content:
+            msg.tool_calls && !msg.content?.length ? '' : openAICompatContentToText(msg.content),
+        }));
 
       return {
-        inputs: prompt,
-        parameters: {
-          temperature: greedy ? undefined : temperature,
-          max_new_tokens: request.parameters?.maxTokens,
-          top_p: greedy ? undefined : request.parameters?.topP,
-          top_k: greedy ? undefined : request.parameters?.topK,
-          repetition_penalty: normalizeRepetitionPenalty(request.parameters?.frequencyPenalty),
-          do_sample: temperature !== undefined && temperature > 0,
-          return_full_text: false,
-        },
-        options: {
-          wait_for_model: true,
-          use_cache: true,
-        },
+        // Meta's Llama repos require accepting a gated license on HF, which breaks a default
+        // that's supposed to "just work". Qwen3.5-9B is ungated (Apache 2.0) and matches the
+        // ~8B-class lite tier other aggregator adapters default to.
+        model: request.parameters?.model || this.config.defaultModel || 'Qwen/Qwen3.5-9B',
+        messages: hfMessages,
+        temperature: request.parameters?.temperature,
+        max_tokens: request.parameters?.maxTokens,
+        top_p: request.parameters?.topP,
+        frequency_penalty: request.parameters?.frequencyPenalty,
+        presence_penalty: request.parameters?.presencePenalty,
+        seed: request.parameters?.seed,
+        stop: request.parameters?.stopSequences ? [...request.parameters.stopSequences] : undefined,
+        stream: request.stream,
+        ...buildOpenAICompatToolFields(request),
       };
     } catch (error) {
       throw new AdapterConversionError({
@@ -363,111 +473,88 @@ export class HuggingFaceBackendAdapter implements BackendAdapter<
    * Public method for testing and debugging - parse Hugging Face responses manually.
    */
   public toIR(
-    response: HuggingFaceResponse | HuggingFaceResponse[],
+    response: HuggingFaceResponse,
     originalRequest: IRChatRequest,
     latencyMs: number
   ): IRChatResponse {
-    try {
-      // Handle array response
-      const hfResponse = Array.isArray(response) ? response[0] : response;
-
-      if (!hfResponse || hfResponse.error) {
-        throw new Error(hfResponse?.error || 'Empty response from Hugging Face');
-      }
-
-      const text = hfResponse.generated_text || '';
-
-      const message: IRMessage = {
-        role: 'assistant',
-        content: originalRequest.responseFormat ? extractStructuredOutputJSON(text) : text,
-      };
-
-      return {
-        message,
-        finishReason: 'stop',
-        usage: {
-          promptTokens: this.estimateTokens(originalRequest),
-          completionTokens: Math.ceil(text.length / 4),
-          totalTokens: this.estimateTokens(originalRequest) + Math.ceil(text.length / 4),
-        },
-        metadata: {
-          ...originalRequest.metadata,
-          provenance: {
-            ...originalRequest.metadata.provenance,
-            backend: this.metadata.name,
-            locality: 'external',
-            // This provider does not report a served model. Setting it explicitly
-            // stops an upstream hop's value, spread in above, from being
-            // re-attributed to this backend — absent is acceptable, wrong is not.
-            servedModel: undefined,
-          },
-          custom: {
-            ...originalRequest.metadata.custom,
-            latencyMs,
-            ...(originalRequest.responseFormat ? { responseFormatEnforced: false } : {}),
-          },
-          warnings: originalRequest.responseFormat
-            ? [
-                ...(originalRequest.metadata.warnings ?? []),
-                buildResponseFormatFallbackWarning(this.metadata.name),
-              ]
-            : originalRequest.metadata.warnings,
-        },
-      };
-    } catch (error) {
+    const choice = response?.choices?.[0];
+    if (!choice) {
       throw new AdapterConversionError({
         code: ErrorCode.ADAPTER_CONVERSION_ERROR,
-        message: `Failed to convert Hugging Face response to IR: ${error instanceof Error ? error.message : String(error)}`,
-        provenance: {
-          backend: this.metadata.name,
-        },
-        cause: error instanceof Error ? error : undefined,
+        message: 'No choices in Hugging Face response',
+        provenance: { backend: this.metadata.name },
       });
     }
+
+    const rawContent = openAICompatContentToText(choice.message.content);
+    const content = originalRequest.responseFormat
+      ? extractStructuredOutputJSON(rawContent)
+      : rawContent;
+    const message: IRMessage = buildOpenAICompatResponseMessage(
+      'assistant',
+      content,
+      choice.message.tool_calls
+    );
+
+    const promptTokens = response.usage?.prompt_tokens ?? this.estimateTokens(originalRequest);
+    const completionTokens = response.usage?.completion_tokens ?? Math.ceil(rawContent.length / 4);
+
+    return {
+      message,
+      finishReason: this.mapFinishReason(choice.finish_reason || 'stop'),
+      usage: {
+        promptTokens,
+        completionTokens,
+        totalTokens: response.usage?.total_tokens ?? promptTokens + completionTokens,
+      },
+      metadata: {
+        ...originalRequest.metadata,
+        ...(response.id && { providerResponseId: response.id }),
+        provenance: {
+          ...originalRequest.metadata.provenance,
+          backend: this.metadata.name,
+          locality: 'external',
+          servedModel: response.model,
+        },
+        custom: {
+          ...originalRequest.metadata.custom,
+          latencyMs,
+          ...(originalRequest.responseFormat ? { responseFormatEnforced: false } : {}),
+        },
+        warnings: originalRequest.responseFormat
+          ? [
+              ...(originalRequest.metadata.warnings ?? []),
+              buildResponseFormatFallbackWarning(this.metadata.name),
+            ]
+          : originalRequest.metadata.warnings,
+      },
+      raw: response as unknown as Record<string, unknown>,
+    };
   }
 
-  /**
-   * Convert messages to prompt text.
-   */
-  private messagesToPrompt(messages: Iterable<IRMessage>): string {
-    const parts: string[] = [];
-
-    for (const message of messages) {
-      const text =
-        typeof message.content === 'string'
-          ? message.content
-          : message.content
-              .filter((c) => c.type === 'text')
-              .map((c) => (c as { text: string }).text)
-              .join('\n');
-
-      if (message.role === 'system') {
-        parts.push(`System: ${text}`);
-      } else if (message.role === 'user') {
-        parts.push(`User: ${text}`);
-      } else if (message.role === 'assistant') {
-        parts.push(`Assistant: ${text}`);
-      }
+  private mapFinishReason(reason: string | null): FinishReason {
+    switch (reason) {
+      case 'length':
+        return 'length';
+      case 'tool_calls':
+        return 'tool_calls';
+      case 'content_filter':
+        return 'content_filter';
+      default:
+        return 'stop';
     }
-
-    // Add final assistant prompt
-    parts.push('Assistant:');
-
-    return parts.join('\n\n');
   }
 
-  /**
-   * Make HTTP request to Hugging Face API.
-   */
-  private async makeRequest(
-    model: string,
-    request: HuggingFaceRequest,
-    signal?: AbortSignal
-  ): Promise<HuggingFaceResponse | HuggingFaceResponse[]> {
-    try {
-      const url = model ? `${this.baseURL}/models/${model}` : this.baseURL;
+  // ==========================================================================
+  // HTTP
+  // ==========================================================================
 
-      const response = await fetch(url, {
+  /**
+   * POST to `<baseURL>/chat/completions`; throws a mapped error on a non-2xx status.
+   */
+  private async post(request: HuggingFaceRequest, signal?: AbortSignal): Promise<Response> {
+    try {
+      const response = await fetch(`${this.baseURL}/chat/completions`, {
         method: 'POST',
         headers: this.getHeaders(),
         body: JSON.stringify(request),
@@ -486,9 +573,7 @@ export class HuggingFaceBackendAdapter implements BackendAdapter<
           response.headers
         );
       }
-
-      const data = (await response.json()) as HuggingFaceResponse | HuggingFaceResponse[];
-      return data;
+      return response;
     } catch (error) {
       if (error instanceof TypeError && error.message.includes('fetch')) {
         throw new NetworkError({
@@ -502,6 +587,14 @@ export class HuggingFaceBackendAdapter implements BackendAdapter<
       }
       throw error;
     }
+  }
+
+  private async makeRequest(
+    request: HuggingFaceRequest,
+    signal?: AbortSignal
+  ): Promise<HuggingFaceResponse> {
+    const response = await this.post(request, signal);
+    return (await response.json()) as HuggingFaceResponse;
   }
 
   /**
