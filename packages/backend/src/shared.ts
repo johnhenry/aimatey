@@ -1194,6 +1194,7 @@ export function streamErrorDetails(error: unknown): Record<string, unknown> | un
     retryable: error.isRetryable,
     ...(error.statusCode !== undefined && { statusCode: error.statusCode }),
     ...(error.providerMessage !== undefined && { providerMessage: error.providerMessage }),
+    ...(typeof error.details?.requestId === 'string' && { requestId: error.details.requestId }),
     ...(error instanceof RateLimitError &&
       error.retryAfter !== undefined && { retryAfter: error.retryAfter }),
   };
