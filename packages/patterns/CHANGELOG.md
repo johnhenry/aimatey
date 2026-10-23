@@ -1,5 +1,15 @@
 # @johnhenry/aimatey-patterns
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [ec7f8e8]
+  - @johnhenry/aimatey-errors@0.4.0
+  - @johnhenry/aimatey-types@0.7.1
+  - @johnhenry/aimatey-core@0.6.1
+  - @johnhenry/aimatey-utils@0.6.1
+
 ## 0.2.0
 
 ### Minor Changes
