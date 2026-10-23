@@ -32,7 +32,7 @@ import type {
   IRStreamChunk,
   IRWarning,
 } from '@johnhenry/aimatey-types';
-import { AdapterError, ProviderError, ErrorCode } from '@johnhenry/aimatey-errors';
+import { AdapterError, ProviderError, StreamError, ErrorCode } from '@johnhenry/aimatey-errors';
 import { createWarning } from '@johnhenry/aimatey-utils';
 
 // ============================================================================
@@ -96,6 +96,60 @@ export interface LiteRtLmConfig {
    * peer dependency.
    */
   engineModule?: LiteRtLmModule;
+
+  /**
+   * Called as the engine loads (download, then compile), for every load this
+   * adapter waits on, including one already started by another adapter
+   * instance for the same URL (the latest snapshot is replayed immediately).
+   * Also see {@link LiteRtLmBackendAdapter.preload}.
+   */
+  onProgress?: (progress: LiteRtLmLoadProgress) => void;
+
+  /**
+   * Download the model bundle in the adapter instead of handing the URL to the
+   * runtime, passing the runtime a byte-counting stream. This is what makes
+   * byte progress (`loaded` / `total`) and mid-download abort possible:
+   * `@litert-lm/core` fetches a URL itself with no progress or abort hook.
+   * The request is the runtime's own (`fetch(url, { credentials: 'same-origin' })`),
+   * plus an abort signal. Pass a function to use a custom `fetch`.
+   *
+   * Off by default (the URL is passed through unchanged); without it progress
+   * is a single `loading` stage and abort takes effect after the runtime
+   * finishes loading, because a runtime-owned download cannot be interrupted.
+   *
+   * @default false
+   */
+  fetchModel?: boolean | typeof fetch;
+}
+
+/**
+ * Engine load stage.
+ *
+ * - `download`: model bytes are being fetched (or, for a Blob, read) by the adapter (`fetchModel`).
+ * - `compile`: all bytes are in; the runtime is compiling the model for WebGPU. Cannot be interrupted.
+ * - `loading`: download + compile as one step, reported when the runtime owns the download
+ *   (`fetchModel` off), so bytes are unknown.
+ * - `ready`: the engine is created.
+ */
+export type LiteRtLmLoadStage = 'download' | 'compile' | 'loading' | 'ready';
+
+/**
+ * A model-load progress event.
+ */
+export interface LiteRtLmLoadProgress {
+  readonly stage: LiteRtLmLoadStage;
+  /** Bytes received so far (0 for `loading`). */
+  readonly loaded: number;
+  /** Total bytes when known (Content-Length or Blob size). */
+  readonly total?: number;
+}
+
+/** Options for {@link LiteRtLmBackendAdapter.preload}. */
+export interface LiteRtLmPreloadOptions {
+  /** Stop waiting (and stop an adapter-managed download when nobody else needs it). */
+  signal?: AbortSignal;
+  /** Progress for this call, in addition to the config's `onProgress`. */
+  onProgress?: (progress: LiteRtLmLoadProgress) => void;
 }
 
 // ============================================================================
@@ -127,7 +181,72 @@ async function loadLiteRtLm(): Promise<LiteRtLmModule> {
  * once per page, shared across adapter instances. Blob models are cached on
  * the adapter instance instead (no stable global key).
  */
-const engineCacheByUrl = new Map<string, Promise<LiteRtLmEngine>>();
+const engineCacheByUrl = new Map<string, EngineLoad>();
+
+/**
+ * One in-flight (or finished) engine load, shared by everything waiting on it.
+ * The load has its own AbortController so one caller's abort cannot kill a
+ * download another caller still needs: the download is only cancelled when the
+ * last waiter leaves, and only while it is still downloading.
+ */
+interface EngineLoad {
+  promise: Promise<LiteRtLmEngine>;
+  controller: AbortController;
+  waiters: number;
+  settled: boolean;
+  last?: LiteRtLmLoadProgress;
+  listeners: Set<(progress: LiteRtLmLoadProgress) => void>;
+}
+
+function emitProgress(load: EngineLoad, progress: LiteRtLmLoadProgress): void {
+  load.last = progress;
+  for (const listener of [...load.listeners]) {
+    try {
+      listener(progress);
+    } catch {
+      // A throwing progress callback must not break the load
+    }
+  }
+}
+
+function cancelledError(backend: string): StreamError {
+  return new StreamError({
+    code: ErrorCode.STREAM_CANCELLED,
+    message: 'LiteRT-LM request aborted',
+    provenance: { backend },
+  });
+}
+
+/**
+ * Settle with `promise`, or reject as soon as `signal` aborts. Does not cancel
+ * `promise` (the caller decides what keeps running).
+ */
+function raceAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+  onAbort: () => Error
+): Promise<T> {
+  if (!signal) {
+    return promise;
+  }
+  if (signal.aborted) {
+    return Promise.reject(onAbort());
+  }
+  return new Promise<T>((resolve, reject) => {
+    const listener = (): void => reject(onAbort());
+    signal.addEventListener('abort', listener, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', listener);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', listener);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    );
+  });
+}
 
 /**
  * Test hook: clear the shared engine cache.
@@ -167,7 +286,7 @@ export function clearLiteRtLmEngineCache(): void {
 export class LiteRtLmBackendAdapter implements BackendAdapter {
   readonly metadata: AdapterMetadata;
   private readonly config: LiteRtLmConfig;
-  private instanceEngine: Promise<LiteRtLmEngine> | null = null;
+  private instanceEngine: EngineLoad | null = null;
 
   constructor(config: LiteRtLmConfig) {
     this.config = config;
@@ -269,13 +388,17 @@ export class LiteRtLmBackendAdapter implements BackendAdapter {
   async *executeStream(request: IRChatRequest, signal?: AbortSignal): IRChatStream {
     let conversation: LiteRtLmConversation | null = null;
     let sequence = 0;
+    const cancelled = (): Error => cancelledError(this.metadata.name);
+    let removeAbortListener = (): void => {};
 
     try {
-      const engine = await this.getEngine();
+      const engine = await this.loadEngine({ signal, onProgress: this.config.onProgress });
 
       const { preface, prompt } = this.buildConversationInput(request);
-      conversation = await engine.createConversation(
-        preface.length > 0 ? { preface: { messages: preface } } : {}
+      conversation = await raceAbort(
+        engine.createConversation(preface.length > 0 ? { preface: { messages: preface } } : {}),
+        signal,
+        cancelled
       );
 
       yield {
@@ -294,27 +417,50 @@ export class LiteRtLmBackendAdapter implements BackendAdapter {
 
       let buffer = '';
 
-      for await (const chunk of conversation.sendMessageStreaming(prompt)) {
-        if (signal?.aborted) {
-          conversation.cancel();
-          throw new ProviderError({
-            code: ErrorCode.PROVIDER_ERROR,
-            message: 'LiteRT-LM generation aborted',
-            provenance: { backend: this.metadata.name },
-          });
-        }
+      // Cancel the runtime the moment the signal fires, not when the next chunk
+      // arrives: a generation that never yields must still be stoppable.
+      const activeConversation = conversation;
+      let abortWaiter: Promise<never> | null = null;
+      if (signal) {
+        abortWaiter = new Promise<never>((_resolve, reject) => {
+          const listener = (): void => {
+            activeConversation.cancel();
+            reject(cancelled());
+          };
+          if (signal.aborted) {
+            listener();
+          } else {
+            signal.addEventListener('abort', listener, { once: true });
+            removeAbortListener = () => signal.removeEventListener('abort', listener);
+          }
+        });
+        abortWaiter.catch(() => {}); // rejection is consumed through the race below
+      }
 
-        for (const item of chunk.content) {
-          if (item.type === 'text' && item.text) {
-            buffer += item.text;
-            yield {
-              type: 'content',
-              sequence: sequence++,
-              delta: item.text,
-              role: 'assistant',
-            } as IRStreamChunk;
+      const iterator = conversation.sendMessageStreaming(prompt)[Symbol.asyncIterator]();
+      try {
+        for (;;) {
+          const next = iterator.next();
+          const result = abortWaiter ? await Promise.race([next, abortWaiter]) : await next;
+          if (result.done) {
+            break;
+          }
+          for (const item of result.value.content) {
+            if (item.type === 'text' && item.text) {
+              buffer += item.text;
+              yield {
+                type: 'content',
+                sequence: sequence++,
+                delta: item.text,
+                role: 'assistant',
+              } as IRStreamChunk;
+            }
           }
         }
+      } catch (error) {
+        // Do not await: a runtime that ignores cancel() could hang return() forever
+        void Promise.resolve(iterator.return?.()).catch(() => {});
+        throw error;
       }
 
       const message: IRMessage = { role: 'assistant', content: buffer };
@@ -334,7 +480,23 @@ export class LiteRtLmBackendAdapter implements BackendAdapter {
           message: error instanceof Error ? error.message : String(error),
         },
       } as IRStreamChunk;
+    } finally {
+      removeAbortListener();
     }
+  }
+
+  /**
+   * Load the model ahead of the first request, with progress and abort.
+   * Shares the same load as `execute`/`executeStream`: calling it first means
+   * the first request starts with a ready engine, and the result is cached.
+   *
+   * Abort stops waiting at once. With `fetchModel` the download itself is
+   * cancelled too (unless another caller still needs it). Once the runtime is
+   * compiling it cannot be interrupted: the compile finishes in the background
+   * and the engine stays cached for the next call.
+   */
+  async preload(options: LiteRtLmPreloadOptions = {}): Promise<void> {
+    await this.loadEngine(options);
   }
 
   /**
@@ -353,8 +515,9 @@ export class LiteRtLmBackendAdapter implements BackendAdapter {
     this.instanceEngine = null;
 
     if (cached) {
+      cached.controller.abort(); // no-op once settled; stops a download still in flight
       try {
-        const engine = await cached;
+        const engine = await cached.promise;
         await engine.delete();
       } catch {
         // Engine failed to initialize; nothing to free
@@ -367,36 +530,174 @@ export class LiteRtLmBackendAdapter implements BackendAdapter {
   // ==========================================================================
 
   /**
-   * Get (or create) the engine — shared per model URL, per-instance for Blobs.
+   * Get (or start) the engine load — shared per model URL, per-instance for Blobs.
    */
-  private getEngine(): Promise<LiteRtLmEngine> {
+  private acquireLoad(): EngineLoad {
     const { model } = this.config;
+
+    const start = (evict: () => void): EngineLoad => {
+      const load: EngineLoad = {
+        promise: undefined as unknown as Promise<LiteRtLmEngine>,
+        controller: new AbortController(),
+        waiters: 0,
+        settled: false,
+        listeners: new Set(),
+      };
+      load.promise = this.createEngine(load);
+      load.promise.then(
+        () => {
+          load.settled = true;
+        },
+        () => {
+          load.settled = true;
+          // Drop failed or aborted initializations so retries re-attempt
+          evict();
+        }
+      );
+      return load;
+    };
 
     if (typeof model === 'string') {
       let cached = engineCacheByUrl.get(model);
       if (!cached) {
-        cached = this.createEngine();
-        engineCacheByUrl.set(model, cached);
-        // Drop failed initializations so retries re-attempt
-        cached.catch(() => engineCacheByUrl.delete(model));
+        const created = start(() => {
+          if (engineCacheByUrl.get(model) === created) {
+            engineCacheByUrl.delete(model);
+          }
+        });
+        cached = created;
+        engineCacheByUrl.set(model, created);
       }
       return cached;
     }
 
     if (!this.instanceEngine) {
-      this.instanceEngine = this.createEngine();
-      this.instanceEngine.catch(() => {
-        this.instanceEngine = null;
+      const created = start(() => {
+        if (this.instanceEngine === created) {
+          this.instanceEngine = null;
+        }
       });
+      this.instanceEngine = created;
     }
     return this.instanceEngine;
   }
 
-  private async createEngine(): Promise<LiteRtLmEngine> {
+  /**
+   * Wait for the engine. Abort rejects immediately; the shared download is
+   * cancelled only when the last waiter has left and it is still downloading.
+   */
+  private async loadEngine(options: {
+    signal?: AbortSignal;
+    onProgress?: (progress: LiteRtLmLoadProgress) => void;
+  }): Promise<LiteRtLmEngine> {
+    const { signal } = options;
+    const cancelled = (): Error => cancelledError(this.metadata.name);
+    if (signal?.aborted) {
+      throw cancelled();
+    }
+
+    const load = this.acquireLoad();
+    const listeners = [this.config.onProgress, options.onProgress].filter(
+      (fn, index, all): fn is (progress: LiteRtLmLoadProgress) => void =>
+        fn !== undefined && all.indexOf(fn) === index
+    );
+    for (const listener of listeners) {
+      load.listeners.add(listener);
+      if (load.last) {
+        try {
+          listener(load.last);
+        } catch {
+          // A throwing progress callback must not break the load
+        }
+      }
+    }
+    load.waiters++;
+
+    try {
+      return await raceAbort(load.promise, signal, cancelled);
+    } finally {
+      load.waiters--;
+      for (const listener of listeners) {
+        load.listeners.delete(listener);
+      }
+      if (load.waiters === 0 && !load.settled && load.last?.stage === 'download') {
+        load.controller.abort();
+      }
+    }
+  }
+
+  private async createEngine(load: EngineLoad): Promise<LiteRtLmEngine> {
     const module = this.config.engineModule ?? (await loadLiteRtLm());
-    return module.Engine.create({
-      model: this.config.model,
+    const { model, fetchModel } = this.config;
+
+    let source: string | Blob | ReadableStream = model;
+    if (fetchModel) {
+      source = await this.openModelStream(load, fetchModel === true ? fetch : fetchModel);
+    } else {
+      emitProgress(load, { stage: 'loading', loaded: 0 });
+    }
+
+    const engine = await module.Engine.create({
+      model: source,
       mainExecutorSettings: { maxNumTokens: this.config.maxNumTokens ?? 8192 },
+    });
+    emitProgress(load, { stage: 'ready', loaded: load.last?.loaded ?? 0, total: load.last?.total });
+    return engine;
+  }
+
+  /**
+   * Fetch (or read) the model ourselves and hand the runtime a stream that
+   * counts bytes. The load's own signal cancels the fetch.
+   */
+  private async openModelStream(
+    load: EngineLoad,
+    fetchImpl: typeof fetch
+  ): Promise<ReadableStream<Uint8Array>> {
+    const { model } = this.config;
+    let body: ReadableStream<Uint8Array>;
+    let total: number | undefined;
+
+    if (typeof model === 'string') {
+      emitProgress(load, { stage: 'download', loaded: 0 });
+      const response = await fetchImpl(model, {
+        credentials: 'same-origin',
+        signal: load.controller.signal,
+      });
+      if (!response.ok || !response.body) {
+        throw new ProviderError({
+          code: ErrorCode.PROVIDER_ERROR,
+          message: `Failed to fetch model file from ${model}: HTTP ${response.status}`,
+          isRetryable: response.status >= 500,
+          provenance: { backend: this.metadata.name },
+          statusCode: response.status,
+        });
+      }
+      body = response.body;
+      const length = Number(response.headers.get('content-length'));
+      total = Number.isFinite(length) && length > 0 ? length : undefined;
+    } else {
+      body = model.stream() as ReadableStream<Uint8Array>;
+      total = model.size;
+    }
+
+    const reader = body.getReader();
+    let loaded = 0;
+    emitProgress(load, { stage: 'download', loaded, total });
+    return new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        const { done, value } = await reader.read();
+        if (done) {
+          emitProgress(load, { stage: 'compile', loaded, total: total ?? loaded });
+          controller.close();
+          return;
+        }
+        loaded += value.byteLength;
+        emitProgress(load, { stage: 'download', loaded, total });
+        controller.enqueue(value);
+      },
+      cancel(reason) {
+        return reader.cancel(reason);
+      },
     });
   }
 
