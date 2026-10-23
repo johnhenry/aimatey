@@ -36,7 +36,14 @@ import {
   buildStructuredOutputFallbackMessages,
   extractStructuredOutputJSON,
   buildResponseFormatFallbackWarning,
+  buildStreamDoneMessage,
+  buildOpenAICompatToolFields,
+  buildOpenAICompatResponseMessage,
+  convertIRMessageToOpenAICompat,
+  openAICompatContentToText,
+  ToolCallAssembler,
   type ModelCapabilityFilter,
+  type OpenAICompatToolFields,
   estimateTokens,
   streamErrorDetails,
 } from '../shared.js';
@@ -47,8 +54,14 @@ import type { ListModelsOptions, ListModelsResult } from '@johnhenry/aimatey-typ
 // ============================================================================
 
 export interface AI21Message {
-  role: 'system' | 'user' | 'assistant';
-  content: string; // AI21 only supports text content
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | null; // AI21 only supports text content
+  tool_call_id?: string;
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: { name: string; arguments: string };
+  }>;
 }
 
 export interface AI21Request {
@@ -61,6 +74,7 @@ export interface AI21Request {
   presence_penalty?: number;
   stop?: string[];
   stream?: boolean;
+  tools?: OpenAICompatToolFields['tools'];
   // AI21-specific parameters
   n?: number; // Number of completions
   documents?: Array<{
@@ -78,7 +92,7 @@ export interface AI21Response {
   choices: Array<{
     index: number;
     message: AI21Message;
-    finish_reason: 'stop' | 'length' | null;
+    finish_reason: 'stop' | 'length' | 'tool_calls' | null;
   }>;
   usage?: {
     prompt_tokens: number;
@@ -97,8 +111,14 @@ export interface AI21StreamChunk {
     delta: {
       role?: 'assistant';
       content?: string;
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: 'function';
+        function?: { name?: string; arguments?: string };
+      }>;
     };
-    finish_reason: 'stop' | 'length' | null;
+    finish_reason: 'stop' | 'length' | 'tool_calls' | null;
   }>;
 }
 
@@ -114,7 +134,7 @@ export interface AI21StreamChunk {
  * - OpenAI-compatible API
  * - RAG support with document parameter
  * - Text-only (no vision support)
- * - No function calling
+ * - Function calling (tools / tool_calls)
  * - Pricing from $0.50 per 1M tokens
  */
 export class AI21BackendAdapter implements BackendAdapter<AI21Request, AI21Response> {
@@ -132,7 +152,7 @@ export class AI21BackendAdapter implements BackendAdapter<AI21Request, AI21Respo
       capabilities: {
         streaming: true,
         multiModal: false, // Text-only
-        tools: false, // No function calling
+        tools: true, // Function calling (tools / tool_calls)
         structuredOutput: 'fallback',
         maxContextTokens: 256000, // Jamba 1.5 has 256K context
         systemMessageStrategy: 'in-messages',
@@ -162,13 +182,15 @@ export class AI21BackendAdapter implements BackendAdapter<AI21Request, AI21Respo
     );
 
     // AI21 only supports text content, so extract text from multi-modal content
-    const ai21Messages: AI21Message[] = messages.map((msg) => ({
-      role: msg.role === 'tool' ? 'user' : msg.role, // Map tool to user
-      content:
-        typeof msg.content === 'string'
-          ? msg.content
-          : msg.content.map((block) => (block.type === 'text' ? block.text : '')).join(''),
-    }));
+    const ai21Messages: AI21Message[] = messages
+      .flatMap((msg) => convertIRMessageToOpenAICompat(msg, this.metadata.name))
+      .map((msg) => ({
+        ...msg,
+        // A tool-role message without a tool_call_id is plain text, not a tool result
+        role: msg.role === 'tool' && !msg.tool_call_id ? 'user' : msg.role,
+        content:
+          msg.tool_calls && !msg.content?.length ? '' : openAICompatContentToText(msg.content),
+      }));
 
     const ai21Request: AI21Request = {
       model: request.parameters?.model || this.config.defaultModel || 'jamba-1.5-mini',
@@ -193,6 +215,12 @@ export class AI21BackendAdapter implements BackendAdapter<AI21Request, AI21Respo
       ai21Request.n = request.parameters.custom.n as number;
     }
 
+    // AI21 documents `tools` only (no tool_choice), so tool_choice is not sent.
+    const { tools } = buildOpenAICompatToolFields(request);
+    if (tools) {
+      ai21Request.tools = tools;
+    }
+
     return ai21Request;
   }
 
@@ -214,16 +242,17 @@ export class AI21BackendAdapter implements BackendAdapter<AI21Request, AI21Respo
       });
     }
 
-    const message: IRMessage = {
-      role: choice.message.role === 'assistant' ? 'assistant' : 'user',
-      content: originalRequest.responseFormat
-        ? extractStructuredOutputJSON(choice.message.content)
-        : choice.message.content,
-    };
+    const rawContent = choice.message.content ?? '';
+    const message: IRMessage = buildOpenAICompatResponseMessage(
+      choice.message.role === 'assistant' ? 'assistant' : 'user',
+      originalRequest.responseFormat ? extractStructuredOutputJSON(rawContent) : rawContent,
+      choice.message.tool_calls
+    );
 
     const finishReasonMap: Record<string, FinishReason> = {
       stop: 'stop',
       length: 'length',
+      tool_calls: 'tool_calls',
     };
 
     return {
@@ -342,6 +371,7 @@ export class AI21BackendAdapter implements BackendAdapter<AI21Request, AI21Respo
         });
       }
       let contentBuffer = '';
+      const toolAssembler = new ToolCallAssembler();
 
       yield {
         type: 'start',
@@ -402,17 +432,25 @@ export class AI21BackendAdapter implements BackendAdapter<AI21Request, AI21Respo
                 yield contentChunk;
               }
 
+              for (const toolChunk of toolAssembler.ingest(
+                chunk.choices[0]?.delta?.tool_calls,
+                () => sequence++
+              )) {
+                yield toolChunk;
+              }
+
               if (chunk.choices[0]?.finish_reason) {
                 const finishReasonMap: Record<string, FinishReason> = {
                   stop: 'stop',
                   length: 'length',
+                  tool_calls: 'tool_calls',
                 };
 
                 yield {
                   type: 'done',
                   sequence: sequence++,
                   finishReason: finishReasonMap[chunk.choices[0].finish_reason] || 'stop',
-                  message: { role: 'assistant', content: contentBuffer },
+                  message: buildStreamDoneMessage(contentBuffer, toolAssembler.calls),
                 } as IRStreamChunk;
               }
             } catch (parseError) {

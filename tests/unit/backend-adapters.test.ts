@@ -298,7 +298,7 @@ describe('Backend Adapters', () => {
       expect(metadata.name).toBe('dashscope-backend');
       expect(metadata.provider).toBe('Alibaba Cloud Model Studio (DashScope)');
       expect(metadata.capabilities.streaming).toBe(true);
-      expect(metadata.capabilities.tools).toBe(false);
+      expect(metadata.capabilities.tools).toBe(true);
       expect(metadata.capabilities.multiModal).toBe(true);
     });
 

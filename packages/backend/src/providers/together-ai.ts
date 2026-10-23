@@ -26,7 +26,13 @@ import {
   buildStructuredOutputFallbackMessages,
   extractStructuredOutputJSON,
   buildResponseFormatFallbackWarning,
-  buildToolsUnsupportedWarning,
+  buildStreamDoneMessage,
+  buildOpenAICompatToolFields,
+  buildOpenAICompatResponseMessage,
+  convertIRMessageToOpenAICompat,
+  openAICompatContentToText,
+  ToolCallAssembler,
+  type OpenAICompatToolFields,
   estimateTokens,
   streamErrorDetails,
 } from '../shared.js';
@@ -48,7 +54,6 @@ import {
 import {
   normalizeSystemMessages,
   getModelPricingInfo,
-  mediaSourceToUrl,
   decisionConfidence,
 } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
@@ -63,7 +68,8 @@ export type TogetherAIMessageContent =
 
 export interface TogetherAIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: TogetherAIMessageContent;
+  content: TogetherAIMessageContent | null;
+  tool_call_id?: string;
   name?: string;
   tool_calls?: Array<{
     id: string;
@@ -75,7 +81,7 @@ export interface TogetherAIMessage {
   }>;
 }
 
-export interface TogetherAIRequest {
+export interface TogetherAIRequest extends OpenAICompatToolFields {
   model: string;
   messages: TogetherAIMessage[];
   temperature?: number;
@@ -128,8 +134,14 @@ export interface TogetherAIStreamChunk {
     delta: {
       role?: 'assistant';
       content?: string;
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: 'function';
+        function?: { name?: string; arguments?: string };
+      }>;
     };
-    finish_reason: 'stop' | 'length' | null;
+    finish_reason: 'stop' | 'length' | 'tool_calls' | null;
   }>;
 }
 
@@ -167,7 +179,7 @@ export class TogetherAIBackendAdapter implements BackendAdapter<
         maxEmbeddingBatchSize: 100,
         streaming: true,
         multiModal: true, // Vision models available
-        tools: false, // Function calling
+        tools: true, // Function calling (OpenAI-compatible tools / tool_calls)
         structuredOutput: 'fallback',
         maxContextTokens: 1000000, // DeepSeek V4 and other current models support up to 1M
         systemMessageStrategy: 'in-messages',
@@ -206,27 +218,11 @@ export class TogetherAIBackendAdapter implements BackendAdapter<
       this.metadata.capabilities.supportsMultipleSystemMessages
     );
 
-    const togetherMessages: TogetherAIMessage[] = messages.map((msg) => ({
-      role: msg.role,
-      content:
-        typeof msg.content === 'string'
-          ? msg.content
-          : msg.content.map((block) => {
-              if (block.type === 'text') {
-                return { type: 'text', text: block.text };
-              } else if (block.type === 'image') {
-                return {
-                  type: 'image_url',
-                  image_url: {
-                    url: mediaSourceToUrl(block.source, 'together-ai-backend'),
-                  },
-                };
-              }
-              return { type: 'text', text: JSON.stringify(block) };
-            }),
-    }));
+    const togetherMessages = messages.flatMap((msg) =>
+      convertIRMessageToOpenAICompat(msg, this.metadata.name)
+    ) as TogetherAIMessage[];
 
-    return {
+    const togetherRequest: TogetherAIRequest = {
       model: request.parameters?.model || this.config.defaultModel || 'deepseek-ai/DeepSeek-V4-Pro',
       messages: togetherMessages,
       temperature: request.parameters?.temperature,
@@ -237,6 +233,8 @@ export class TogetherAIBackendAdapter implements BackendAdapter<
       stop: request.parameters?.stopSequences ? [...request.parameters.stopSequences] : undefined,
       stream: request.stream || false,
     };
+    Object.assign(togetherRequest, buildOpenAICompatToolFields(request));
+    return togetherRequest;
   }
 
   /**
@@ -257,17 +255,15 @@ export class TogetherAIBackendAdapter implements BackendAdapter<
       });
     }
 
-    const rawContent =
-      typeof choice.message.content === 'string'
-        ? choice.message.content
-        : choice.message.content.map((c: any) => (c.type === 'text' ? c.text : '')).join('');
+    const rawContent = openAICompatContentToText(choice.message.content);
     const content = originalRequest.responseFormat
       ? extractStructuredOutputJSON(rawContent)
       : rawContent;
-    const message: IRMessage = {
-      role: choice.message.role === 'assistant' ? 'assistant' : 'user',
+    const message: IRMessage = buildOpenAICompatResponseMessage(
+      choice.message.role === 'assistant' ? 'assistant' : 'user',
       content,
-    };
+      choice.message.tool_calls
+    );
 
     const finishReasonMap: Record<string, FinishReason> = {
       stop: 'stop',
@@ -279,7 +275,6 @@ export class TogetherAIBackendAdapter implements BackendAdapter<
       ...(originalRequest.responseFormat
         ? [buildResponseFormatFallbackWarning(this.metadata.name)]
         : []),
-      ...(originalRequest.tools?.length ? [buildToolsUnsupportedWarning(this.metadata.name)] : []),
     ];
 
     return {
@@ -572,6 +567,7 @@ export class TogetherAIBackendAdapter implements BackendAdapter<
         });
       }
       let contentBuffer = '';
+      const toolAssembler = new ToolCallAssembler();
 
       yield {
         type: 'start',
@@ -632,17 +628,25 @@ export class TogetherAIBackendAdapter implements BackendAdapter<
                 yield contentChunk;
               }
 
+              for (const toolChunk of toolAssembler.ingest(
+                chunk.choices[0]?.delta?.tool_calls,
+                () => sequence++
+              )) {
+                yield toolChunk;
+              }
+
               if (chunk.choices[0]?.finish_reason) {
                 const finishReasonMap: Record<string, FinishReason> = {
                   stop: 'stop',
                   length: 'length',
+                  tool_calls: 'tool_calls',
                 };
 
                 yield {
                   type: 'done',
                   sequence: sequence++,
                   finishReason: finishReasonMap[chunk.choices[0].finish_reason] || 'stop',
-                  message: { role: 'assistant', content: contentBuffer },
+                  message: buildStreamDoneMessage(contentBuffer, toolAssembler.calls),
                 } as IRStreamChunk;
               }
             } catch (parseError) {

@@ -18,7 +18,13 @@ import {
   buildStructuredOutputFallbackMessages,
   extractStructuredOutputJSON,
   buildResponseFormatFallbackWarning,
-  buildToolsUnsupportedWarning,
+  buildStreamDoneMessage,
+  buildOpenAICompatToolFields,
+  buildOpenAICompatResponseMessage,
+  convertIRMessageToOpenAICompat,
+  openAICompatContentToText,
+  ToolCallAssembler,
+  type OpenAICompatToolFields,
   estimateTokens,
   streamErrorDetails,
 } from '../shared.js';
@@ -37,7 +43,7 @@ import {
   createErrorFromHttpResponse,
   AdapterError,
 } from '@johnhenry/aimatey-errors';
-import { normalizeSystemMessages, mediaSourceToUrl } from '@johnhenry/aimatey-utils';
+import { normalizeSystemMessages } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
 
 // ============================================================================
@@ -50,7 +56,8 @@ export type DeepInfraMessageContent =
 
 export interface DeepInfraMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: DeepInfraMessageContent;
+  content: DeepInfraMessageContent | null;
+  tool_call_id?: string;
   name?: string;
   tool_calls?: Array<{
     id: string;
@@ -62,7 +69,7 @@ export interface DeepInfraMessage {
   }>;
 }
 
-export interface DeepInfraRequest {
+export interface DeepInfraRequest extends OpenAICompatToolFields {
   model: string;
   messages: DeepInfraMessage[];
   temperature?: number;
@@ -101,8 +108,14 @@ export interface DeepInfraStreamChunk {
     delta: {
       role?: 'assistant';
       content?: string;
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: 'function';
+        function?: { name?: string; arguments?: string };
+      }>;
     };
-    finish_reason: 'stop' | 'length' | null;
+    finish_reason: 'stop' | 'length' | 'tool_calls' | null;
   }>;
 }
 
@@ -140,7 +153,7 @@ export class DeepInfraBackendAdapter implements BackendAdapter<
         maxEmbeddingBatchSize: 100,
         streaming: true,
         multiModal: true, // Vision models available
-        tools: false, // Function calling
+        tools: true, // Function calling (OpenAI-compatible tools / tool_calls)
         structuredOutput: 'fallback',
         maxContextTokens: 128000,
         systemMessageStrategy: 'in-messages',
@@ -169,27 +182,11 @@ export class DeepInfraBackendAdapter implements BackendAdapter<
       this.metadata.capabilities.supportsMultipleSystemMessages
     );
 
-    const deepinfraMessages: DeepInfraMessage[] = messages.map((msg) => ({
-      role: msg.role,
-      content:
-        typeof msg.content === 'string'
-          ? msg.content
-          : msg.content.map((block) => {
-              if (block.type === 'text') {
-                return { type: 'text', text: block.text };
-              } else if (block.type === 'image') {
-                return {
-                  type: 'image_url',
-                  image_url: {
-                    url: mediaSourceToUrl(block.source, 'deepinfra-backend'),
-                  },
-                };
-              }
-              return { type: 'text', text: JSON.stringify(block) };
-            }),
-    }));
+    const deepinfraMessages = messages.flatMap((msg) =>
+      convertIRMessageToOpenAICompat(msg, this.metadata.name)
+    ) as DeepInfraMessage[];
 
-    return {
+    const chatRequest: DeepInfraRequest = {
       model:
         request.parameters?.model ||
         this.config.defaultModel ||
@@ -203,6 +200,8 @@ export class DeepInfraBackendAdapter implements BackendAdapter<
       stop: request.parameters?.stopSequences ? [...request.parameters.stopSequences] : undefined,
       stream: request.stream || false,
     };
+    Object.assign(chatRequest, buildOpenAICompatToolFields(request));
+    return chatRequest;
   }
 
   /**
@@ -223,17 +222,13 @@ export class DeepInfraBackendAdapter implements BackendAdapter<
       });
     }
 
-    const rawContent =
-      typeof choice.message.content === 'string'
-        ? choice.message.content
-        : choice.message.content.map((c: any) => (c.type === 'text' ? c.text : '')).join('');
+    const rawContent = openAICompatContentToText(choice.message.content);
 
-    const message: IRMessage = {
-      role: choice.message.role === 'assistant' ? 'assistant' : 'user',
-      content: originalRequest.responseFormat
-        ? extractStructuredOutputJSON(rawContent)
-        : rawContent,
-    };
+    const message: IRMessage = buildOpenAICompatResponseMessage(
+      choice.message.role === 'assistant' ? 'assistant' : 'user',
+      originalRequest.responseFormat ? extractStructuredOutputJSON(rawContent) : rawContent,
+      choice.message.tool_calls
+    );
 
     const finishReasonMap: Record<string, FinishReason> = {
       stop: 'stop',
@@ -245,7 +240,6 @@ export class DeepInfraBackendAdapter implements BackendAdapter<
       ...(originalRequest.responseFormat
         ? [buildResponseFormatFallbackWarning(this.metadata.name)]
         : []),
-      ...(originalRequest.tools?.length ? [buildToolsUnsupportedWarning(this.metadata.name)] : []),
     ];
 
     return {
@@ -375,6 +369,7 @@ export class DeepInfraBackendAdapter implements BackendAdapter<
         });
       }
       let contentBuffer = '';
+      const toolAssembler = new ToolCallAssembler();
 
       yield {
         type: 'start',
@@ -435,17 +430,25 @@ export class DeepInfraBackendAdapter implements BackendAdapter<
                 yield contentChunk;
               }
 
+              for (const toolChunk of toolAssembler.ingest(
+                chunk.choices[0]?.delta?.tool_calls,
+                () => sequence++
+              )) {
+                yield toolChunk;
+              }
+
               if (chunk.choices[0]?.finish_reason) {
                 const finishReasonMap: Record<string, FinishReason> = {
                   stop: 'stop',
                   length: 'length',
+                  tool_calls: 'tool_calls',
                 };
 
                 yield {
                   type: 'done',
                   sequence: sequence++,
                   finishReason: finishReasonMap[chunk.choices[0].finish_reason] || 'stop',
-                  message: { role: 'assistant', content: contentBuffer },
+                  message: buildStreamDoneMessage(contentBuffer, toolAssembler.calls),
                 } as IRStreamChunk;
               }
             } catch (parseError) {

@@ -40,7 +40,13 @@ import {
   buildStructuredOutputFallbackMessages,
   extractStructuredOutputJSON,
   buildResponseFormatFallbackWarning,
-  buildToolsUnsupportedWarning,
+  buildStreamDoneMessage,
+  buildOpenAICompatToolFields,
+  buildOpenAICompatResponseMessage,
+  convertIRMessageToOpenAICompat,
+  openAICompatContentToText,
+  ToolCallAssembler,
+  type OpenAICompatToolFields,
   estimateTokens,
   type ModelCapabilityFilter,
   streamErrorDetails,
@@ -52,11 +58,17 @@ import type { ListModelsOptions, ListModelsResult, AIModel } from '@johnhenry/ai
 // ============================================================================
 
 export interface MistralMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | null;
+  tool_call_id?: string;
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: { name: string; arguments: string };
+  }>;
 }
 
-export interface MistralRequest {
+export interface MistralRequest extends OpenAICompatToolFields {
   model: string;
   messages: MistralMessage[];
   temperature?: number;
@@ -75,7 +87,7 @@ export interface MistralResponse {
   choices: Array<{
     index: number;
     message: MistralMessage;
-    finish_reason: 'stop' | 'length' | 'model_length' | null;
+    finish_reason: 'stop' | 'length' | 'model_length' | 'tool_calls' | null;
   }>;
   usage: {
     prompt_tokens: number;
@@ -108,7 +120,7 @@ export class MistralBackendAdapter implements BackendAdapter<MistralRequest, Mis
         maxEmbeddingBatchSize: 512,
         streaming: true,
         multiModal: false,
-        tools: false,
+        tools: true, // Function calling (tools / tool_calls)
         structuredOutput: 'fallback',
         maxContextTokens: 32000,
         systemMessageStrategy: 'in-messages',
@@ -244,6 +256,7 @@ export class MistralBackendAdapter implements BackendAdapter<MistralRequest, Mis
       const decoder = new TextDecoder();
       let buffer = '';
       let contentBuffer = '';
+      const toolAssembler = new ToolCallAssembler();
 
       try {
         while (true) {
@@ -289,8 +302,18 @@ export class MistralBackendAdapter implements BackendAdapter<MistralRequest, Mis
                 yield contentChunk;
               }
 
+              for (const toolChunk of toolAssembler.ingest(
+                chunk.choices?.[0]?.delta?.tool_calls,
+                () => sequence++
+              )) {
+                yield toolChunk;
+              }
+
               if (finishReason) {
-                const message: IRMessage = { role: 'assistant', content: contentBuffer };
+                const message: IRMessage = buildStreamDoneMessage(
+                  contentBuffer,
+                  toolAssembler.calls
+                );
                 yield {
                   type: 'done',
                   sequence: sequence++,
@@ -439,13 +462,14 @@ export class MistralBackendAdapter implements BackendAdapter<MistralRequest, Mis
       this.metadata.capabilities.supportsMultipleSystemMessages
     );
 
-    const mistralMessages: MistralMessage[] = messages.map((msg) => ({
-      role: msg.role as 'system' | 'user' | 'assistant',
-      content:
-        typeof msg.content === 'string'
-          ? msg.content
-          : msg.content.map((c) => (c.type === 'text' ? c.text : JSON.stringify(c))).join(''),
-    }));
+    // Mistral chat is text-only here: flatten content parts to a string.
+    const mistralMessages: MistralMessage[] = messages
+      .flatMap((msg) => convertIRMessageToOpenAICompat(msg, this.metadata.name))
+      .map((msg) => ({
+        ...msg,
+        content:
+          msg.tool_calls && !msg.content?.length ? '' : openAICompatContentToText(msg.content),
+      }));
 
     return {
       model: request.parameters?.model || this.config.defaultModel || 'mistral-small-2501',
@@ -455,6 +479,7 @@ export class MistralBackendAdapter implements BackendAdapter<MistralRequest, Mis
       top_p: request.parameters?.topP,
       stream: request.stream,
       random_seed: request.parameters?.seed,
+      ...buildOpenAICompatToolFields(request),
     };
   }
 
@@ -477,16 +502,20 @@ export class MistralBackendAdapter implements BackendAdapter<MistralRequest, Mis
       });
     }
 
+    const rawContent = openAICompatContentToText(choice.message.content);
     const content = originalRequest.responseFormat
-      ? extractStructuredOutputJSON(choice.message.content)
-      : choice.message.content;
-    const message: IRMessage = { role: 'assistant', content };
+      ? extractStructuredOutputJSON(rawContent)
+      : rawContent;
+    const message: IRMessage = buildOpenAICompatResponseMessage(
+      'assistant',
+      content,
+      choice.message.tool_calls
+    );
 
     const extraWarnings = [
       ...(originalRequest.responseFormat
         ? [buildResponseFormatFallbackWarning(this.metadata.name)]
         : []),
-      ...(originalRequest.tools?.length ? [buildToolsUnsupportedWarning(this.metadata.name)] : []),
     ];
 
     return {
@@ -524,6 +553,8 @@ export class MistralBackendAdapter implements BackendAdapter<MistralRequest, Mis
     switch (reason) {
       case 'stop':
         return 'stop';
+      case 'tool_calls':
+        return 'tool_calls';
       case 'length':
       case 'model_length':
         return 'length';

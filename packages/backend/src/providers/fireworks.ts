@@ -18,7 +18,13 @@ import {
   buildStructuredOutputFallbackMessages,
   extractStructuredOutputJSON,
   buildResponseFormatFallbackWarning,
-  buildToolsUnsupportedWarning,
+  buildStreamDoneMessage,
+  buildOpenAICompatToolFields,
+  buildOpenAICompatResponseMessage,
+  convertIRMessageToOpenAICompat,
+  openAICompatContentToText,
+  ToolCallAssembler,
+  type OpenAICompatToolFields,
   estimateTokens,
   streamErrorDetails,
 } from '../shared.js';
@@ -37,7 +43,7 @@ import {
   createErrorFromHttpResponse,
   AdapterError,
 } from '@johnhenry/aimatey-errors';
-import { normalizeSystemMessages, mediaSourceToUrl } from '@johnhenry/aimatey-utils';
+import { normalizeSystemMessages } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
 
 // ============================================================================
@@ -50,7 +56,8 @@ export type FireworksAIMessageContent =
 
 export interface FireworksAIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: FireworksAIMessageContent;
+  content: FireworksAIMessageContent | null;
+  tool_call_id?: string;
   name?: string;
   tool_calls?: Array<{
     id: string;
@@ -62,7 +69,7 @@ export interface FireworksAIMessage {
   }>;
 }
 
-export interface FireworksAIRequest {
+export interface FireworksAIRequest extends OpenAICompatToolFields {
   model: string;
   messages: FireworksAIMessage[];
   temperature?: number;
@@ -104,8 +111,14 @@ export interface FireworksAIStreamChunk {
     delta: {
       role?: 'assistant';
       content?: string;
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: 'function';
+        function?: { name?: string; arguments?: string };
+      }>;
     };
-    finish_reason: 'stop' | 'length' | null;
+    finish_reason: 'stop' | 'length' | 'tool_calls' | null;
   }>;
   usage?: {
     // Usage stats included in streaming chunks
@@ -151,7 +164,7 @@ export class FireworksAIBackendAdapter implements BackendAdapter<
         maxEmbeddingBatchSize: 100,
         streaming: true,
         multiModal: true, // Vision models available
-        tools: false, // Function calling
+        tools: true, // Function calling (OpenAI-compatible tools / tool_calls)
         structuredOutput: 'fallback',
         maxContextTokens: 1000000, // DeepSeek V4 and other current models support up to 1M
         systemMessageStrategy: 'in-messages',
@@ -180,25 +193,9 @@ export class FireworksAIBackendAdapter implements BackendAdapter<
       this.metadata.capabilities.supportsMultipleSystemMessages
     );
 
-    const fireworksMessages: FireworksAIMessage[] = messages.map((msg) => ({
-      role: msg.role,
-      content:
-        typeof msg.content === 'string'
-          ? msg.content
-          : msg.content.map((block) => {
-              if (block.type === 'text') {
-                return { type: 'text', text: block.text };
-              } else if (block.type === 'image') {
-                return {
-                  type: 'image_url',
-                  image_url: {
-                    url: mediaSourceToUrl(block.source, 'fireworks-ai-backend'),
-                  },
-                };
-              }
-              return { type: 'text', text: JSON.stringify(block) };
-            }),
-    }));
+    const fireworksMessages = messages.flatMap((msg) =>
+      convertIRMessageToOpenAICompat(msg, this.metadata.name)
+    ) as FireworksAIMessage[];
 
     const fireworksRequest: FireworksAIRequest = {
       model:
@@ -224,6 +221,8 @@ export class FireworksAIBackendAdapter implements BackendAdapter<
         | 'high';
     }
 
+    Object.assign(fireworksRequest, buildOpenAICompatToolFields(request));
+
     return fireworksRequest;
   }
 
@@ -245,17 +244,15 @@ export class FireworksAIBackendAdapter implements BackendAdapter<
       });
     }
 
-    const rawContent =
-      typeof choice.message.content === 'string'
-        ? choice.message.content
-        : choice.message.content.map((c: any) => (c.type === 'text' ? c.text : '')).join('');
+    const rawContent = openAICompatContentToText(choice.message.content);
     const content = originalRequest.responseFormat
       ? extractStructuredOutputJSON(rawContent)
       : rawContent;
-    const message: IRMessage = {
-      role: choice.message.role === 'assistant' ? 'assistant' : 'user',
+    const message: IRMessage = buildOpenAICompatResponseMessage(
+      choice.message.role === 'assistant' ? 'assistant' : 'user',
       content,
-    };
+      choice.message.tool_calls
+    );
 
     const finishReasonMap: Record<string, FinishReason> = {
       stop: 'stop',
@@ -267,7 +264,6 @@ export class FireworksAIBackendAdapter implements BackendAdapter<
       ...(originalRequest.responseFormat
         ? [buildResponseFormatFallbackWarning(this.metadata.name)]
         : []),
-      ...(originalRequest.tools?.length ? [buildToolsUnsupportedWarning(this.metadata.name)] : []),
     ];
 
     return {
@@ -396,6 +392,7 @@ export class FireworksAIBackendAdapter implements BackendAdapter<
         });
       }
       let contentBuffer = '';
+      const toolAssembler = new ToolCallAssembler();
       let usage:
         | { promptTokens: number; completionTokens: number; totalTokens: number }
         | undefined;
@@ -468,17 +465,25 @@ export class FireworksAIBackendAdapter implements BackendAdapter<
                 yield contentChunk;
               }
 
+              for (const toolChunk of toolAssembler.ingest(
+                chunk.choices[0]?.delta?.tool_calls,
+                () => sequence++
+              )) {
+                yield toolChunk;
+              }
+
               if (chunk.choices[0]?.finish_reason) {
                 const finishReasonMap: Record<string, FinishReason> = {
                   stop: 'stop',
                   length: 'length',
+                  tool_calls: 'tool_calls',
                 };
 
                 const doneChunk: IRStreamChunk = {
                   type: 'done',
                   sequence: sequence++,
                   finishReason: finishReasonMap[chunk.choices[0].finish_reason] || 'stop',
-                  message: { role: 'assistant', content: contentBuffer },
+                  message: buildStreamDoneMessage(contentBuffer, toolAssembler.calls),
                 };
 
                 // Include usage stats in done chunk

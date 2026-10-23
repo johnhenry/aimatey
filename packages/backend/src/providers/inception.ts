@@ -87,7 +87,7 @@ export class InceptionBackendAdapter
         embeddings: false,
         streaming: true,
         multiModal: false,
-        tools: false,
+        tools: true, // Function calling (inherited OpenAI-compatible tools mapping)
         structuredOutput: 'native',
         maxContextTokens: 32768,
         systemMessageStrategy: 'in-messages',

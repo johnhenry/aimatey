@@ -7,10 +7,11 @@
  * @module
  */
 
-import { localityForBaseURL, servedByForBaseURL } from '@johnhenry/aimatey-utils';
+import { localityForBaseURL, servedByForBaseURL, mediaSourceToUrl } from '@johnhenry/aimatey-utils';
 import type {
   IRChatRequest,
   IRMessage,
+  IRStreamChunk,
   IREmbedRequest,
   IREmbedResponse,
   IRResponseFormat,
@@ -280,6 +281,228 @@ export function buildStreamDoneMessage(
         })),
     ],
   };
+}
+
+// ============================================================================
+// Tool calling (OpenAI-compatible chat completions)
+// ============================================================================
+
+/** Wire-format message for OpenAI-compatible chat completions, including tool turns. */
+export interface OpenAICompatWireMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content:
+    | string
+    | null
+    | Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }>;
+  tool_call_id?: string;
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: { name: string; arguments: string };
+  }>;
+}
+
+/** Wire-format `tools` / `tool_choice` request fields. */
+export interface OpenAICompatToolFields {
+  tools?: Array<{
+    type: 'function';
+    function: { name: string; description?: string; parameters: Record<string, unknown> };
+  }>;
+  tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
+}
+
+/**
+ * Map IR tools and toolChoice to the OpenAI-compatible `tools` / `tool_choice` fields.
+ * Returns an empty object when the request has no tools.
+ */
+export function buildOpenAICompatToolFields(request: IRChatRequest): OpenAICompatToolFields {
+  if (!request.tools?.length) {
+    return {};
+  }
+  const fields: OpenAICompatToolFields = {
+    tools: request.tools.map((tool) => ({
+      type: 'function' as const,
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters as unknown as Record<string, unknown>,
+      },
+    })),
+  };
+  if (request.toolChoice !== undefined) {
+    fields.tool_choice =
+      typeof request.toolChoice === 'string'
+        ? request.toolChoice
+        : { type: 'function', function: { name: request.toolChoice.name } };
+  }
+  return fields;
+}
+
+/**
+ * Convert one IR message to OpenAI-compatible wire message(s). Tool results become separate
+ * `role: 'tool'` messages (one per tool_use id); `tool_use` blocks become the assistant
+ * message's `tool_calls`.
+ */
+export function convertIRMessageToOpenAICompat(
+  msg: IRMessage,
+  backendName: string
+): OpenAICompatWireMessage[] {
+  if (typeof msg.content === 'string') {
+    return [{ role: msg.role, content: msg.content }];
+  }
+  const out: OpenAICompatWireMessage[] = [];
+  for (const block of msg.content) {
+    if (block.type === 'tool_result') {
+      out.push({
+        role: 'tool',
+        tool_call_id: block.toolUseId,
+        content:
+          typeof block.content === 'string'
+            ? block.content
+            : block.content.map((text) => text.text).join(''),
+      });
+    }
+  }
+  const toolUses = msg.content.filter((block) => block.type === 'tool_use');
+  const rest = msg.content.filter(
+    (block) => block.type !== 'tool_result' && block.type !== 'tool_use'
+  );
+  if (rest.length > 0 || toolUses.length > 0) {
+    const message: OpenAICompatWireMessage = {
+      role: msg.role,
+      content: rest.map((block) => {
+        if (block.type === 'text') {
+          return { type: 'text' as const, text: block.text };
+        } else if (block.type === 'image') {
+          return {
+            type: 'image_url' as const,
+            image_url: { url: mediaSourceToUrl(block.source, backendName) },
+          };
+        }
+        return { type: 'text' as const, text: JSON.stringify(block) };
+      }),
+    };
+    if (toolUses.length > 0) {
+      message.tool_calls = toolUses.map((block) => ({
+        id: block.id,
+        type: 'function' as const,
+        function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
+      }));
+      if (rest.length === 0) {
+        message.content = '';
+      }
+    }
+    out.push(message);
+  }
+  return out;
+}
+
+/** Flatten a wire message `content` (string, null or text-part array) to plain text. */
+export function openAICompatContentToText(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((part: { type?: string; text?: string }) => (part.type === 'text' ? part.text : ''))
+      .join('');
+  }
+  return '';
+}
+
+/**
+ * Build the IR assistant message for a blocking response: plain string content without tool
+ * calls, otherwise an optional text block followed by one `tool_use` block per call.
+ */
+export function buildOpenAICompatResponseMessage(
+  role: 'assistant' | 'user',
+  text: string,
+  toolCalls:
+    | ReadonlyArray<{ id: string; function: { name: string; arguments?: string } }>
+    | undefined
+): IRMessage {
+  if (!toolCalls?.length) {
+    return { role, content: text };
+  }
+  return {
+    role,
+    content: [
+      ...(text ? [{ type: 'text' as const, text }] : []),
+      ...toolCalls.map((call) => ({
+        type: 'tool_use' as const,
+        id: call.id,
+        name: call.function.name,
+        input: safeParseJSON(call.function.arguments),
+      })),
+    ],
+  };
+}
+
+/** A streamed `delta.tool_calls[]` fragment. */
+export interface ToolCallDelta {
+  index?: number;
+  id?: string;
+  type?: 'function';
+  function?: { name?: string; arguments?: string };
+}
+
+/**
+ * Assembles streamed OpenAI-compatible tool-call fragments by `index` (falling back to id /
+ * position for providers that omit it), emitting one `tool_use` stream chunk per fragment.
+ */
+export class ToolCallAssembler {
+  private readonly byIndex = new Map<number, StreamedToolCall>();
+
+  /** Accumulated calls, in index order. */
+  get calls(): StreamedToolCall[] {
+    return [...this.byIndex.values()].sort((a, b) => a.index - b.index);
+  }
+
+  get size(): number {
+    return this.byIndex.size;
+  }
+
+  ingest(
+    deltas: readonly ToolCallDelta[] | undefined,
+    nextSequence: () => number
+  ): IRStreamChunk[] {
+    const chunks: IRStreamChunk[] = [];
+    for (const delta of deltas ?? []) {
+      let index = delta.index;
+      if (index === undefined) {
+        const known = delta.id ? this.calls.find((call) => call.id === delta.id) : undefined;
+        index = known ? known.index : delta.id || this.size === 0 ? this.size : this.size - 1;
+      }
+      let call = this.byIndex.get(index);
+      if (!call) {
+        call = {
+          id: delta.id ?? `call_${index}`,
+          name: delta.function?.name ?? '',
+          args: '',
+          index,
+        };
+        this.byIndex.set(index, call);
+      } else {
+        if (delta.id) {
+          call.id = delta.id;
+        }
+        if (delta.function?.name) {
+          call.name = delta.function.name;
+        }
+      }
+      const inputDelta = delta.function?.arguments ?? '';
+      call.args += inputDelta;
+      chunks.push({
+        type: 'tool_use',
+        sequence: nextSequence(),
+        id: call.id,
+        name: call.name,
+        inputDelta,
+        index: call.index,
+      } as IRStreamChunk);
+    }
+    return chunks;
+  }
 }
 
 // ============================================================================
