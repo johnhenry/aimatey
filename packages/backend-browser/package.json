@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-backend-browser",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "description": "Browser-compatible backend adapters for Aimatey - Chrome AI, Function, Mock",
   "type": "module",
   "main": "./dist/cjs/index.js",
