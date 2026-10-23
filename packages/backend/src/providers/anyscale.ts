@@ -123,7 +123,7 @@ export class AnyscaleBackendAdapter implements BackendAdapter<AnyscaleRequest, A
       capabilities: {
         streaming: true,
         multiModal: false, // Text-only
-        tools: false, // No function calling
+        tools: false, // Hosted Endpoints API was wound down (Aug 2024); no function-calling docs, left false (#207)
         structuredOutput: 'fallback',
         maxContextTokens: 4096, // Llama-2 default
         systemMessageStrategy: 'in-messages',

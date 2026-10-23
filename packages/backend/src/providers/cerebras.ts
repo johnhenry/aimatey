@@ -27,13 +27,19 @@ import {
   createErrorFromHttpResponse,
   AdapterError,
 } from '@johnhenry/aimatey-errors';
-import { normalizeSystemMessages, mediaSourceToUrl } from '@johnhenry/aimatey-utils';
+import { normalizeSystemMessages } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
 import {
   buildStructuredOutputFallbackMessages,
   extractStructuredOutputJSON,
   buildResponseFormatFallbackWarning,
-  buildToolsUnsupportedWarning,
+  buildStreamDoneMessage,
+  buildOpenAICompatToolFields,
+  buildOpenAICompatResponseMessage,
+  convertIRMessageToOpenAICompat,
+  openAICompatContentToText,
+  ToolCallAssembler,
+  type OpenAICompatToolFields,
   estimateTokens,
   streamErrorDetails,
 } from '../shared.js';
@@ -48,7 +54,8 @@ export type CerebrasMessageContent =
 
 export interface CerebrasMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: CerebrasMessageContent;
+  content: CerebrasMessageContent | null;
+  tool_call_id?: string;
   name?: string;
   tool_calls?: Array<{
     id: string;
@@ -60,7 +67,7 @@ export interface CerebrasMessage {
   }>;
 }
 
-export interface CerebrasRequest {
+export interface CerebrasRequest extends OpenAICompatToolFields {
   model: string;
   messages: CerebrasMessage[];
   temperature?: number;
@@ -106,8 +113,14 @@ export interface CerebrasStreamChunk {
     delta: {
       role?: 'assistant';
       content?: string;
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: 'function';
+        function?: { name?: string; arguments?: string };
+      }>;
     };
-    finish_reason: 'stop' | 'length' | null;
+    finish_reason: 'stop' | 'length' | 'tool_calls' | null;
   }>;
   time_info?: {
     completion_time: number;
@@ -146,7 +159,7 @@ export class CerebrasBackendAdapter implements BackendAdapter<CerebrasRequest, C
       capabilities: {
         streaming: true,
         multiModal: false, // Text-only models
-        tools: false, // Function calling
+        tools: true, // Function calling (OpenAI-compatible tools / tool_calls)
         structuredOutput: 'fallback',
         maxContextTokens: 128000,
         systemMessageStrategy: 'in-messages',
@@ -175,25 +188,9 @@ export class CerebrasBackendAdapter implements BackendAdapter<CerebrasRequest, C
       this.metadata.capabilities.supportsMultipleSystemMessages
     );
 
-    const cerebrasMessages: CerebrasMessage[] = messages.map((msg) => ({
-      role: msg.role,
-      content:
-        typeof msg.content === 'string'
-          ? msg.content
-          : msg.content.map((block) => {
-              if (block.type === 'text') {
-                return { type: 'text', text: block.text };
-              } else if (block.type === 'image') {
-                return {
-                  type: 'image_url',
-                  image_url: {
-                    url: mediaSourceToUrl(block.source, 'cerebras-backend'),
-                  },
-                };
-              }
-              return { type: 'text', text: JSON.stringify(block) };
-            }),
-    }));
+    const cerebrasMessages = messages.flatMap((msg) =>
+      convertIRMessageToOpenAICompat(msg, this.metadata.name)
+    ) as CerebrasMessage[];
 
     const cerebrasRequest: CerebrasRequest = {
       model: request.parameters?.model || this.config.defaultModel || 'llama3.1-8b',
@@ -211,6 +208,8 @@ export class CerebrasBackendAdapter implements BackendAdapter<CerebrasRequest, C
     if (request.parameters?.seed !== undefined) {
       cerebrasRequest.seed = request.parameters.seed;
     }
+
+    Object.assign(cerebrasRequest, buildOpenAICompatToolFields(request));
 
     return cerebrasRequest;
   }
@@ -233,17 +232,13 @@ export class CerebrasBackendAdapter implements BackendAdapter<CerebrasRequest, C
       });
     }
 
-    const rawContent =
-      typeof choice.message.content === 'string'
-        ? choice.message.content
-        : choice.message.content.map((c: any) => (c.type === 'text' ? c.text : '')).join('');
+    const rawContent = openAICompatContentToText(choice.message.content);
 
-    const message: IRMessage = {
-      role: choice.message.role === 'assistant' ? 'assistant' : 'user',
-      content: originalRequest.responseFormat
-        ? extractStructuredOutputJSON(rawContent)
-        : rawContent,
-    };
+    const message: IRMessage = buildOpenAICompatResponseMessage(
+      choice.message.role === 'assistant' ? 'assistant' : 'user',
+      originalRequest.responseFormat ? extractStructuredOutputJSON(rawContent) : rawContent,
+      choice.message.tool_calls
+    );
 
     const finishReasonMap: Record<string, FinishReason> = {
       stop: 'stop',
@@ -255,7 +250,6 @@ export class CerebrasBackendAdapter implements BackendAdapter<CerebrasRequest, C
       ...(originalRequest.responseFormat
         ? [buildResponseFormatFallbackWarning(this.metadata.name)]
         : []),
-      ...(originalRequest.tools?.length ? [buildToolsUnsupportedWarning(this.metadata.name)] : []),
     ];
 
     return {
@@ -372,6 +366,7 @@ export class CerebrasBackendAdapter implements BackendAdapter<CerebrasRequest, C
         });
       }
       let contentBuffer = '';
+      const toolAssembler = new ToolCallAssembler();
       let timeInfo:
         | { completion_time: number; prompt_time: number; total_time: number }
         | undefined;
@@ -440,17 +435,25 @@ export class CerebrasBackendAdapter implements BackendAdapter<CerebrasRequest, C
                 yield contentChunk;
               }
 
+              for (const toolChunk of toolAssembler.ingest(
+                chunk.choices[0]?.delta?.tool_calls,
+                () => sequence++
+              )) {
+                yield toolChunk;
+              }
+
               if (chunk.choices[0]?.finish_reason) {
                 const finishReasonMap: Record<string, FinishReason> = {
                   stop: 'stop',
                   length: 'length',
+                  tool_calls: 'tool_calls',
                 };
 
                 const doneChunk: IRStreamChunk = {
                   type: 'done',
                   sequence: sequence++,
                   finishReason: finishReasonMap[chunk.choices[0].finish_reason] || 'stop',
-                  message: { role: 'assistant', content: contentBuffer },
+                  message: buildStreamDoneMessage(contentBuffer, toolAssembler.calls),
                 };
 
                 // Include timing information in done chunk

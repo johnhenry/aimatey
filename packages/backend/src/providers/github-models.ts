@@ -140,7 +140,7 @@ export class GitHubModelsBackendAdapter implements BackendAdapter<
         maxEmbeddingBatchSize: 100,
         streaming: true,
         multiModal: true, // gpt-4o, gpt-4.1, llama-3.2-vision, etc.
-        tools: false, // Function calling
+        tools: false, // GitHub Models was retired 2026-07-30; left false (#207)
         structuredOutput: 'fallback',
         maxContextTokens: 128000,
         systemMessageStrategy: 'in-messages',

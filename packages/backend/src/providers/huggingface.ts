@@ -136,7 +136,7 @@ export class HuggingFaceBackendAdapter implements BackendAdapter<
       capabilities: {
         streaming: false, // Hugging Face Inference API doesn't support streaming in the same way
         multiModal: false, // Text-only for standard inference
-        tools: false,
+        tools: false, // Uses the legacy text-generation endpoint (prompt string), not chat completions (#207)
         structuredOutput: 'fallback',
         maxContextTokens: 4096, // Varies by model
         systemMessageStrategy: 'in-messages',

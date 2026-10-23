@@ -1182,7 +1182,13 @@ export class OpenAIBackendAdapter implements BackendAdapter<OpenAIRequest, OpenA
   /**
    * Convert OpenAI message content to string.
    */
-  private convertMessageContentFromOpenAI(content: OpenAIMessageContent): string {
+  private convertMessageContentFromOpenAI(
+    content: OpenAIMessageContent | null | undefined
+  ): string {
+    // OpenAI-compatible servers send `content: null` alongside tool_calls.
+    if (content === null || content === undefined) {
+      return '';
+    }
     if (typeof content === 'string') {
       return content;
     }

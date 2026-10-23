@@ -27,13 +27,19 @@ import {
   createErrorFromHttpResponse,
   AdapterError,
 } from '@johnhenry/aimatey-errors';
-import { normalizeSystemMessages, mediaSourceToUrl } from '@johnhenry/aimatey-utils';
+import { normalizeSystemMessages } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
 import {
   buildStructuredOutputFallbackMessages,
   extractStructuredOutputJSON,
   buildResponseFormatFallbackWarning,
-  buildToolsUnsupportedWarning,
+  buildStreamDoneMessage,
+  buildOpenAICompatToolFields,
+  buildOpenAICompatResponseMessage,
+  convertIRMessageToOpenAICompat,
+  openAICompatContentToText,
+  ToolCallAssembler,
+  type OpenAICompatToolFields,
   estimateTokens,
   streamErrorDetails,
 } from '../shared.js';
@@ -48,7 +54,8 @@ export type XAIMessageContent =
 
 export interface XAIMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: XAIMessageContent;
+  content: XAIMessageContent | null;
+  tool_call_id?: string;
   name?: string;
   tool_calls?: Array<{
     id: string;
@@ -60,7 +67,7 @@ export interface XAIMessage {
   }>;
 }
 
-export interface XAIRequest {
+export interface XAIRequest extends OpenAICompatToolFields {
   model: string;
   messages: XAIMessage[];
   temperature?: number;
@@ -99,8 +106,14 @@ export interface XAIStreamChunk {
     delta: {
       role?: 'assistant';
       content?: string;
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: 'function';
+        function?: { name?: string; arguments?: string };
+      }>;
     };
-    finish_reason: 'stop' | 'length' | null;
+    finish_reason: 'stop' | 'length' | 'tool_calls' | null;
   }>;
 }
 
@@ -134,7 +147,7 @@ export class XAIBackendAdapter implements BackendAdapter<XAIRequest, XAIResponse
       capabilities: {
         streaming: true,
         multiModal: true, // Grok-vision available
-        tools: false, // Function calling
+        tools: true, // Function calling (OpenAI-compatible tools / tool_calls)
         structuredOutput: 'fallback',
         maxContextTokens: 2_000_000, // 2M context window
         systemMessageStrategy: 'in-messages',
@@ -163,27 +176,11 @@ export class XAIBackendAdapter implements BackendAdapter<XAIRequest, XAIResponse
       this.metadata.capabilities.supportsMultipleSystemMessages
     );
 
-    const xaiMessages: XAIMessage[] = messages.map((msg) => ({
-      role: msg.role,
-      content:
-        typeof msg.content === 'string'
-          ? msg.content
-          : msg.content.map((block) => {
-              if (block.type === 'text') {
-                return { type: 'text', text: block.text };
-              } else if (block.type === 'image') {
-                return {
-                  type: 'image_url',
-                  image_url: {
-                    url: mediaSourceToUrl(block.source, 'xai-backend'),
-                  },
-                };
-              }
-              return { type: 'text', text: JSON.stringify(block) };
-            }),
-    }));
+    const xaiMessages = messages.flatMap((msg) =>
+      convertIRMessageToOpenAICompat(msg, this.metadata.name)
+    ) as XAIMessage[];
 
-    return {
+    const chatRequest: XAIRequest = {
       model: request.parameters?.model || this.config.defaultModel || 'grok-4.5',
       messages: xaiMessages,
       temperature: request.parameters?.temperature,
@@ -194,6 +191,8 @@ export class XAIBackendAdapter implements BackendAdapter<XAIRequest, XAIResponse
       stop: request.parameters?.stopSequences ? [...request.parameters.stopSequences] : undefined,
       stream: request.stream || false,
     };
+    Object.assign(chatRequest, buildOpenAICompatToolFields(request));
+    return chatRequest;
   }
 
   /**
@@ -214,18 +213,16 @@ export class XAIBackendAdapter implements BackendAdapter<XAIRequest, XAIResponse
       });
     }
 
-    const rawContent =
-      typeof choice.message.content === 'string'
-        ? choice.message.content
-        : choice.message.content.map((c: any) => (c.type === 'text' ? c.text : '')).join('');
+    const rawContent = openAICompatContentToText(choice.message.content);
     const content = originalRequest.responseFormat
       ? extractStructuredOutputJSON(rawContent)
       : rawContent;
 
-    const message: IRMessage = {
-      role: choice.message.role === 'assistant' ? 'assistant' : 'user',
+    const message: IRMessage = buildOpenAICompatResponseMessage(
+      choice.message.role === 'assistant' ? 'assistant' : 'user',
       content,
-    };
+      choice.message.tool_calls
+    );
 
     const finishReasonMap: Record<string, FinishReason> = {
       stop: 'stop',
@@ -237,7 +234,6 @@ export class XAIBackendAdapter implements BackendAdapter<XAIRequest, XAIResponse
       ...(originalRequest.responseFormat
         ? [buildResponseFormatFallbackWarning(this.metadata.name)]
         : []),
-      ...(originalRequest.tools?.length ? [buildToolsUnsupportedWarning(this.metadata.name)] : []),
     ];
 
     return {
@@ -353,6 +349,7 @@ export class XAIBackendAdapter implements BackendAdapter<XAIRequest, XAIResponse
         });
       }
       let contentBuffer = '';
+      const toolAssembler = new ToolCallAssembler();
 
       yield {
         type: 'start',
@@ -413,17 +410,25 @@ export class XAIBackendAdapter implements BackendAdapter<XAIRequest, XAIResponse
                 yield contentChunk;
               }
 
+              for (const toolChunk of toolAssembler.ingest(
+                chunk.choices[0]?.delta?.tool_calls,
+                () => sequence++
+              )) {
+                yield toolChunk;
+              }
+
               if (chunk.choices[0]?.finish_reason) {
                 const finishReasonMap: Record<string, FinishReason> = {
                   stop: 'stop',
                   length: 'length',
+                  tool_calls: 'tool_calls',
                 };
 
                 yield {
                   type: 'done',
                   sequence: sequence++,
                   finishReason: finishReasonMap[chunk.choices[0].finish_reason] || 'stop',
-                  message: { role: 'assistant', content: contentBuffer },
+                  message: buildStreamDoneMessage(contentBuffer, toolAssembler.calls),
                 } as IRStreamChunk;
               }
             } catch (parseError) {
