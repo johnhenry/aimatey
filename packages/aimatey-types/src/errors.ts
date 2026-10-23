@@ -278,6 +278,13 @@ export interface BaseErrorOptions {
     readonly response?: Partial<IRChatResponse>;
   };
   readonly details?: Record<string, unknown>;
+  /** HTTP status of the provider response that caused this error, when there was one. */
+  readonly statusCode?: number;
+  /**
+   * The provider's own error message, extracted from the response body and
+   * redacted of credentials. For developers and logs, like `message`.
+   */
+  readonly providerMessage?: string;
   /**
    * Text that is safe to show an **end user**, as opposed to `message`, which
    * is for developers and logs.
@@ -299,6 +306,12 @@ export interface AuthenticationErrorOptions {
     | typeof ErrorCode.MISSING_API_KEY
     | typeof ErrorCode.EXPIRED_API_KEY;
   readonly message: string;
+  /** HTTP status of the provider response. See {@link BaseErrorOptions.statusCode}. */
+  readonly statusCode?: number;
+  /** The provider's redacted error message. See {@link BaseErrorOptions.providerMessage}. */
+  readonly providerMessage?: string;
+  /** Extra structured context (for example the redacted response body). */
+  readonly details?: Record<string, unknown>;
   /** See {@link BaseErrorOptions.userMessage}. */
   readonly userMessage?: string;
   readonly provenance?: ErrorProvenance;
@@ -311,6 +324,12 @@ export interface AuthenticationErrorOptions {
 export interface AuthorizationErrorOptions {
   readonly code: typeof ErrorCode.INSUFFICIENT_PERMISSIONS | typeof ErrorCode.QUOTA_EXCEEDED;
   readonly message: string;
+  /** HTTP status of the provider response. See {@link BaseErrorOptions.statusCode}. */
+  readonly statusCode?: number;
+  /** The provider's redacted error message. See {@link BaseErrorOptions.providerMessage}. */
+  readonly providerMessage?: string;
+  /** Extra structured context (for example the redacted response body). */
+  readonly details?: Record<string, unknown>;
   /** See {@link BaseErrorOptions.userMessage}. */
   readonly userMessage?: string;
   readonly provenance?: ErrorProvenance;
@@ -322,6 +341,12 @@ export interface AuthorizationErrorOptions {
  */
 export interface RateLimitErrorOptions {
   readonly message: string;
+  /** HTTP status of the provider response. See {@link BaseErrorOptions.statusCode}. */
+  readonly statusCode?: number;
+  /** The provider's redacted error message. See {@link BaseErrorOptions.providerMessage}. */
+  readonly providerMessage?: string;
+  /** Extra structured context (for example the redacted response body). */
+  readonly details?: Record<string, unknown>;
   /** See {@link BaseErrorOptions.userMessage}. */
   readonly userMessage?: string;
   readonly provenance?: ErrorProvenance;
@@ -341,6 +366,12 @@ export interface ValidationErrorOptions {
     | typeof ErrorCode.UNSUPPORTED_FEATURE
     | typeof ErrorCode.CONTEXT_LENGTH_EXCEEDED;
   readonly message: string;
+  /** HTTP status of the provider response. See {@link BaseErrorOptions.statusCode}. */
+  readonly statusCode?: number;
+  /** The provider's redacted error message. See {@link BaseErrorOptions.providerMessage}. */
+  readonly providerMessage?: string;
+  /** Extra structured context (for example the redacted response body). */
+  readonly details?: Record<string, unknown>;
   /** See {@link BaseErrorOptions.userMessage}. */
   readonly userMessage?: string;
   readonly validationDetails: ValidationErrorDetails[];
@@ -367,6 +398,10 @@ export interface ProviderErrorOptions {
   readonly provenance?: ErrorProvenance;
   readonly cause?: Error;
   readonly providerDetails?: ProviderErrorDetails;
+  /** HTTP status of the provider response. See {@link BaseErrorOptions.statusCode}. */
+  readonly statusCode?: number;
+  /** The provider's redacted error message. See {@link BaseErrorOptions.providerMessage}. */
+  readonly providerMessage?: string;
   readonly httpContext?: HttpErrorContext;
   readonly irState?: {
     readonly request?: Partial<IRChatRequest>;

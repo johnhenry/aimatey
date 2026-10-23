@@ -28,11 +28,11 @@ import type {
   AIModel,
 } from '@johnhenry/aimatey-types';
 import {
-  NetworkError,
   ProviderError,
   StreamError,
   ErrorCode,
   createErrorFromHttpResponse,
+  AdapterError,
 } from '@johnhenry/aimatey-errors';
 import { normalizeSystemMessages, createWarning } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
@@ -46,6 +46,7 @@ import {
   type ModelCapabilityFilter,
   type StreamedToolCall,
   buildStreamDoneMessage,
+  streamErrorDetails,
 } from '../shared.js';
 import { decideViaSystemOne } from '../decisions/systemone-client.js';
 
@@ -225,9 +226,15 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
 
     if (!response.ok) {
       const errorBody = await response.text();
-      throw createErrorFromHttpResponse(response.status, response.statusText, errorBody, {
-        backend: this.metadata.name,
-      });
+      throw createErrorFromHttpResponse(
+        response.status,
+        response.statusText,
+        errorBody,
+        {
+          backend: this.metadata.name,
+        },
+        response.headers
+      );
     }
 
     const json = (await response.json()) as {
@@ -311,16 +318,22 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
         const errorBody = await response.text();
         throw (
           this.loadingFromResponse(response.status, errorBody) ??
-          createErrorFromHttpResponse(response.status, response.statusText, errorBody, {
-            backend: this.metadata.name,
-          })
+          createErrorFromHttpResponse(
+            response.status,
+            response.statusText,
+            errorBody,
+            {
+              backend: this.metadata.name,
+            },
+            response.headers
+          )
         );
       }
 
       const data = (await response.json()) as OllamaResponse;
       return this.toIR(data, request, Date.now() - startTime);
     } catch (error) {
-      if (error instanceof NetworkError || error instanceof ProviderError) {
+      if (error instanceof AdapterError) {
         throw error;
       }
       const warming = await this.loadingFromDeadline(error, signal, model);
@@ -361,9 +374,15 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
         const errorBody = await response.text();
         throw (
           this.loadingFromResponse(response.status, errorBody) ??
-          createErrorFromHttpResponse(response.status, response.statusText, errorBody, {
-            backend: this.metadata.name,
-          })
+          createErrorFromHttpResponse(
+            response.status,
+            response.statusText,
+            errorBody,
+            {
+              backend: this.metadata.name,
+            },
+            response.headers
+          )
         );
       }
 
@@ -499,6 +518,7 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
               ? error.name
               : 'UNKNOWN_ERROR',
           message: error instanceof Error ? error.message : String(error),
+          details: streamErrorDetails(error),
         },
       } as IRStreamChunk;
     }
@@ -819,7 +839,8 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
           response.status,
           response.statusText,
           await response.text(),
-          { backend: this.metadata.name }
+          { backend: this.metadata.name },
+          response.headers
         );
       }
 

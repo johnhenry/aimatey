@@ -29,6 +29,7 @@ import {
   StreamError,
   ErrorCode,
   createErrorFromHttpResponse,
+  AdapterError,
 } from '@johnhenry/aimatey-errors';
 import {
   normalizeSystemMessages,
@@ -45,6 +46,7 @@ import {
   type ModelCapabilityFilter,
   type StreamedToolCall,
   DEFAULT_ANTHROPIC_MODELS,
+  streamErrorDetails,
 } from '../shared.js';
 
 /**
@@ -240,11 +242,7 @@ export class AnthropicBackendAdapter implements BackendAdapter<
       return irResponse;
     } catch (error) {
       // Re-throw adapter errors
-      if (
-        error instanceof AdapterConversionError ||
-        error instanceof NetworkError ||
-        error instanceof ProviderError
-      ) {
+      if (error instanceof AdapterError) {
         throw error;
       }
 
@@ -286,9 +284,15 @@ export class AnthropicBackendAdapter implements BackendAdapter<
 
       if (!response.ok) {
         const errorBody = await response.text();
-        throw createErrorFromHttpResponse(response.status, response.statusText, errorBody, {
-          backend: this.metadata.name,
-        });
+        throw createErrorFromHttpResponse(
+          response.status,
+          response.statusText,
+          errorBody,
+          {
+            backend: this.metadata.name,
+          },
+          response.headers
+        );
       }
 
       if (!response.body) {
@@ -507,6 +511,7 @@ export class AnthropicBackendAdapter implements BackendAdapter<
         error: {
           code: error instanceof Error ? error.name : 'UNKNOWN_ERROR',
           message: error instanceof Error ? error.message : String(error),
+          details: streamErrorDetails(error),
         },
       } as IRStreamChunk;
     }
@@ -927,9 +932,15 @@ export class AnthropicBackendAdapter implements BackendAdapter<
 
       if (!response.ok) {
         const errorBody = await response.text();
-        throw createErrorFromHttpResponse(response.status, response.statusText, errorBody, {
-          backend: this.metadata.name,
-        });
+        throw createErrorFromHttpResponse(
+          response.status,
+          response.statusText,
+          errorBody,
+          {
+            backend: this.metadata.name,
+          },
+          response.headers
+        );
       }
 
       const data = (await response.json()) as AnthropicResponse;

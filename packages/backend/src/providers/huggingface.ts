@@ -25,12 +25,14 @@ import {
   ProviderError,
   ErrorCode,
   createErrorFromHttpResponse,
+  AdapterError,
 } from '@johnhenry/aimatey-errors';
 import { normalizeRepetitionPenalty } from '@johnhenry/aimatey-utils';
 import {
   buildStructuredOutputFallbackMessages,
   extractStructuredOutputJSON,
   buildResponseFormatFallbackWarning,
+  streamErrorDetails,
 } from '../shared.js';
 
 /**
@@ -179,11 +181,7 @@ export class HuggingFaceBackendAdapter implements BackendAdapter<
       return irResponse;
     } catch (error) {
       // Re-throw adapter errors
-      if (
-        error instanceof AdapterConversionError ||
-        error instanceof NetworkError ||
-        error instanceof ProviderError
-      ) {
+      if (error instanceof AdapterError) {
         throw error;
       }
 
@@ -248,6 +246,7 @@ export class HuggingFaceBackendAdapter implements BackendAdapter<
         error: {
           code: error instanceof Error ? error.name : 'UNKNOWN_ERROR',
           message: error instanceof Error ? error.message : String(error),
+          details: streamErrorDetails(error),
         },
       } as IRStreamChunk;
     }
@@ -477,9 +476,15 @@ export class HuggingFaceBackendAdapter implements BackendAdapter<
 
       if (!response.ok) {
         const errorBody = await response.text();
-        throw createErrorFromHttpResponse(response.status, response.statusText, errorBody, {
-          backend: this.metadata.name,
-        });
+        throw createErrorFromHttpResponse(
+          response.status,
+          response.statusText,
+          errorBody,
+          {
+            backend: this.metadata.name,
+          },
+          response.headers
+        );
       }
 
       const data = (await response.json()) as HuggingFaceResponse | HuggingFaceResponse[];

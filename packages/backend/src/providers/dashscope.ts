@@ -19,6 +19,7 @@ import {
   extractStructuredOutputJSON,
   buildResponseFormatFallbackWarning,
   buildToolsUnsupportedWarning,
+  streamErrorDetails,
 } from '../shared.js';
 import type {
   IRChatRequest,
@@ -29,11 +30,11 @@ import type {
   FinishReason,
 } from '@johnhenry/aimatey-types';
 import {
-  NetworkError,
   ProviderError,
   StreamError,
   ErrorCode,
   createErrorFromHttpResponse,
+  AdapterError,
 } from '@johnhenry/aimatey-errors';
 import { normalizeSystemMessages, mediaSourceToUrl } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
@@ -311,14 +312,15 @@ export class DashScopeBackendAdapter implements BackendAdapter<
           response.status,
           response.statusText,
           await response.text(),
-          { backend: this.metadata.name }
+          { backend: this.metadata.name },
+          response.headers
         );
       }
 
       const data = (await response.json()) as DashScopeResponse;
       return this.toIR(data, request, Date.now() - startTime);
     } catch (error) {
-      if (error instanceof NetworkError || error instanceof ProviderError) {
+      if (error instanceof AdapterError) {
         throw error;
       }
 
@@ -357,7 +359,8 @@ export class DashScopeBackendAdapter implements BackendAdapter<
           response.status,
           response.statusText,
           await response.text(),
-          { backend: this.metadata.name }
+          { backend: this.metadata.name },
+          response.headers
         );
       }
 
@@ -457,6 +460,7 @@ export class DashScopeBackendAdapter implements BackendAdapter<
         error: {
           code: error instanceof Error ? error.name : 'UNKNOWN_ERROR',
           message: error instanceof Error ? error.message : String(error),
+          details: streamErrorDetails(error),
         },
       } as IRStreamChunk;
     }

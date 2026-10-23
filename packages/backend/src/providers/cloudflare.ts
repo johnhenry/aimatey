@@ -24,11 +24,11 @@ import type {
 } from '@johnhenry/aimatey-types';
 import {
   AdapterConversionError,
-  NetworkError,
   ProviderError,
   StreamError,
   ErrorCode,
   createErrorFromHttpResponse,
+  AdapterError,
 } from '@johnhenry/aimatey-errors';
 import { normalizeSystemMessages, mediaSourceToUrl } from '@johnhenry/aimatey-utils';
 import { getEffectiveStreamMode, mergeStreamingConfig } from '@johnhenry/aimatey-utils';
@@ -38,6 +38,7 @@ import {
   buildResponseFormatFallbackWarning,
   buildToolsUnsupportedWarning,
   estimateTokens,
+  streamErrorDetails,
 } from '../shared.js';
 import { decideViaSystemOne, estimateSystemOneCost } from '../decisions/systemone-client.js';
 
@@ -344,14 +345,15 @@ export class CloudflareBackendAdapter implements BackendAdapter<
           response.status,
           response.statusText,
           await response.text(),
-          { backend: this.metadata.name }
+          { backend: this.metadata.name },
+          response.headers
         );
       }
 
       const data = (await response.json()) as CloudflareResponse;
       return this.toIR(data, request, Date.now() - startTime);
     } catch (error) {
-      if (error instanceof NetworkError || error instanceof ProviderError) {
+      if (error instanceof AdapterError) {
         throw error;
       }
 
@@ -390,7 +392,8 @@ export class CloudflareBackendAdapter implements BackendAdapter<
           response.status,
           response.statusText,
           await response.text(),
-          { backend: this.metadata.name }
+          { backend: this.metadata.name },
+          response.headers
         );
       }
 
@@ -490,6 +493,7 @@ export class CloudflareBackendAdapter implements BackendAdapter<
         error: {
           code: error instanceof Error ? error.name : 'UNKNOWN_ERROR',
           message: error instanceof Error ? error.message : String(error),
+          details: streamErrorDetails(error),
         },
       } as IRStreamChunk;
     }

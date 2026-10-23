@@ -18,7 +18,13 @@ import type {
   AIModel,
   ListModelsResult,
 } from '@johnhenry/aimatey-types';
-import { createErrorFromHttpResponse, NetworkError, ErrorCode } from '@johnhenry/aimatey-errors';
+import {
+  AdapterError,
+  RateLimitError,
+  createErrorFromHttpResponse,
+  NetworkError,
+  ErrorCode,
+} from '@johnhenry/aimatey-errors';
 
 // ============================================================================
 // Token Estimation
@@ -330,9 +336,15 @@ export async function executeOpenAICompatibleEmbed(options: {
 
   if (!response.ok) {
     const errorBody = await response.text();
-    throw createErrorFromHttpResponse(response.status, response.statusText, errorBody, {
-      backend: backendName,
-    });
+    throw createErrorFromHttpResponse(
+      response.status,
+      response.statusText,
+      errorBody,
+      {
+        backend: backendName,
+      },
+      response.headers
+    );
   }
 
   const json = (await response.json()) as {
@@ -942,3 +954,24 @@ export const DEFAULT_MISTRAL_MODELS: readonly AIModel[] = [
     },
   },
 ] as const;
+
+/**
+ * Structured `details` for a terminal stream `error` chunk, so a consumer can
+ * classify a failed stream the same way it classifies a thrown error: the
+ * adapter's error code, whether a retry is worthwhile, the provider's HTTP
+ * status and message, and the rate-limit wait (ms) when there was one.
+ * Streams report failures as chunks rather than throwing.
+ */
+export function streamErrorDetails(error: unknown): Record<string, unknown> | undefined {
+  if (!(error instanceof AdapterError)) {
+    return undefined;
+  }
+  return {
+    errorCode: error.code,
+    retryable: error.isRetryable,
+    ...(error.statusCode !== undefined && { statusCode: error.statusCode }),
+    ...(error.providerMessage !== undefined && { providerMessage: error.providerMessage }),
+    ...(error instanceof RateLimitError &&
+      error.retryAfter !== undefined && { retryAfter: error.retryAfter }),
+  };
+}

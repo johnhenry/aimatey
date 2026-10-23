@@ -524,9 +524,15 @@ export async function postSystemOne(
   }
 
   if (!response.ok) {
-    throw createErrorFromHttpResponse(response.status, response.statusText, await response.text(), {
-      backend: opts.backendName,
-    });
+    throw createErrorFromHttpResponse(
+      response.status,
+      response.statusText,
+      await response.text(),
+      {
+        backend: opts.backendName,
+      },
+      response.headers
+    );
   }
 
   try {
