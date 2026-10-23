@@ -300,7 +300,11 @@ describe('servedModel survives a JSON round trip (#113)', () => {
     // is the same either way and no consumer sees a null model name.
     const adapter = new CohereBackendAdapter({ apiKey: 'test' });
     const provenance = adapter.toIR(
-      { generation_id: 'gen-1', text: 'hi', finish_reason: 'COMPLETE' } as never,
+      {
+        id: 'gen-1',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
+        finish_reason: 'COMPLETE',
+      } as never,
       makeRequest('command-r'),
       5
     ).metadata.provenance;
@@ -359,12 +363,16 @@ describe('backend adapters report the served model (#113)', () => {
   });
 
   it('Cohere leaves it unset, because Cohere does not report it', () => {
-    // "Absent" is an acceptable outcome; "wrong" is not. Cohere's v1 /chat response has no
+    // "Absent" is an acceptable outcome; "wrong" is not. Cohere's v2 /chat response has no
     // model field, so this must not fall back to the requested model.
     const adapter = new CohereBackendAdapter({ apiKey: 'test' });
 
     const ir = adapter.toIR(
-      { generation_id: 'gen-1', text: 'hi', finish_reason: 'COMPLETE' } as never,
+      {
+        id: 'gen-1',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
+        finish_reason: 'COMPLETE',
+      } as never,
       makeRequest('command-r'),
       5
     );
@@ -393,7 +401,11 @@ describe('backend adapters report the served model (#113)', () => {
 
     const adapter = new CohereBackendAdapter({ apiKey: 'test' });
     const ir = adapter.toIR(
-      { generation_id: 'gen-1', text: 'hi', finish_reason: 'COMPLETE' } as never,
+      {
+        id: 'gen-1',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
+        finish_reason: 'COMPLETE',
+      } as never,
       upstream,
       5
     );
