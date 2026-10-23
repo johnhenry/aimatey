@@ -1,5 +1,38 @@
 # @johnhenry/aimatey-backend
 
+## 0.9.0
+
+### Minor Changes
+
+- b77cb17: Cohere adapter moves from the legacy `/v1/chat` to the v2 Chat API (`/v2/chat`), with native tool calling (#215).
+  - `capabilities.tools` is now `true`: `tools` / `toolChoice` map to v2 function tools, assistant `tool_calls` become `tool_use` blocks (an optional leading text block, then one block per call), and IR `tool_use` / `tool_result` history is sent as assistant `tool_calls` and `role: 'tool'` messages with `tool_call_id`. Streamed `tool-call-start` / `-delta` / `-end` events become `tool_use` chunks (`id`, `name`, `inputDelta`, `index`) and the `done` message holds the assembled `tool_use` blocks with `finishReason: 'tool_calls'`. The model's `tool_plan` is not surfaced.
+  - `toolChoice`: v2 only supports forcing or forbidding tools, so `'required'` sends `REQUIRED`, `'none'` sends `NONE`, `'auto'` is the default, and `{ name }` sends `REQUIRED` with only that tool offered.
+  - Breaking for 0.x: the wire format changed. Requests send a `messages` array (system, user, assistant, tool) instead of `message` / `chat_history` / `preamble`, so the last message no longer has to be from the user. `CohereRequest`, `CohereResponse` and the stream event types are now the v2 shapes. Streaming is real SSE (`content-delta`, `tool-call-*`, `message-end`) instead of newline-delimited JSON, and usage now reaches the final `done` chunk. `seed` is now sent (`supportsSeed: true`) and up to 5 stop sequences are allowed. `finish_reason` `ERROR` and `TIMEOUT` now map to `'error'` (they were `'stop'`); `STOP_SEQUENCE` maps to `'stop'` and `TOOL_CALL` to `'tool_calls'`.
+  - Removed: the v1-only `connectors` option (`parameters.custom.connectors`) is no longer sent; v2 has no connectors. `parameters.custom.documents` and citations (`metadata.custom.citations`, and `citations` on the `done` chunk) keep working.
+  - `baseURL` migration: the default is now `https://api.cohere.com/v2`. A custom `baseURL` ending in `/v1` (including the old `https://api.cohere.ai/v1`) is rewritten to `/v2`; a bare origin such as a proxy gets `/v2` appended; any other path is used as given. `listModels()` and `healthCheck()` still call the v1 `/models` and `/check-api-key` endpoints, and `embed()` is unchanged.
+  - The default model is now `command-r7b-12-2024` when neither `parameters.model` nor `defaultModel` is set (v2 requires a model).
+
+- f0bb17c: Keep the provider's request id on HTTP errors (#213). `createErrorFromHttpResponse` now puts the id from `x-request-id`, `request-id` (Anthropic), `x-amzn-requestid` / `x-amzn-request-id` (AWS), `x-ms-request-id` or `apim-request-id` (Azure) on `error.details.requestId`, and stream `error` chunks carry it in `error.details.requestId`. New `extractRequestId(headers)` export. Replicate's HTTP errors now also receive the response headers.
+- 338d5a8: Native function calling for the Gemini backend adapter (#214). IR tools map to `tools[].functionDeclarations`, `toolChoice` maps to `toolConfig.functionCallingConfig` (`AUTO` / `ANY` / `NONE`, plus `allowedFunctionNames` for a named tool), `functionCall` parts become `tool_use` blocks (finish reason `tool_calls`), and `tool_result` blocks become `functionResponse` parts with the function name resolved from the earlier `tool_use`. Gemini sends no call ids, so `call_<n>` ids are generated. Streamed calls are assembled into `tool_use` chunks and `done` message blocks like the other adapters. `capabilities.tools` is now `true` and the tool-unsupported warning is gone.
+
+  `ToolUseContent` and the `tool_use` stream chunk gain an optional, backward-compatible `providerMetadata` field. Gemini keeps its `thoughtSignature` at `providerMetadata.gemini.thoughtSignature` and echoes it on the `functionCall` part when the block is sent back; other adapters ignore it.
+
+  Fix: `executeStream` now calls `streamGenerateContent` with `alt=sse`. Without it Gemini returns a JSON array, so no `data:` lines were parsed and streaming yielded no content.
+
+- ba9e690: Hugging Face adapter moves to the Inference Providers router's OpenAI-compatible chat completions (#216), with native tool calling.
+  - Requests go to `https://router.huggingface.co/v1/chat/completions` with a `messages` array (the flattened `inputs` prompt and the legacy `api-inference.huggingface.co` text-generation endpoint are gone). Streaming is now real SSE, with usage on the final chunk, instead of one blocking response split in two. Authenticate with a Hugging Face token that has the "Inference Providers" permission.
+  - `capabilities.tools` is now `true`: `tools` / `toolChoice`, blocking `tool_calls`, streamed tool-call fragments and `tool_use` / `tool_result` history work through the shared OpenAI-compatible helpers. Capabilities also change to `streaming: true`, `supportsSeed`, `supportsFrequencyPenalty`, `supportsPresencePenalty` true (sent natively) and `maxStopSequences: 4`; `topK` is no longer sent.
+  - Breaking for 0.x: the wire format changed. `temperature: 0` is now sent as-is (the old greedy/`do_sample` mapping and the `repetition_penalty` mapping are removed), and `HuggingFaceRequest` / `HuggingFaceResponse` are now the chat completions shapes.
+  - Custom `baseURL` migration: `https://api-inference.huggingface.co` is mapped to the router; a bare origin such as a dedicated Inference Endpoint (`https://xyz.endpoints.huggingface.cloud`) gets `/v1` appended (text-generation-inference serves chat completions at `/v1/chat/completions`); a URL that already has a path (`.../v1`) is used as given. Endpoints that only expose the old `/models/<id>` prompt API must stay on the previous release.
+
+### Patch Changes
+
+- Updated dependencies [f0bb17c]
+- Updated dependencies [338d5a8]
+  - @johnhenry/aimatey-errors@0.5.0
+  - @johnhenry/aimatey-types@0.8.0
+  - @johnhenry/aimatey-utils@0.6.2
+
 ## 0.8.0
 
 ### Minor Changes

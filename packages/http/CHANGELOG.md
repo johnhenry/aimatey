@@ -1,5 +1,14 @@
 # @johnhenry/aimatey-http
 
+## 0.1.7
+
+### Patch Changes
+
+- Updated dependencies [338d5a8]
+  - @johnhenry/aimatey-types@0.8.0
+  - @johnhenry/aimatey-core@0.6.2
+  - @johnhenry/aimatey-http-core@0.4.2
+
 ## 0.1.6
 
 ### Patch Changes

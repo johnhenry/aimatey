@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-core",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Core components for Aimatey - Universal AI Adapter System",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -37,9 +37,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@johnhenry/aimatey-types": "^0.7.1",
-    "@johnhenry/aimatey-errors": "^0.4.0",
-    "@johnhenry/aimatey-utils": "^0.6.1"
+    "@johnhenry/aimatey-types": "^0.8.0",
+    "@johnhenry/aimatey-errors": "^0.5.0",
+    "@johnhenry/aimatey-utils": "^0.6.2"
   },
   "devDependencies": {
     "typescript": "^5.9.3",
