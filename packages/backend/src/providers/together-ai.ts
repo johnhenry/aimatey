@@ -28,6 +28,7 @@ import {
   buildResponseFormatFallbackWarning,
   buildToolsUnsupportedWarning,
   estimateTokens,
+  streamErrorDetails,
 } from '../shared.js';
 import type {
   IRChatRequest,
@@ -38,11 +39,11 @@ import type {
   FinishReason,
 } from '@johnhenry/aimatey-types';
 import {
-  NetworkError,
   ProviderError,
   StreamError,
   ErrorCode,
   createErrorFromHttpResponse,
+  AdapterError,
 } from '@johnhenry/aimatey-errors';
 import {
   normalizeSystemMessages,
@@ -447,13 +448,14 @@ export class TogetherAIBackendAdapter implements BackendAdapter<
           response.status,
           response.statusText,
           await response.text(),
-          { backend: this.metadata.name }
+          { backend: this.metadata.name },
+          response.headers
         );
       }
 
       return (await response.json()) as TogetherAIResponse;
     } catch (error) {
-      if (error instanceof NetworkError || error instanceof ProviderError) {
+      if (error instanceof AdapterError) {
         throw error;
       }
       throw new ProviderError({
@@ -510,14 +512,15 @@ export class TogetherAIBackendAdapter implements BackendAdapter<
           response.status,
           response.statusText,
           await response.text(),
-          { backend: this.metadata.name }
+          { backend: this.metadata.name },
+          response.headers
         );
       }
 
       const data = (await response.json()) as TogetherAIResponse;
       return this.toIR(data, request, Date.now() - startTime);
     } catch (error) {
-      if (error instanceof NetworkError || error instanceof ProviderError) {
+      if (error instanceof AdapterError) {
         throw error;
       }
 
@@ -556,7 +559,8 @@ export class TogetherAIBackendAdapter implements BackendAdapter<
           response.status,
           response.statusText,
           await response.text(),
-          { backend: this.metadata.name }
+          { backend: this.metadata.name },
+          response.headers
         );
       }
 
@@ -656,6 +660,7 @@ export class TogetherAIBackendAdapter implements BackendAdapter<
         error: {
           code: error instanceof Error ? error.name : 'UNKNOWN_ERROR',
           message: error instanceof Error ? error.message : String(error),
+          details: streamErrorDetails(error),
         },
       } as IRStreamChunk;
     }

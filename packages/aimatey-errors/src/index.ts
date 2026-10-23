@@ -61,6 +61,10 @@ export class AdapterError extends Error {
    * string either way.
    */
   readonly userMessage?: string;
+  /** HTTP status of the provider response that caused this error, when there was one. */
+  readonly statusCode?: number;
+  /** The provider's own (credential-redacted) error message, when one was returned. */
+  readonly providerMessage?: string;
 
   constructor(options: BaseErrorOptions) {
     super(options.message);
@@ -74,6 +78,8 @@ export class AdapterError extends Error {
     this.details = options.details;
     this.timestamp = Date.now();
     this.userMessage = options.userMessage;
+    this.statusCode = options.statusCode;
+    this.providerMessage = options.providerMessage;
 
     // Maintains proper stack trace for where error was thrown (V8 only)
     if (Error.captureStackTrace) {
@@ -98,6 +104,8 @@ export class AdapterError extends Error {
       category: this.category,
       message: this.message,
       userMessage: this.userMessage,
+      statusCode: this.statusCode,
+      providerMessage: this.providerMessage,
       isRetryable: this.isRetryable,
       provenance: this.provenance,
       irState: this.irState,
@@ -162,7 +170,9 @@ export class RateLimitError extends AdapterError {
       isRetryable: true,
       provenance: options.provenance,
       cause: options.cause,
-      details: options.rateLimitDetails as Record<string, unknown>,
+      statusCode: options.statusCode,
+      providerMessage: options.providerMessage,
+      details: { ...options.rateLimitDetails, ...options.details } as Record<string, unknown>,
     });
     this.name = 'RateLimitError';
     this.retryAfter = options.rateLimitDetails?.retryAfter;
@@ -182,7 +192,7 @@ export class ValidationError extends AdapterError {
     super({
       ...options,
       isRetryable: false,
-      details: { validationDetails: options.validationDetails },
+      details: { ...options.details, validationDetails: options.validationDetails },
     });
     this.name = 'ValidationError';
     this.validationDetails = options.validationDetails;
@@ -391,70 +401,236 @@ function isRetryableStatusCode(statusCode: number): boolean {
   return statusCode >= 500 || RETRYABLE_CLIENT_STATUS_CODES.has(statusCode);
 }
 
+const REDACTED = '[REDACTED]';
+
+/**
+ * Strip credentials a provider (or proxy) may echo back in an error body:
+ * `Authorization`/`x-api-key`-style header lines, bearer tokens, `key=`/`api_key=`
+ * query or JSON values, and well-known key shapes (OpenAI `sk-`, Google `AIza`,
+ * Anthropic `sk-ant-`, GitHub `ghp_`, Hugging Face `hf_`, Groq `gsk_`, AWS `AKIA`).
+ */
+export function redactSecrets(text: string): string {
+  return text
+    .replace(
+      /\b(authorization|proxy-authorization|x-api-key|api-key|x-goog-api-key)(["']?\s*[:=]\s*["']?)(?:bearer\s+|basic\s+)?[^\s"',;&]+/gi,
+      `$1$2${REDACTED}`
+    )
+    .replace(/\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{6,}/gi, `$1 ${REDACTED}`)
+    .replace(/\b(api[_-]?key|access[_-]?token|token|secret|key)=([^\s&"']+)/gi, `$1=${REDACTED}`)
+    .replace(
+      /\b(?:sk-[A-Za-z0-9_-]{10,}|AIza[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{16,}|hf_[A-Za-z0-9]{16,}|gsk_[A-Za-z0-9]{16,}|AKIA[A-Z0-9]{12,}|xox[abp]-[A-Za-z0-9-]{10,})/g,
+      REDACTED
+    );
+}
+
+const MAX_PROVIDER_MESSAGE_LENGTH = 1000;
+
+function pickString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * Pull the human-readable message out of a provider error body. Handles the
+ * common shapes: `{error:{message}}`, `{error:"..."}`, `{message}`, `{detail}`,
+ * `{errors:[{message}]}`, arrays of those (Gemini), JSON given as a string, and
+ * plain text. Returns undefined when nothing readable is there.
+ */
+function extractProviderMessage(body: unknown, depth = 0): string | undefined {
+  if (body === null || body === undefined || depth > 3) {
+    return undefined;
+  }
+  if (typeof body === 'string') {
+    const text = body.trim();
+    if (!text) {
+      return undefined;
+    }
+    if (text.startsWith('{') || text.startsWith('[')) {
+      try {
+        const nested = extractProviderMessage(JSON.parse(text), depth + 1);
+        if (nested) {
+          return nested;
+        }
+      } catch {
+        // not JSON after all; fall through to the raw text
+      }
+    }
+    // An HTML error page is not a message worth surfacing.
+    return /^<(?:!doctype|html)/i.test(text) ? undefined : text;
+  }
+  if (Array.isArray(body)) {
+    for (const item of body) {
+      const m = extractProviderMessage(item, depth + 1);
+      if (m) {
+        return m;
+      }
+    }
+    return undefined;
+  }
+  if (typeof body === 'object') {
+    const o = body as Record<string, unknown>;
+    return (
+      pickString(o.message) ??
+      extractProviderMessage(o.error, depth + 1) ??
+      pickString(o.detail) ??
+      pickString(o.error_description) ??
+      extractProviderMessage(o.errors, depth + 1) ??
+      extractProviderMessage(o.detail, depth + 1)
+    );
+  }
+  return undefined;
+}
+
+function readHeader(headers: unknown, name: string): string | undefined {
+  if (!headers) {
+    return undefined;
+  }
+  if (typeof (headers as Headers).get === 'function') {
+    return (headers as Headers).get(name) ?? undefined;
+  }
+  const lower = name.toLowerCase();
+  for (const [k, v] of Object.entries(headers as Record<string, unknown>)) {
+    if (k.toLowerCase() === lower && (typeof v === 'string' || typeof v === 'number')) {
+      return String(v);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Parse a rate-limit wait out of response headers, in milliseconds.
+ * Honors `retry-after-ms`, then `Retry-After` as delta-seconds or an HTTP-date.
+ */
+export function parseRetryAfter(headers: unknown): number | undefined {
+  const ms = readHeader(headers, 'retry-after-ms');
+  if (ms !== undefined && /^\d+(\.\d+)?$/.test(ms.trim())) {
+    return Math.round(Number(ms));
+  }
+  const raw = readHeader(headers, 'retry-after')?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    return Math.round(Number(raw) * 1000);
+  }
+  const when = Date.parse(raw);
+  return Number.isNaN(when) ? undefined : Math.max(0, when - Date.now());
+}
+
+function redactBody(body: unknown): unknown {
+  if (typeof body === 'string') {
+    return redactSecrets(body).slice(0, 4000);
+  }
+  if (body === null || body === undefined) {
+    return body;
+  }
+  try {
+    return JSON.parse(redactSecrets(JSON.stringify(body)));
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Create adapter error from HTTP response.
+ *
+ * Keeps what the provider said: the status (`error.statusCode`), the provider's
+ * own message (`error.providerMessage`, also folded into `error.message` so it
+ * is visible when `statusText` is empty, as it always is over HTTP/2 and
+ * HTTP/3), and the redacted body (`error.details.responseBody`). Credentials
+ * echoed by a provider are redacted from all three.
+ *
+ * Status mapping: 401 authentication, 403 authorization, 429 rate limit
+ * (`retryAfter` in ms from `headers`), 400 validation (non-retryable),
+ * 404/410 about a model `UNSUPPORTED_MODEL` (non-retryable), 5xx retryable.
+ *
+ * @param headers - Optional response headers (`Headers` or a plain object) used for `Retry-After`.
  */
 export function createErrorFromHttpResponse(
   statusCode: number,
   statusText: string,
   responseBody: unknown,
-  provenance: ErrorProvenance
+  provenance: ErrorProvenance,
+  headers?: Headers | Record<string, string>
 ): AdapterError {
+  const rawMessage = extractProviderMessage(responseBody);
+  const providerMessage = rawMessage
+    ? redactSecrets(rawMessage).slice(0, MAX_PROVIDER_MESSAGE_LENGTH)
+    : undefined;
+  const redactedBody = redactBody(responseBody);
+  const detail = providerMessage ?? (statusText ? redactSecrets(statusText) : `HTTP ${statusCode}`);
+
   const httpContext = {
     statusCode,
     statusText,
-    responseBody,
+    responseBody: redactedBody,
   } as HttpErrorContext;
+  const common = {
+    provenance,
+    statusCode,
+    providerMessage,
+    details: { statusCode, statusText, responseBody: redactedBody, providerMessage },
+  };
 
-  // Map HTTP status codes to error types
   if (statusCode === 401) {
     return new AuthenticationError({
+      ...common,
       code: ErrorCodeEnum.INVALID_API_KEY,
-      message: `Authentication failed: ${statusText}`,
-      provenance,
+      message: `Authentication failed (${statusCode}): ${detail}`,
     });
   }
 
   if (statusCode === 403) {
     return new AuthorizationError({
+      ...common,
       code: ErrorCodeEnum.INSUFFICIENT_PERMISSIONS,
-      message: `Authorization failed: ${statusText}`,
-      provenance,
+      message: `Authorization failed (${statusCode}): ${detail}`,
     });
   }
 
   if (statusCode === 429) {
+    const retryAfter = parseRetryAfter(headers);
     return new RateLimitError({
-      message: `Rate limit exceeded: ${statusText}`,
-      provenance,
+      ...common,
+      message: `Rate limit exceeded (${statusCode}): ${detail}`,
+      rateLimitDetails: retryAfter === undefined ? undefined : { retryAfter },
     });
   }
 
   if (statusCode === 400) {
     return new ValidationError({
+      ...common,
       code: ErrorCodeEnum.INVALID_REQUEST,
-      message: `Invalid request: ${statusText}`,
+      message: `Invalid request (${statusCode}): ${detail}`,
       validationDetails: [],
-      provenance,
+    });
+  }
+
+  if ((statusCode === 404 || statusCode === 410) && /\bmodels?\b/i.test(detail)) {
+    return new ValidationError({
+      ...common,
+      code: ErrorCodeEnum.UNSUPPORTED_MODEL,
+      message: `Model not found (${statusCode}): ${detail}`,
+      validationDetails: [],
     });
   }
 
   if (statusCode >= 500) {
     return new ProviderError({
-      code: ErrorCodeEnum.PROVIDER_ERROR,
-      message: `Provider error: ${statusText}`,
-      isRetryable: true,
       provenance,
+      statusCode,
+      providerMessage,
+      code: ErrorCodeEnum.PROVIDER_ERROR,
+      message: `Provider error (${statusCode}): ${detail}`,
+      isRetryable: true,
       httpContext,
     });
   }
 
   return new AdapterError({
+    ...common,
     code: ErrorCodeEnum.PROVIDER_ERROR,
-    message: `HTTP error ${statusCode}: ${statusText}`,
+    message: `HTTP error ${statusCode}: ${detail}`,
     isRetryable: isRetryableStatusCode(statusCode),
-    provenance,
-    details: httpContext as unknown as Record<string, unknown>,
   });
 }
 

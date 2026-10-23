@@ -23,11 +23,11 @@ import type {
 } from '@johnhenry/aimatey-types';
 import {
   AdapterConversionError,
-  NetworkError,
   ProviderError,
   StreamError,
   ErrorCode,
   createErrorFromHttpResponse,
+  AdapterError,
 } from '@johnhenry/aimatey-errors';
 import { normalizeSystemMessages, requireResolvedContent } from '@johnhenry/aimatey-utils';
 import { getModelCache } from '@johnhenry/aimatey-utils';
@@ -38,6 +38,7 @@ import {
   DEFAULT_GEMINI_MODELS,
   buildToolsUnsupportedWarning,
   type ModelCapabilityFilter,
+  streamErrorDetails,
 } from '../shared.js';
 import type { ListModelsOptions, ListModelsResult, AIModel } from '@johnhenry/aimatey-types';
 
@@ -166,9 +167,15 @@ export class GeminiBackendAdapter implements BackendAdapter<GeminiRequest, Gemin
 
     if (!response.ok) {
       const errorBody = await response.text();
-      throw createErrorFromHttpResponse(response.status, response.statusText, errorBody, {
-        backend: this.metadata.name,
-      });
+      throw createErrorFromHttpResponse(
+        response.status,
+        response.statusText,
+        errorBody,
+        {
+          backend: this.metadata.name,
+        },
+        response.headers
+      );
     }
 
     const json = (await response.json()) as { embeddings: Array<{ values: number[] }> };
@@ -206,15 +213,21 @@ export class GeminiBackendAdapter implements BackendAdapter<GeminiRequest, Gemin
 
       if (!response.ok) {
         const errorBody = await response.text();
-        throw createErrorFromHttpResponse(response.status, response.statusText, errorBody, {
-          backend: this.metadata.name,
-        });
+        throw createErrorFromHttpResponse(
+          response.status,
+          response.statusText,
+          errorBody,
+          {
+            backend: this.metadata.name,
+          },
+          response.headers
+        );
       }
 
       const data = (await response.json()) as GeminiResponse;
       return this.toIR(data, request, Date.now() - startTime);
     } catch (error) {
-      if (error instanceof NetworkError || error instanceof ProviderError) {
+      if (error instanceof AdapterError) {
         throw error;
       }
       throw new ProviderError({
@@ -248,9 +261,15 @@ export class GeminiBackendAdapter implements BackendAdapter<GeminiRequest, Gemin
 
       if (!response.ok) {
         const errorBody = await response.text();
-        throw createErrorFromHttpResponse(response.status, response.statusText, errorBody, {
-          backend: this.metadata.name,
-        });
+        throw createErrorFromHttpResponse(
+          response.status,
+          response.statusText,
+          errorBody,
+          {
+            backend: this.metadata.name,
+          },
+          response.headers
+        );
       }
 
       if (!response.body) {
@@ -354,6 +373,7 @@ export class GeminiBackendAdapter implements BackendAdapter<GeminiRequest, Gemin
         error: {
           code: error instanceof Error ? error.name : 'UNKNOWN_ERROR',
           message: error instanceof Error ? error.message : String(error),
+          details: streamErrorDetails(error),
         },
       } as IRStreamChunk;
     }
@@ -409,7 +429,8 @@ export class GeminiBackendAdapter implements BackendAdapter<GeminiRequest, Gemin
           response.status,
           response.statusText,
           await response.text(),
-          { backend: this.metadata.name }
+          { backend: this.metadata.name },
+          response.headers
         );
       }
 
