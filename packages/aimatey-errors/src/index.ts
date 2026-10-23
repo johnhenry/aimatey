@@ -497,6 +497,35 @@ function readHeader(headers: unknown, name: string): string | undefined {
 }
 
 /**
+ * Response headers that carry the provider's own request id, in lookup order:
+ * the generic `x-request-id` (OpenAI and compatibles), Anthropic's `request-id`,
+ * AWS's `x-amzn-requestid` / `x-amzn-request-id`, Azure's `x-ms-request-id` /
+ * `apim-request-id`.
+ */
+const REQUEST_ID_HEADERS = [
+  'x-request-id',
+  'request-id',
+  'x-amzn-requestid',
+  'x-amzn-request-id',
+  'x-ms-request-id',
+  'apim-request-id',
+] as const;
+
+/**
+ * Read the provider's request id from response headers (for support tickets).
+ * Returns undefined when none of the known headers is present.
+ */
+export function extractRequestId(headers: unknown): string | undefined {
+  for (const name of REQUEST_ID_HEADERS) {
+    const value = readHeader(headers, name)?.trim();
+    if (value) {
+      return redactSecrets(value).slice(0, 200);
+    }
+  }
+  return undefined;
+}
+
+/**
  * Parse a rate-limit wait out of response headers, in milliseconds.
  * Honors `retry-after-ms`, then `Retry-After` as delta-seconds or an HTTP-date.
  */
@@ -559,16 +588,24 @@ export function createErrorFromHttpResponse(
   const redactedBody = redactBody(responseBody);
   const detail = providerMessage ?? (statusText ? redactSecrets(statusText) : `HTTP ${statusCode}`);
 
+  const requestId = extractRequestId(headers);
   const httpContext = {
     statusCode,
     statusText,
     responseBody: redactedBody,
+    ...(requestId !== undefined && { requestId }),
   } as HttpErrorContext;
   const common = {
     provenance,
     statusCode,
     providerMessage,
-    details: { statusCode, statusText, responseBody: redactedBody, providerMessage },
+    details: {
+      statusCode,
+      statusText,
+      responseBody: redactedBody,
+      providerMessage,
+      ...(requestId !== undefined && { requestId }),
+    },
   };
 
   if (statusCode === 401) {

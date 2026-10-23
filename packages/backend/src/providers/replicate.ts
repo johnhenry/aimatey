@@ -263,7 +263,8 @@ export class ReplicateBackendAdapter implements BackendAdapter<
           createResponse.status,
           createResponse.statusText,
           await createResponse.text(),
-          { backend: this.metadata.name }
+          { backend: this.metadata.name },
+          createResponse.headers
         );
       }
 
@@ -290,7 +291,8 @@ export class ReplicateBackendAdapter implements BackendAdapter<
             pollResponse.status,
             pollResponse.statusText,
             await pollResponse.text(),
-            { backend: this.metadata.name }
+            { backend: this.metadata.name },
+            pollResponse.headers
           );
         }
 
