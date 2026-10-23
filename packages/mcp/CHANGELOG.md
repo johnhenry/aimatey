@@ -1,5 +1,12 @@
 # @johnhenry/aimatey-mcp
 
+## 0.1.8
+
+### Patch Changes
+
+- Updated dependencies [338d5a8]
+  - @johnhenry/aimatey-types@0.8.0
+
 ## 0.1.7
 
 ### Patch Changes

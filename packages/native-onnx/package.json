@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-native-onnx",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Shared ONNX Runtime (Node) integration layer for Aimatey native backends",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -37,7 +37,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@johnhenry/aimatey-errors": "^0.4.0"
+    "@johnhenry/aimatey-errors": "^0.5.0"
   },
   "peerDependencies": {
     "onnxruntime-node": "^1.22.0"
@@ -48,7 +48,7 @@
     }
   },
   "devDependencies": {
-    "@johnhenry/aimatey-testing": "^0.2.0",
+    "@johnhenry/aimatey-testing": "^0.2.1",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },

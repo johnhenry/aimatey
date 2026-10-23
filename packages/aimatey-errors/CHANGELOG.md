@@ -1,5 +1,16 @@
 # @johnhenry/aimatey-errors
 
+## 0.5.0
+
+### Minor Changes
+
+- f0bb17c: Keep the provider's request id on HTTP errors (#213). `createErrorFromHttpResponse` now puts the id from `x-request-id`, `request-id` (Anthropic), `x-amzn-requestid` / `x-amzn-request-id` (AWS), `x-ms-request-id` or `apim-request-id` (Azure) on `error.details.requestId`, and stream `error` chunks carry it in `error.details.requestId`. New `extractRequestId(headers)` export. Replicate's HTTP errors now also receive the response headers.
+
+### Patch Changes
+
+- Updated dependencies [338d5a8]
+  - @johnhenry/aimatey-types@0.8.0
+
 ## 0.4.0
 
 ### Minor Changes

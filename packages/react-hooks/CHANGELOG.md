@@ -1,5 +1,14 @@
 # @johnhenry/aimatey-react-hooks
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [338d5a8]
+  - @johnhenry/aimatey-types@0.8.0
+  - @johnhenry/aimatey-utils@0.6.2
+  - @johnhenry/aimatey-react-core@0.1.7
+
 ## 0.2.0
 
 ### Minor Changes
