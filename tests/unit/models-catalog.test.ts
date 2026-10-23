@@ -2,6 +2,8 @@
  * @johnhenry/aimatey-models: helpers, generator core and checks.
  */
 import { describe, it, expect } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   CATALOG,
   getProvider,
@@ -402,5 +404,70 @@ describe('OpenRouter pricing policy', () => {
       now: NOW,
     }).catalog.providers.deepseek.models;
     expect(m['m-cur'].pricing).toBeUndefined();
+  });
+});
+
+describe('tool-capable adapters have a recommended tool-capable model', () => {
+  const dir = join(__dirname, '../../packages/backend/src/providers');
+  // adapter file name -> catalog provider id, where they differ
+  const idFor: Record<string, string> = { 'together-ai': 'together' };
+  const toolProviders = readdirSync(dir)
+    .filter((f) => f.endsWith('.ts'))
+    .filter((f) => /\btools:\s*true/.test(readFileSync(join(dir, f), 'utf8')))
+    .map((f) => f.replace(/\.ts$/, ''))
+    .map((n) => idFor[n] ?? n);
+
+  // Providers whose recommended model is not yet curated in the catalog.
+  // Remove an entry once its model is verified against the provider's docs.
+  const NOT_YET_CURATED = new Set([
+    'ai21',
+    'cerebras',
+    'dashscope',
+    'deepinfra',
+    'fireworks',
+    'inception',
+    'nvidia',
+    'sambanova',
+    'together',
+    // gateway / local runtimes: the model is chosen by the user's setup
+    'omniroute',
+    'ollama',
+    'lmstudio',
+  ]);
+
+  it('finds the tool-capable adapters', () => {
+    expect(toolProviders).toEqual(expect.arrayContaining(['cohere', 'huggingface', 'groq']));
+  });
+
+  it('every such provider recommends a model whose catalog entry supports tools', () => {
+    const problems: string[] = [];
+    for (const pid of toolProviders) {
+      if (NOT_YET_CURATED.has(pid)) continue;
+      const p = CATALOG.providers[pid];
+      const id = p?.recommended?.default;
+      if (!id) {
+        problems.push(`${pid}: no recommended default`);
+        continue;
+      }
+      const m = p.models[id];
+      if (!m) problems.push(`${pid}: ${id} not in catalog`);
+      else if (m.capabilities?.tools !== true)
+        problems.push(`${pid}: ${id} does not declare tools`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('the allowlist only names providers that still lack a verified default', () => {
+    for (const pid of NOT_YET_CURATED) {
+      const p = CATALOG.providers[pid];
+      const id = p?.recommended?.default;
+      const entry = id ? p.models[id] : undefined;
+      expect(entry?.capabilities?.tools === true && p.verifiedOn).toBeFalsy();
+    }
+  });
+
+  it('recommends tool-calling models for Cohere and Hugging Face', () => {
+    expect(recommendedModel('cohere', 'default')?.id).toBe('command-a-plus-05-2026');
+    expect(recommendedModel('huggingface', 'default')?.id).toBe('Qwen/Qwen3.5-9B');
   });
 });
