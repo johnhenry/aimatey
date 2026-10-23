@@ -187,3 +187,18 @@ describe('baseURL migration path', () => {
     );
   });
 });
+
+describe('Hugging Face request id (#213)', () => {
+  it('keeps x-request-id from an error response', async () => {
+    global.fetch = vi.fn(
+      async () =>
+        new Response('{"error":"bad token"}', {
+          status: 401,
+          headers: { 'x-request-id': 'req_hf' },
+        })
+    ) as never;
+    const adapter = new HuggingFaceBackendAdapter({ apiKey: 'bad' });
+    const e: any = await adapter.execute(makeRequest()).catch((err) => err);
+    expect(e.details.requestId).toBe('req_hf');
+  });
+});
