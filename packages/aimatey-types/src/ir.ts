@@ -268,6 +268,12 @@ export interface ToolUseContent {
   readonly id: string;
   readonly name: string;
   readonly input: Record<string, unknown>;
+  /**
+   * Opaque, provider-keyed metadata that must be echoed back with this block on the next turn
+   * (for example `{ gemini: { thoughtSignature } }`). Adapters ignore keys that are not theirs,
+   * so it is safe to pass blocks produced by one provider to another.
+   */
+  readonly providerMetadata?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -1656,6 +1662,9 @@ export interface StreamToolUseChunk extends BaseStreamChunk {
   readonly id: string;
   readonly name: string;
   readonly inputDelta?: string;
+
+  /** Provider-keyed metadata for this call; see {@link ToolUseContent.providerMetadata}. */
+  readonly providerMetadata?: Readonly<Record<string, unknown>>;
 
   /**
    * Zero-based position of this tool call within the assistant message.
