@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-frontend",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Frontend adapters for Aimatey - Universal AI Adapter System",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -107,9 +107,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@johnhenry/aimatey-types": "^0.7.0",
-    "@johnhenry/aimatey-errors": "^0.3.0",
-    "@johnhenry/aimatey-utils": "^0.6.0"
+    "@johnhenry/aimatey-types": "^0.7.1",
+    "@johnhenry/aimatey-errors": "^0.4.0",
+    "@johnhenry/aimatey-utils": "^0.6.1"
   },
   "devDependencies": {
     "@johnhenry/aimatey-testing": "^0.2.0",

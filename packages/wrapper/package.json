@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-wrapper",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "SDK wrappers for Aimatey - Use familiar SDK patterns with any provider",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -97,10 +97,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@johnhenry/aimatey-types": "^0.7.0",
-    "@johnhenry/aimatey-utils": "^0.6.0",
-    "@johnhenry/aimatey-frontend": "^0.4.0",
-    "@johnhenry/aimatey-errors": "^0.3.0"
+    "@johnhenry/aimatey-types": "^0.7.1",
+    "@johnhenry/aimatey-utils": "^0.6.1",
+    "@johnhenry/aimatey-frontend": "^0.4.1",
+    "@johnhenry/aimatey-errors": "^0.4.0"
   },
   "devDependencies": {
     "@johnhenry/aimatey-testing": "^0.2.0",
