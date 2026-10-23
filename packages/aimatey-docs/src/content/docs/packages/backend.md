@@ -320,7 +320,9 @@ const backend = new CohereBackendAdapter({
 });
 ```
 
-**Models:** `command-r-plus`, `command-r`, `command`
+**Models:** `command-a-03-2025`, `command-r-plus-08-2024`, `command-r-08-2024`, `command-r7b-12-2024`
+
+Uses the v2 Chat API with native tool calling (`tools`, `toolChoice`, streamed tool calls).
 
 ### Mistral
 

@@ -1,8 +1,8 @@
 /**
  * Cohere Backend Adapter
  *
- * Adapts Universal IR to Cohere Chat API.
- * Cohere has a custom API format optimized for RAG use cases.
+ * Adapts Universal IR to Cohere's v2 Chat API (`/v2/chat`): an OpenAI-like messages array with
+ * native tool calling, plus Cohere's RAG `documents` and citations.
  *
  * @module
  */
@@ -25,7 +25,6 @@ import type {
   AIModel,
 } from '@johnhenry/aimatey-types';
 import {
-  AdapterConversionError,
   ProviderError,
   StreamError,
   ErrorCode,
@@ -39,6 +38,11 @@ import {
   applyModelFilter,
   DEFAULT_COHERE_MODELS,
   buildStructuredOutputFallbackMessages,
+  buildStreamDoneMessage,
+  buildOpenAICompatResponseMessage,
+  convertIRMessageToOpenAICompat,
+  ToolCallAssembler,
+  type OpenAICompatWireMessage,
   extractStructuredOutputJSON,
   buildResponseFormatFallbackWarning,
   type ModelCapabilityFilter,
@@ -47,69 +51,147 @@ import {
 } from '../shared.js';
 
 // ============================================================================
-// Cohere API Types (Custom API)
+// Cohere v2 API Types
 // ============================================================================
 
-export interface CohereChatMessage {
-  role: 'USER' | 'CHATBOT'; // Note: uppercase roles
-  message: string;
+/** A document passed to Cohere for RAG (`documents`). */
+export interface CohereDocument {
+  id?: string;
+  data: Record<string, any>;
+}
+
+/** Cohere v2 `messages[]` entry. Same shape as OpenAI chat completions. */
+export type CohereMessage = OpenAICompatWireMessage;
+
+export interface CohereTool {
+  type: 'function';
+  function: { name: string; description?: string; parameters: Record<string, unknown> };
 }
 
 export interface CohereRequest {
-  model?: string; // Optional in Cohere
-  message: string; // Current user message
-  chat_history?: CohereChatMessage[]; // Previous conversation
-  preamble?: string; // System message
+  model: string;
+  messages: CohereMessage[];
+  tools?: CohereTool[];
+  /** v2 only supports forcing (`REQUIRED`) or forbidding (`NONE`) tool use. */
+  tool_choice?: 'REQUIRED' | 'NONE';
   temperature?: number;
   max_tokens?: number;
   p?: number; // top_p equivalent
   k?: number; // top_k
+  seed?: number;
   frequency_penalty?: number;
   presence_penalty?: number;
   stop_sequences?: string[];
   stream?: boolean;
   // Cohere-specific RAG parameters
-  documents?: Array<{
-    id?: string;
-    data: Record<string, any>;
-  }>;
-  connectors?: Array<{
-    id: string;
-  }>;
+  documents?: CohereDocument[];
+}
+
+export interface CohereCitation {
+  start: number;
+  end: number;
+  text: string;
+  sources?: unknown[];
+  content_index?: number;
+  type?: string;
+}
+
+export type CohereFinishReason =
+  | 'COMPLETE'
+  | 'STOP_SEQUENCE'
+  | 'MAX_TOKENS'
+  | 'TOOL_CALL'
+  | 'ERROR'
+  | 'TIMEOUT';
+
+export interface CohereUsage {
+  billed_units?: { input_tokens?: number; output_tokens?: number };
+  tokens?: { input_tokens?: number; output_tokens?: number };
 }
 
 export interface CohereResponse {
-  generation_id: string;
-  text: string;
-  finish_reason: 'COMPLETE' | 'MAX_TOKENS' | 'ERROR' | 'ERROR_TOXIC';
-  meta?: {
-    api_version: {
-      version: string;
-    };
-    billed_units?: {
-      input_tokens: number;
-      output_tokens: number;
-    };
+  id: string;
+  finish_reason: CohereFinishReason;
+  message: {
+    role: 'assistant';
+    content?: Array<{ type: string; text?: string; thinking?: string }>;
+    tool_plan?: string;
+    tool_calls?: Array<{
+      id: string;
+      type?: 'function';
+      function: { name: string; arguments?: string };
+    }>;
+    citations?: CohereCitation[];
   };
-  citations?: Array<{
-    start: number;
-    end: number;
-    text: string;
-    document_ids: string[];
-  }>;
+  usage?: CohereUsage;
 }
 
-export interface CohereStreamChunk {
-  event_type: 'stream-start' | 'text-generation' | 'stream-end' | 'citation-generation';
-  text?: string;
-  finish_reason?: 'COMPLETE' | 'MAX_TOKENS' | 'ERROR' | 'ERROR_TOXIC';
-  generation_id?: string;
-  citations?: Array<{
-    start: number;
-    end: number;
-    text: string;
-    document_ids: string[];
-  }>;
+/** A v2 server-sent event payload (`data:` line). */
+export interface CohereStreamEvent {
+  type:
+    | 'message-start'
+    | 'content-start'
+    | 'content-delta'
+    | 'content-end'
+    | 'tool-plan-delta'
+    | 'tool-call-start'
+    | 'tool-call-delta'
+    | 'tool-call-end'
+    | 'citation-start'
+    | 'citation-end'
+    | 'message-end'
+    | 'debug';
+  id?: string;
+  index?: number;
+  delta?: {
+    finish_reason?: CohereFinishReason;
+    usage?: CohereUsage;
+    message?: {
+      content?: { text?: string };
+      tool_plan?: string;
+      tool_calls?: {
+        id?: string;
+        type?: 'function';
+        function?: { name?: string; arguments?: string };
+      };
+      citations?: CohereCitation;
+    };
+  };
+}
+
+const COHERE_FINISH_REASONS: Record<string, FinishReason> = {
+  COMPLETE: 'stop',
+  STOP_SEQUENCE: 'stop',
+  MAX_TOKENS: 'length',
+  TOOL_CALL: 'tool_calls',
+  ERROR: 'error',
+  TIMEOUT: 'error',
+};
+
+function mapCohereFinishReason(reason: string | undefined): FinishReason {
+  return COHERE_FINISH_REASONS[reason ?? 'COMPLETE'] ?? 'stop';
+}
+
+function mapCohereUsage(usage: CohereUsage | undefined) {
+  const units = usage?.billed_units ?? usage?.tokens;
+  if (!units || (units.input_tokens === undefined && units.output_tokens === undefined)) {
+    return undefined;
+  }
+  const promptTokens = units.input_tokens ?? 0;
+  const completionTokens = units.output_tokens ?? 0;
+  return { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens };
+}
+
+/**
+ * Resolve the chat base URL. Cohere's chat lives at `/v2`; a legacy `.../v1` base URL is mapped
+ * to `/v2` and a bare origin (e.g. a proxy) gets `/v2` appended. Any other path is used as given.
+ */
+function resolveBaseURL(baseURL: string | undefined): string {
+  const base = (baseURL || 'https://api.cohere.com/v2').replace(/\/+$/, '');
+  if (/\/v1$/.test(base)) {
+    return base.replace(/\/v1$/, '/v2');
+  }
+  return /^https?:\/\/[^/]+$/.test(base) ? `${base}/v2` : base;
 }
 
 // ============================================================================
@@ -117,29 +199,31 @@ export interface CohereStreamChunk {
 // ============================================================================
 
 /**
- * Backend adapter for Cohere Chat API.
+ * Backend adapter for Cohere's v2 Chat API.
  *
  * Features:
- * - Custom API optimized for RAG
- * - Document and connector support
- * - Citation generation
+ * - `/v2/chat` messages array (system / user / assistant / tool roles)
+ * - Native tool calling (`tools`, `tool_calls`, `role: 'tool'` results, streamed tool calls)
+ * - Document support and citation generation (RAG)
  * - Text-only (no vision support)
- * - No function calling
  * - Pricing from $0.15 per 1M tokens
  */
 export class CohereBackendAdapter implements BackendAdapter<CohereRequest, CohereResponse> {
   readonly metadata: AdapterMetadata;
   private readonly config: ApiKeyBackendAdapterConfig;
   private readonly baseURL: string;
+  /** Legacy v1 base, still used by `/models` and `/check-api-key`. */
+  private readonly v1URL: string;
   private readonly modelCache: ReturnType<typeof getModelCache>;
 
   constructor(config: ApiKeyBackendAdapterConfig) {
     this.config = config;
-    this.baseURL = config.baseURL || 'https://api.cohere.ai/v1';
+    this.baseURL = resolveBaseURL(config.baseURL);
+    this.v1URL = this.baseURL.replace(/\/v2$/, '/v1');
     this.modelCache = getModelCache(config.modelsCacheScope || 'global');
     this.metadata = {
       name: 'cohere-backend',
-      version: '1.0.0',
+      version: '2.0.0',
       provider: 'Cohere',
       capabilities: {
         embeddings: true,
@@ -147,18 +231,18 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
         maxEmbeddingBatchSize: 96,
         streaming: true,
         multiModal: false, // Text-only
-        tools: false, // No function calling
+        tools: true,
         structuredOutput: 'fallback',
         maxContextTokens: 128000,
-        systemMessageStrategy: 'separate-parameter', // Uses preamble field
-        supportsMultipleSystemMessages: false, // Only one preamble
+        systemMessageStrategy: 'separate-parameter', // Folded into one leading system message
+        supportsMultipleSystemMessages: false,
         supportsTemperature: true,
         supportsTopP: true,
         supportsTopK: true,
-        supportsSeed: false,
+        supportsSeed: true,
         supportsFrequencyPenalty: true,
         supportsPresencePenalty: true,
-        maxStopSequences: 4,
+        maxStopSequences: 5,
       },
       config: {
         baseURL: this.baseURL,
@@ -167,7 +251,7 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
   }
 
   /**
-   * Convert IR to Cohere format.
+   * Convert IR to Cohere v2 format.
    */
   public fromIR(request: IRChatRequest): CohereRequest {
     const { messages, systemParameter } = normalizeSystemMessages(
@@ -176,37 +260,36 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
       this.metadata.capabilities.supportsMultipleSystemMessages
     );
 
-    // Cohere requires the last message to be a user message
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage?.role !== 'user') {
-      throw new AdapterConversionError({
-        code: ErrorCode.ADAPTER_CONVERSION_ERROR,
-        message: 'Cohere requires the last message to be from user',
-        provenance: { backend: this.metadata.name },
+    const wireMessages: CohereMessage[] = [];
+    if (systemParameter) {
+      wireMessages.push({
+        role: 'system',
+        content:
+          typeof systemParameter === 'string'
+            ? systemParameter
+            : (systemParameter as any[])
+                .map((block: any) => (block.type === 'text' ? block.text : ''))
+                .join(''),
       });
     }
-
-    // Extract text content from last message
-    const currentMessage =
-      typeof lastMessage.content === 'string'
-        ? lastMessage.content
-        : lastMessage.content.map((block) => (block.type === 'text' ? block.text : '')).join('');
-
-    // Convert chat history (all messages except the last)
-    const chatHistory: CohereChatMessage[] = messages.slice(0, -1).map((msg) => ({
-      role: msg.role === 'user' ? 'USER' : 'CHATBOT',
-      message:
-        typeof msg.content === 'string'
-          ? msg.content
-          : msg.content.map((block) => (block.type === 'text' ? block.text : '')).join(''),
-    }));
+    for (const msg of messages) {
+      for (const wire of convertIRMessageToOpenAICompat(msg, this.metadata.name)) {
+        // An assistant turn that only carries tool calls has no content.
+        if (wire.tool_calls?.length && wire.content === '') {
+          delete (wire as { content?: unknown }).content;
+        }
+        wireMessages.push(wire);
+      }
+    }
 
     const cohereRequest: CohereRequest = {
-      message: currentMessage,
+      model: request.parameters?.model || this.config.defaultModel || 'command-r7b-12-2024',
+      messages: wireMessages,
       temperature: request.parameters?.temperature,
       max_tokens: request.parameters?.maxTokens,
       p: request.parameters?.topP,
       k: request.parameters?.topK,
+      seed: request.parameters?.seed,
       frequency_penalty: request.parameters?.frequencyPenalty,
       presence_penalty: request.parameters?.presencePenalty,
       stop_sequences: request.parameters?.stopSequences
@@ -215,35 +298,34 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
       stream: request.stream || false,
     };
 
-    // Add model if specified
-    if (request.parameters?.model || this.config.defaultModel) {
-      cohereRequest.model = request.parameters?.model || this.config.defaultModel || 'command-r7b';
-    }
-
-    // Add chat history if present
-    if (chatHistory.length > 0) {
-      cohereRequest.chat_history = chatHistory;
-    }
-
-    // Add system message as preamble
-    if (systemParameter) {
-      cohereRequest.preamble =
-        typeof systemParameter === 'string'
-          ? systemParameter
-          : (systemParameter as any[])
-              .map((block: any) => (block.type === 'text' ? block.text : ''))
-              .join('');
+    if (request.tools?.length) {
+      let tools = request.tools;
+      const choice = request.toolChoice;
+      if (choice === 'required') {
+        cohereRequest.tool_choice = 'REQUIRED';
+      } else if (choice === 'none') {
+        cohereRequest.tool_choice = 'NONE';
+      } else if (choice !== undefined && choice !== 'auto') {
+        // v2 cannot name a tool: force tool use and offer only the named one.
+        const named = tools.filter((tool) => tool.name === choice.name);
+        if (named.length > 0) {
+          tools = named;
+        }
+        cohereRequest.tool_choice = 'REQUIRED';
+      }
+      cohereRequest.tools = tools.map((tool) => ({
+        type: 'function' as const,
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters as unknown as Record<string, unknown>,
+        },
+      }));
     }
 
     // Add Cohere-specific RAG parameters if provided
     if (request.parameters?.custom?.documents) {
-      cohereRequest.documents = request.parameters.custom.documents as Array<{
-        id?: string;
-        data: Record<string, any>;
-      }>;
-    }
-    if (request.parameters?.custom?.connectors) {
-      cohereRequest.connectors = request.parameters.custom.connectors as Array<{ id: string }>;
+      cohereRequest.documents = request.parameters.custom.documents as CohereDocument[];
     }
 
     return cohereRequest;
@@ -257,35 +339,24 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
     originalRequest: IRChatRequest,
     latencyMs: number
   ): IRChatResponse {
-    const content = originalRequest.responseFormat
-      ? extractStructuredOutputJSON(response.text)
-      : response.text;
-    const message: IRMessage = {
-      role: 'assistant',
-      content,
-    };
-
-    const finishReasonMap: Record<string, FinishReason> = {
-      COMPLETE: 'stop',
-      MAX_TOKENS: 'length',
-      ERROR: 'stop',
-      ERROR_TOXIC: 'stop',
-    };
+    const rawText = (response.message?.content ?? [])
+      .map((part) => (part.type === 'text' ? (part.text ?? '') : ''))
+      .join('');
+    const text = originalRequest.responseFormat ? extractStructuredOutputJSON(rawText) : rawText;
+    const message: IRMessage = buildOpenAICompatResponseMessage(
+      'assistant',
+      text,
+      response.message?.tool_calls
+    );
+    const citations = response.message?.citations;
 
     return {
       message,
-      finishReason: finishReasonMap[response.finish_reason] || 'stop',
-      usage: response.meta?.billed_units
-        ? {
-            promptTokens: response.meta.billed_units.input_tokens,
-            completionTokens: response.meta.billed_units.output_tokens,
-            totalTokens:
-              response.meta.billed_units.input_tokens + response.meta.billed_units.output_tokens,
-          }
-        : undefined,
+      finishReason: mapCohereFinishReason(response.finish_reason),
+      usage: mapCohereUsage(response.usage),
       metadata: {
         ...originalRequest.metadata,
-        providerResponseId: response.generation_id,
+        providerResponseId: response.id,
         provenance: {
           ...originalRequest.metadata.provenance,
           backend: this.metadata.name,
@@ -298,9 +369,7 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
         custom: {
           ...originalRequest.metadata.custom,
           latencyMs,
-          ...(response.citations && response.citations.length > 0
-            ? { citations: response.citations }
-            : {}),
+          ...(citations && citations.length > 0 ? { citations } : {}),
           ...(originalRequest.responseFormat ? { responseFormatEnforced: false } : {}),
         },
         warnings: originalRequest.responseFormat
@@ -334,9 +403,7 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
     };
     const inputType = inputTypeMap[request.parameters?.inputType ?? 'document'];
 
-    // v2 embed lives under /v2 regardless of the chat base path
-    const embedURL = this.baseURL.replace(/\/v1$/, '/v2');
-    const response = await fetch(`${embedURL}/embed`, {
+    const response = await fetch(`${this.baseURL}/embed`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({
@@ -431,7 +498,7 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
   }
 
   /**
-   * Execute streaming request.
+   * Execute streaming request (v2 server-sent events).
    */
   async *executeStream(request: IRChatRequest, signal?: AbortSignal): IRChatStream {
     let sequence = 0;
@@ -445,7 +512,7 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
 
       const response = await fetch(`${this.baseURL}/chat`, {
         method: 'POST',
-        headers: this.getHeaders(),
+        headers: { ...this.getHeaders(), Accept: 'text/event-stream' },
         body: JSON.stringify(cohereRequest),
         signal,
       });
@@ -468,7 +535,11 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
         });
       }
       let contentBuffer = '';
-      let citations: CohereResponse['citations'];
+      const citations: CohereCitation[] = [];
+      const toolAssembler = new ToolCallAssembler();
+      let finishReason: string | undefined;
+      let usage: CohereUsage | undefined;
+      const nextSequence = () => sequence++;
 
       yield {
         type: 'start',
@@ -487,6 +558,73 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
       const decoder = new TextDecoder();
       let buffer = '';
 
+      const handleLine = function* (line: string): Generator<IRStreamChunk> {
+        // SSE frames are `event: <type>` + `data: <json>`; the JSON also carries `type`.
+        if (!line.startsWith('data:')) {
+          return;
+        }
+        const payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') {
+          return;
+        }
+        let event: CohereStreamEvent;
+        try {
+          event = JSON.parse(payload) as CohereStreamEvent;
+        } catch (parseError) {
+          console.warn('Failed to parse Cohere stream chunk:', line, parseError);
+          return;
+        }
+        const message = event.delta?.message;
+        switch (event.type) {
+          case 'content-delta': {
+            const text = message?.content?.text;
+            if (text) {
+              contentBuffer += text;
+              const contentChunk: IRStreamChunk = {
+                type: 'content',
+                sequence: sequence++,
+                delta: text,
+                role: 'assistant',
+              };
+              if (includeBoth) {
+                (contentChunk as any).accumulated = contentBuffer;
+              }
+              yield contentChunk;
+            }
+            break;
+          }
+          case 'tool-call-start':
+          case 'tool-call-delta': {
+            const call = message?.tool_calls;
+            if (call) {
+              yield* toolAssembler.ingest(
+                [
+                  {
+                    index: event.index ?? 0,
+                    id: call.id,
+                    function: { name: call.function?.name, arguments: call.function?.arguments },
+                  },
+                ],
+                nextSequence
+              );
+            }
+            break;
+          }
+          case 'citation-start':
+            if (message?.citations) {
+              citations.push(message.citations);
+            }
+            break;
+          case 'message-end':
+            finishReason = event.delta?.finish_reason ?? 'COMPLETE';
+            usage = event.delta?.usage;
+            break;
+          default:
+            // message-start, content-start/-end, tool-plan-delta, tool-call-end, citation-end
+            break;
+        }
+      };
+
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -497,63 +635,40 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
-
           for (const line of lines) {
-            if (!line.trim()) {
-              continue;
-            }
-
-            try {
-              const chunk = JSON.parse(line) as CohereStreamChunk;
-
-              // Handle different event types
-              if (chunk.event_type === 'text-generation' && chunk.text) {
-                contentBuffer += chunk.text;
-
-                const contentChunk: IRStreamChunk = {
-                  type: 'content',
-                  sequence: sequence++,
-                  delta: chunk.text,
-                  role: 'assistant',
-                };
-
-                if (includeBoth) {
-                  (contentChunk as any).accumulated = contentBuffer;
-                }
-
-                yield contentChunk;
-              } else if (chunk.event_type === 'citation-generation' && chunk.citations) {
-                citations = chunk.citations;
-              } else if (chunk.event_type === 'stream-end') {
-                const finishReasonMap: Record<string, FinishReason> = {
-                  COMPLETE: 'stop',
-                  MAX_TOKENS: 'length',
-                  ERROR: 'stop',
-                  ERROR_TOXIC: 'stop',
-                };
-
-                const doneChunk: IRStreamChunk = {
-                  type: 'done',
-                  sequence: sequence++,
-                  finishReason: finishReasonMap[chunk.finish_reason || 'COMPLETE'] || 'stop',
-                  message: { role: 'assistant', content: contentBuffer },
-                };
-
-                // Include citations if present
-                if (citations && citations.length > 0) {
-                  (doneChunk as any).citations = citations;
-                }
-
-                yield doneChunk;
-              }
-            } catch (parseError) {
-              console.warn('Failed to parse Cohere stream chunk:', line, parseError);
-            }
+            yield* handleLine(line.trim());
           }
+        }
+        if (buffer.trim()) {
+          yield* handleLine(buffer.trim());
         }
       } finally {
         reader.releaseLock();
       }
+
+      if (finishReason === undefined) {
+        throw new StreamError({
+          code: ErrorCode.STREAM_ERROR,
+          message: 'Cohere stream ended before message-end arrived',
+          provenance: { backend: this.metadata.name },
+        });
+      }
+
+      const mappedUsage = mapCohereUsage(usage);
+      const doneChunk: IRStreamChunk = {
+        type: 'done',
+        sequence: sequence++,
+        finishReason: mapCohereFinishReason(finishReason),
+        ...(mappedUsage && { usage: mappedUsage }),
+        message: buildStreamDoneMessage(contentBuffer, toolAssembler.calls),
+      } as IRStreamChunk;
+
+      // Include citations if present
+      if (citations.length > 0) {
+        (doneChunk as any).citations = citations;
+      }
+
+      yield doneChunk;
     } catch (error) {
       yield {
         type: 'error',
@@ -585,7 +700,7 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
    */
   async healthCheck(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseURL}/check-api-key`, {
+      const response = await fetch(`${this.v1URL}/check-api-key`, {
         method: 'POST',
         headers: this.getHeaders(),
         signal: AbortSignal.timeout(5000),
@@ -630,7 +745,7 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
    * Priority order:
    * 1. Static config override (this.config.models)
    * 2. Cached result (1 hour TTL)
-   * 3. API fetch (https://api.cohere.ai/v1/models)
+   * 3. API fetch (https://api.cohere.com/v1/models)
    * 4. Fallback to DEFAULT_COHERE_MODELS
    *
    * @param options - Optional filter and refresh settings
@@ -652,7 +767,7 @@ export class CohereBackendAdapter implements BackendAdapter<CohereRequest, Coher
       }
 
       // 3. Fetch from Cohere API
-      const response = await fetch(`${this.baseURL}/models`, {
+      const response = await fetch(`${this.v1URL}/models`, {
         method: 'GET',
         headers: this.getHeaders(),
         signal: AbortSignal.timeout(this.config.timeout || 30000),
