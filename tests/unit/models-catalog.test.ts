@@ -420,15 +420,6 @@ describe('tool-capable adapters have a recommended tool-capable model', () => {
   // Providers whose recommended model is not yet curated in the catalog.
   // Remove an entry once its model is verified against the provider's docs.
   const NOT_YET_CURATED = new Set([
-    'ai21',
-    'cerebras',
-    'dashscope',
-    'deepinfra',
-    'fireworks',
-    'inception',
-    'nvidia',
-    'sambanova',
-    'together',
     // gateway / local runtimes: the model is chosen by the user's setup
     'omniroute',
     'ollama',
@@ -469,5 +460,22 @@ describe('tool-capable adapters have a recommended tool-capable model', () => {
   it('recommends tool-calling models for Cohere and Hugging Face', () => {
     expect(recommendedModel('cohere', 'default')?.id).toBe('command-a-plus-05-2026');
     expect(recommendedModel('huggingface', 'default')?.id).toBe('Qwen/Qwen3.5-9B');
+  });
+
+  it('recommends a verified tool-calling model for the remaining hosted providers', () => {
+    const want: Record<string, string> = {
+      ai21: 'jamba-mini',
+      cerebras: 'gpt-oss-120b',
+      dashscope: 'qwen3.7-flash',
+      deepinfra: 'deepseek-ai/DeepSeek-V4-Flash-0731',
+      fireworks: 'accounts/fireworks/models/kimi-k2-instruct-0905',
+      inception: 'mercury-3',
+      nvidia: 'meta/llama-3.1-8b-instruct',
+      sambanova: 'gpt-oss-120b',
+      together: 'deepseek-ai/DeepSeek-V4-Pro',
+    };
+    for (const [pid, id] of Object.entries(want)) {
+      expect(recommendedModel(pid, 'default')?.id).toBe(id);
+    }
   });
 });
