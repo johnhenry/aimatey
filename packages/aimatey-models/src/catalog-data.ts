@@ -2072,15 +2072,53 @@ export const CATALOG: ModelCatalog = {
     },
     "together": {
       "label": "Together AI",
-      "notes": "Not verified in this pass; models come from the live list (needs a key).",
-      "recommended": {},
-      "models": {}
+      "verifiedOn": "2026-10-23",
+      "sources": [
+        "https://www.together.ai/models/deepseek-v4-pro",
+        "https://docs.together.ai/docs/function-calling"
+      ],
+      "notes": "Only the recommended model is curated; others come from the live list. Together's model page for deepseek-ai/DeepSeek-V4-Pro lists Function Calling (context 512K). The pricing page only shows a separate DeepSeek-V4-Pro-0813 entry, so no price is recorded for this id.",
+      "recommended": {
+        "default": "deepseek-ai/DeepSeek-V4-Pro"
+      },
+      "models": {
+        "deepseek-ai/DeepSeek-V4-Pro": {
+          "id": "deepseek-ai/DeepSeek-V4-Pro",
+          "name": "DeepSeek V4 Pro",
+          "family": "deepseek-v4",
+          "status": "current",
+          "contextWindow": 512000,
+          "capabilities": {
+            "tools": true,
+            "streaming": true
+          }
+        }
+      }
     },
     "fireworks": {
       "label": "Fireworks AI",
-      "notes": "Not verified in this pass; models come from the live list (needs a key).",
-      "recommended": {},
-      "models": {}
+      "verifiedOn": "2026-10-23",
+      "sources": [
+        "https://docs.fireworks.ai/guides/function-calling",
+        "https://fireworks.ai/models/fireworks/kimi-k2-instruct-0905"
+      ],
+      "notes": "Only the recommended model is curated; others come from the live list. Fireworks's function-calling guide uses this model in its examples and its model page lists Function Calling as supported. Per-token pricing is not on the model page, so none is recorded. Context is published as 262k.",
+      "recommended": {
+        "default": "accounts/fireworks/models/kimi-k2-instruct-0905"
+      },
+      "models": {
+        "accounts/fireworks/models/kimi-k2-instruct-0905": {
+          "id": "accounts/fireworks/models/kimi-k2-instruct-0905",
+          "name": "Kimi K2 Instruct 0905",
+          "family": "kimi-k2",
+          "status": "current",
+          "contextWindow": 262144,
+          "capabilities": {
+            "tools": true,
+            "streaming": true
+          }
+        }
+      }
     },
     "cohere": {
       "label": "Cohere",
@@ -2127,9 +2165,34 @@ export const CATALOG: ModelCatalog = {
     },
     "ai21": {
       "label": "AI21 Labs",
-      "notes": "Not verified in this pass; models come from the live list (needs a key).",
-      "recommended": {},
-      "models": {}
+      "verifiedOn": "2026-10-23",
+      "sources": [
+        "https://docs.ai21.com/docs/jamba-foundation-models",
+        "https://docs.ai21.com/reference/jamba-1-6-api-ref",
+        "https://www.ai21.com/pricing/"
+      ],
+      "notes": "Only the recommended model is curated; others come from the live list. Tool support is documented on AI21's chat completions API reference (a `tools` parameter, function type only; `stream` must be false when tools are sent). That reference page is titled for Jamba 1.6, while the current models page lists the same jamba-mini endpoint. Prices from ai21.com/pricing.",
+      "recommended": {
+        "default": "jamba-mini"
+      },
+      "models": {
+        "jamba-mini": {
+          "id": "jamba-mini",
+          "name": "Jamba Mini",
+          "family": "jamba",
+          "status": "current",
+          "contextWindow": 256000,
+          "pricing": {
+            "inputPer1M": 0.2,
+            "outputPer1M": 0.4
+          },
+          "capabilities": {
+            "tools": true,
+            "streaming": true
+          },
+          "pricingAsOf": "2026-10-23"
+        }
+      }
     },
     "anyscale": {
       "label": "Anyscale",
@@ -2139,21 +2202,94 @@ export const CATALOG: ModelCatalog = {
     },
     "cerebras": {
       "label": "Cerebras",
-      "notes": "Not verified in this pass; models come from the live list (needs a key).",
-      "recommended": {},
-      "models": {}
+      "verifiedOn": "2026-10-23",
+      "sources": [
+        "https://inference-docs.cerebras.ai/models/overview",
+        "https://inference-docs.cerebras.ai/models/openai-oss",
+        "https://inference-docs.cerebras.ai/capabilities/tool-use"
+      ],
+      "notes": "Only the recommended model is curated; others come from the live list. gpt-oss-120b is listed in Cerebras's tool-calling table for Shared Inference. Context is published as 131k on the paid tier (65k on the free tier).",
+      "recommended": {
+        "default": "gpt-oss-120b"
+      },
+      "models": {
+        "gpt-oss-120b": {
+          "id": "gpt-oss-120b",
+          "name": "GPT OSS 120B",
+          "family": "gpt-oss",
+          "status": "current",
+          "contextWindow": 131000,
+          "pricing": {
+            "inputPer1M": 0.35,
+            "outputPer1M": 0.75
+          },
+          "capabilities": {
+            "tools": true,
+            "streaming": true
+          },
+          "pricingAsOf": "2026-10-23"
+        }
+      }
     },
     "dashscope": {
       "label": "Alibaba DashScope",
-      "notes": "Not verified in this pass; models come from the live list (needs a key).",
-      "recommended": {},
-      "models": {}
+      "verifiedOn": "2026-10-23",
+      "sources": [
+        "https://www.alibabacloud.com/help/en/model-studio/qwen-function-calling",
+        "https://www.alibabacloud.com/help/en/model-studio/model-pricing"
+      ],
+      "notes": "Only the recommended model is curated; others come from the live list. Alibaba's function-calling page lists the Qwen3.7-Flash series as supporting tool calls. Pricing is the Singapore (international) tier for requests up to 32K input tokens; longer requests cost more ($0.10/$0.40 up to 256K, $0.20/$0.80 up to 1M). The docs do not state a context window, so none is recorded.",
+      "recommended": {
+        "default": "qwen3.7-flash"
+      },
+      "models": {
+        "qwen3.7-flash": {
+          "id": "qwen3.7-flash",
+          "name": "Qwen3.7 Flash",
+          "family": "qwen3.7",
+          "status": "current",
+          "pricing": {
+            "inputPer1M": 0.03,
+            "outputPer1M": 0.13
+          },
+          "capabilities": {
+            "tools": true,
+            "streaming": true
+          },
+          "pricingAsOf": "2026-10-23"
+        }
+      }
     },
     "deepinfra": {
       "label": "DeepInfra",
-      "notes": "Not verified in this pass; models come from the live list (needs a key).",
-      "recommended": {},
-      "models": {}
+      "verifiedOn": "2026-10-23",
+      "sources": [
+        "https://docs.deepinfra.com/chat/tool-calling",
+        "https://deepinfra.com/deepseek-ai/DeepSeek-V4-Flash-0731"
+      ],
+      "notes": "Only the recommended model is curated; others come from the live list. DeepInfra's tool-calling docs use this model in their examples against https://api.deepinfra.com/v1/openai, and its model page tags it with Function calling. Pricing is the default tier (priority and flex tiers differ).",
+      "recommended": {
+        "default": "deepseek-ai/DeepSeek-V4-Flash-0731"
+      },
+      "models": {
+        "deepseek-ai/DeepSeek-V4-Flash-0731": {
+          "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+          "name": "DeepSeek V4 Flash 0731",
+          "family": "deepseek-v4",
+          "status": "current",
+          "contextWindow": 1048576,
+          "pricing": {
+            "inputPer1M": 0.06,
+            "outputPer1M": 0.18,
+            "cachedInputPer1M": 0.015
+          },
+          "capabilities": {
+            "tools": true,
+            "streaming": true
+          },
+          "pricingAsOf": "2026-10-23"
+        }
+      }
     },
     "github-models": {
       "label": "GitHub Models",
@@ -2190,15 +2326,57 @@ export const CATALOG: ModelCatalog = {
     },
     "inception": {
       "label": "Inception",
-      "notes": "Not verified in this pass; models come from the live list (needs a key).",
-      "recommended": {},
-      "models": {}
+      "verifiedOn": "2026-10-23",
+      "sources": [
+        "https://docs.inceptionlabs.ai/get-started/models"
+      ],
+      "notes": "Only the recommended model is curated; others come from the live list. The models page marks mercury-3 chat as tool-calling capable (mercury-decide is not). Prices are the regular rates; a 50% launch discount ($0.10/$0.35) was running on 2026-10-23. Context is 1M for chat.",
+      "recommended": {
+        "default": "mercury-3"
+      },
+      "models": {
+        "mercury-3": {
+          "id": "mercury-3",
+          "name": "Mercury 3",
+          "family": "mercury",
+          "status": "current",
+          "contextWindow": 1000000,
+          "pricing": {
+            "inputPer1M": 0.2,
+            "outputPer1M": 0.7,
+            "cachedInputPer1M": 0.02
+          },
+          "capabilities": {
+            "tools": true,
+            "streaming": true
+          },
+          "pricingAsOf": "2026-10-23"
+        }
+      }
     },
     "nvidia": {
       "label": "NVIDIA NIM",
-      "notes": "Not verified in this pass; models come from the live list (needs a key).",
-      "recommended": {},
-      "models": {}
+      "verifiedOn": "2026-10-23",
+      "sources": [
+        "https://build.nvidia.com/meta/llama-3_1-8b-instruct"
+      ],
+      "notes": "Only the recommended model is curated; others come from the live list. The NVIDIA API Catalog page for this model lists Function Calling as supported (context 131,072); it is the adapter's default on https://integrate.api.nvidia.com/v1. The catalog publishes no per-token pricing, so none is recorded. Self-hosted NIM endpoints differ per deployment.",
+      "recommended": {
+        "default": "meta/llama-3.1-8b-instruct"
+      },
+      "models": {
+        "meta/llama-3.1-8b-instruct": {
+          "id": "meta/llama-3.1-8b-instruct",
+          "name": "Llama 3.1 8B Instruct",
+          "family": "llama-3.1",
+          "status": "current",
+          "contextWindow": 131072,
+          "capabilities": {
+            "tools": true,
+            "streaming": true
+          }
+        }
+      }
     },
     "omniroute": {
       "label": "OmniRoute",
@@ -2219,9 +2397,34 @@ export const CATALOG: ModelCatalog = {
     },
     "sambanova": {
       "label": "SambaNova",
-      "notes": "Not verified in this pass; models come from the live list (needs a key).",
-      "recommended": {},
-      "models": {}
+      "verifiedOn": "2026-10-23",
+      "sources": [
+        "https://docs.sambanova.ai/docs/en/models/sambacloud-models",
+        "https://docs.sambanova.ai/docs/en/features/function-calling",
+        "https://cloud.sambanova.ai/plans/pricing"
+      ],
+      "notes": "Only the recommended model is curated; others come from the live list. SambaNova's function-calling page lists gpt-oss-120b (a Production model, 128k context). The adapter's built-in fallback, Meta-Llama-3.1-8B-Instruct, is no longer in the current model list.",
+      "recommended": {
+        "default": "gpt-oss-120b"
+      },
+      "models": {
+        "gpt-oss-120b": {
+          "id": "gpt-oss-120b",
+          "name": "GPT OSS 120B",
+          "family": "gpt-oss",
+          "status": "current",
+          "contextWindow": 128000,
+          "pricing": {
+            "inputPer1M": 0.22,
+            "outputPer1M": 0.59
+          },
+          "capabilities": {
+            "tools": true,
+            "streaming": true
+          },
+          "pricingAsOf": "2026-10-23"
+        }
+      }
     },
     "azure-openai": {
       "label": "Azure OpenAI",
