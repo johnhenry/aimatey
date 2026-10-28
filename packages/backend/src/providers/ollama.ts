@@ -40,9 +40,6 @@ import { localityForBaseURL, servedByForBaseURL } from '@johnhenry/aimatey-utils
 import {
   buildStaticResult,
   applyModelFilter,
-  buildStructuredOutputFallbackMessages,
-  extractStructuredOutputJSON,
-  buildResponseFormatFallbackWarning,
   type ModelCapabilityFilter,
   type StreamedToolCall,
   buildStreamDoneMessage,
@@ -90,12 +87,19 @@ export interface OllamaRequest {
   model: string;
   messages: OllamaMessage[];
   tools?: OllamaTool[];
+  /** JSON Schema object that constrains the output (Ollama >= 0.5), or `'json'`. */
+  format?: 'json' | Record<string, unknown>;
   options?: {
     temperature?: number;
     top_p?: number;
     top_k?: number;
     num_predict?: number;
     stop?: string[];
+    seed?: number;
+    frequency_penalty?: number;
+    presence_penalty?: number;
+    /** Ollama's own repetition penalty, from `parameters.custom.repeatPenalty`. */
+    repeat_penalty?: number;
   };
   stream?: boolean;
 }
@@ -193,7 +197,8 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
         // make Ollama answer HTTP 400 ("does not support tools"), which is
         // surfaced as the usual provider error.
         tools: true,
-        structuredOutput: 'fallback',
+        // `format` on `/api/chat` takes a JSON Schema (Ollama >= 0.5).
+        structuredOutput: 'native',
         embeddings: true,
         maxContextTokens: 4096, // Varies by model
         systemMessageStrategy: 'in-messages',
@@ -201,9 +206,9 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
         supportsTemperature: true,
         supportsTopP: true,
         supportsTopK: true,
-        supportsSeed: false,
-        supportsFrequencyPenalty: false,
-        supportsPresencePenalty: false,
+        supportsSeed: true,
+        supportsFrequencyPenalty: true,
+        supportsPresencePenalty: true,
         maxStopSequences: 4,
       },
       config: { baseURL: this.baseURL },
@@ -617,7 +622,7 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
    */
   public fromIR(request: IRChatRequest): OllamaRequest {
     const { messages } = normalizeSystemMessages(
-      buildStructuredOutputFallbackMessages(request.messages, request.responseFormat),
+      request.messages,
       this.metadata.capabilities.systemMessageStrategy,
       this.metadata.capabilities.supportsMultipleSystemMessages
     );
@@ -629,9 +634,14 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
         ? request.tools
         : undefined;
 
+    const repeatPenalty = request.parameters?.custom?.repeatPenalty;
+
     return {
       model: request.parameters?.model || this.config.defaultModel || 'llama3.2',
       messages: ollamaMessages,
+      ...(request.responseFormat
+        ? { format: request.responseFormat.schema as unknown as Record<string, unknown> }
+        : {}),
       ...(offerTools
         ? {
             tools: offerTools.map((tool) => ({
@@ -650,6 +660,10 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
         top_k: request.parameters?.topK,
         num_predict: request.parameters?.maxTokens,
         stop: request.parameters?.stopSequences ? [...request.parameters.stopSequences] : undefined,
+        seed: request.parameters?.seed,
+        frequency_penalty: request.parameters?.frequencyPenalty,
+        presence_penalty: request.parameters?.presencePenalty,
+        repeat_penalty: typeof repeatPenalty === 'number' ? repeatPenalty : undefined,
       },
       stream: request.stream,
     };
@@ -748,9 +762,7 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
     originalRequest: IRChatRequest,
     latencyMs: number
   ): IRChatResponse {
-    const content = originalRequest.responseFormat
-      ? extractStructuredOutputJSON(response.message.content)
-      : response.message.content;
+    const content = response.message.content;
     const toolCalls = response.message.tool_calls ?? [];
     const message: IRMessage =
       toolCalls.length > 0
@@ -793,14 +805,9 @@ export class OllamaBackendAdapter implements BackendAdapter<OllamaRequest, Ollam
         custom: {
           ...originalRequest.metadata.custom,
           latencyMs,
-          ...(originalRequest.responseFormat ? { responseFormatEnforced: false } : {}),
+          ...(originalRequest.responseFormat ? { responseFormatEnforced: true } : {}),
         },
-        warnings: originalRequest.responseFormat
-          ? [
-              ...(this.withToolChoiceWarnings(originalRequest) ?? []),
-              buildResponseFormatFallbackWarning(this.metadata.name),
-            ]
-          : this.withToolChoiceWarnings(originalRequest),
+        warnings: this.withToolChoiceWarnings(originalRequest),
       },
       raw: response as unknown as Record<string, unknown>,
     };

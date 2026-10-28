@@ -134,6 +134,9 @@ export interface OpenAIRequest {
   /** Nucleus sampling parameter 0-1. Alternative to temperature */
   top_p?: number;
 
+  /** Top-K sampling limit. Not part of OpenAI's API; accepted by many compatible servers */
+  top_k?: number;
+
   /** Penalty for token frequency -2 to 2. Reduces repetition */
   frequency_penalty?: number;
 
@@ -164,6 +167,15 @@ export interface OpenAIRequest {
 
   /** Controls which (if any) tool the model must call */
   tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
+
+  /** Constrains the output format: plain text, any JSON object, or a JSON Schema */
+  response_format?:
+    | { type: 'text' }
+    | { type: 'json_object' }
+    | {
+        type: 'json_schema';
+        json_schema: { name?: string; schema?: Record<string, unknown>; strict?: boolean | null };
+      };
 }
 
 /**
@@ -385,6 +397,7 @@ export class OpenAIFrontendAdapter implements FrontendAdapter<
           temperature: request.temperature,
           maxTokens: request.max_tokens,
           topP: request.top_p,
+          topK: request.top_k,
           frequencyPenalty: request.frequency_penalty,
           presencePenalty: request.presence_penalty,
           stopSequences: typeof request.stop === 'string' ? [request.stop] : request.stop,
@@ -405,6 +418,7 @@ export class OpenAIFrontendAdapter implements FrontendAdapter<
             : typeof request.tool_choice === 'string'
               ? request.tool_choice
               : { name: request.tool_choice.function.name },
+        responseFormat: this.convertResponseFormatToIR(request.response_format),
         stream: request.stream ?? false,
         metadata: {
           requestId: crypto.randomUUID(),
@@ -426,6 +440,26 @@ export class OpenAIFrontendAdapter implements FrontendAdapter<
         cause: error instanceof Error ? error : undefined,
       });
     }
+  }
+
+  /**
+   * Map `response_format` onto the IR. `json_object` becomes a schema that
+   * only requires an object; `text` (and no format) leaves it unset.
+   */
+  private convertResponseFormatToIR(
+    format: OpenAIRequest['response_format']
+  ): IRChatRequest['responseFormat'] {
+    if (format?.type === 'json_schema') {
+      return {
+        type: 'json_schema',
+        schema: (format.json_schema.schema ?? { type: 'object' }) as JSONSchema,
+        ...(format.json_schema.strict ? { strict: true } : {}),
+      };
+    }
+    if (format?.type === 'json_object') {
+      return { type: 'json_schema', schema: { type: 'object' } as JSONSchema };
+    }
+    return undefined;
   }
 
   /**

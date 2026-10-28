@@ -43,14 +43,18 @@ async function checkOpenTelemetryAvailability(): Promise<boolean> {
   }
 
   try {
-    // Use dynamic import() for ESM/CJS compatibility
+    // Dynamic import() for ESM/CJS compatibility. The specifiers go through a
+    // variable so bundlers (esbuild, webpack, Vite) leave these optional peers
+    // unresolved instead of failing the build when they aren't installed.
+    const load = (specifier: string): Promise<any> =>
+      import(/* webpackIgnore: true */ /* @vite-ignore */ specifier);
     const [apiModule, sdkTraceBase, otlpExporter, resources, semanticConventions] =
       await Promise.all([
-        import('@opentelemetry/api'),
-        import('@opentelemetry/sdk-trace-base'),
-        import('@opentelemetry/exporter-trace-otlp-http'),
-        import('@opentelemetry/resources'),
-        import('@opentelemetry/semantic-conventions'),
+        load('@opentelemetry/api'),
+        load('@opentelemetry/sdk-trace-base'),
+        load('@opentelemetry/exporter-trace-otlp-http'),
+        load('@opentelemetry/resources'),
+        load('@opentelemetry/semantic-conventions'),
       ]);
 
     api = apiModule;
