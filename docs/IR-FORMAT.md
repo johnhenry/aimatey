@@ -1161,7 +1161,8 @@ Backends handle `responseFormat` one of two ways, reported via `IRCapabilities.s
 | Anthropic | Native (`output_config: { format: { type: 'json_schema', schema } }`) |
 | Gemini | Native (`generationConfig.responseSchema` + `responseMimeType: 'application/json'`) |
 | Groq, DeepSeek, Inception, Moonshot, NVIDIA, LM Studio, SambaNova, OmniRoute | Native (OpenAI-compatible - inherit OpenAI's mapping unchanged) |
-| All other backends (AI21, Anyscale, AWS Bedrock, Azure OpenAI, Cerebras, Cloudflare, Cohere, DeepInfra, Fireworks, Hugging Face, Mistral, Ollama, OpenRouter, Perplexity, Replicate, Together AI, xAI, GitHub Models, DashScope) | Fallback (prompt injection + best-effort JSON extraction) |
+| Ollama | Native (`format: <schema>` on `/api/chat`, Ollama >= 0.5) |
+| All other backends (AI21, Anyscale, AWS Bedrock, Azure OpenAI, Cerebras, Cloudflare, Cohere, DeepInfra, Fireworks, Hugging Face, Mistral, OpenRouter, Perplexity, Replicate, Together AI, xAI, GitHub Models, DashScope) | Fallback (prompt injection + best-effort JSON extraction) |
 
 ### Example
 

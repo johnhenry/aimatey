@@ -1,9 +1,9 @@
 /**
  * Structured/schema-constrained output (`responseFormat`) mapping tests.
  *
- * Verifies that native backends (OpenAI, Anthropic, Gemini, Groq) map
+ * Verifies that native backends (OpenAI, Anthropic, Gemini, Groq, Ollama) map
  * `IRChatRequest.responseFormat` onto their own provider mechanism, and that
- * fallback backends (Mistral, Ollama, Cohere) emulate it via prompt injection
+ * fallback backends (Mistral, Cohere) emulate it via prompt injection
  * plus best-effort JSON extraction - in both cases setting
  * `metadata.custom.responseFormatEnforced` appropriately.
  */
@@ -85,7 +85,11 @@ describe('OpenAI backend responseFormat mapping (native)', () => {
         created: 0,
         model: 'test-model',
         choices: [
-          { index: 0, message: { role: 'assistant', content: '{"answer":"42"}' }, finish_reason: 'stop' },
+          {
+            index: 0,
+            message: { role: 'assistant', content: '{"answer":"42"}' },
+            finish_reason: 'stop',
+          },
         ],
       },
       makeRequest({ responseFormat: FLAT_SCHEMA }),
@@ -101,7 +105,9 @@ describe('OpenAI backend responseFormat mapping (native)', () => {
         object: 'chat.completion',
         created: 0,
         model: 'test-model',
-        choices: [{ index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' }],
+        choices: [
+          { index: 0, message: { role: 'assistant', content: 'hi' }, finish_reason: 'stop' },
+        ],
       },
       makeRequest(),
       10
@@ -239,7 +245,13 @@ describe('Mistral backend responseFormat fallback', () => {
         object: 'chat.completion',
         created: 0,
         model: 'test-model',
-        choices: [{ index: 0, message: { role: 'assistant', content: 'plain text reply' }, finish_reason: 'stop' }],
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: 'plain text reply' },
+            finish_reason: 'stop',
+          },
+        ],
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
       },
       makeRequest(),
@@ -252,17 +264,17 @@ describe('Mistral backend responseFormat fallback', () => {
   });
 });
 
-describe('Ollama backend responseFormat fallback', () => {
+describe('Ollama backend responseFormat (native format)', () => {
   const adapter = new OllamaBackendAdapter({});
 
-  it('advertises fallback structuredOutput support', () => {
-    expect(adapter.metadata.capabilities.structuredOutput).toBe('fallback');
+  it('advertises native structuredOutput support', () => {
+    expect(adapter.metadata.capabilities.structuredOutput).toBe('native');
   });
 
-  it('appends a schema-instruction message and extracts JSON on the way back', () => {
+  it('sends the schema as `format` without injecting a prompt', () => {
     const req = adapter.fromIR(makeRequest({ responseFormat: PROPOSAL_SCHEMA }));
-    expect(req.messages[0]?.role).toBe('system');
-    expect(req.messages[0]?.content).toContain(JSON.stringify(PROPOSAL_SCHEMA.schema));
+    expect(req.format).toEqual(PROPOSAL_SCHEMA.schema);
+    expect(JSON.stringify(req.messages)).not.toContain(JSON.stringify(PROPOSAL_SCHEMA.schema));
 
     const response = adapter.toIR(
       {
@@ -276,7 +288,12 @@ describe('Ollama backend responseFormat fallback', () => {
     );
 
     expect(response.message.content).toBe('{"kind": "wait", "reason": "loading"}');
-    expect(response.metadata.custom?.responseFormatEnforced).toBe(false);
+    expect(response.metadata.custom?.responseFormatEnforced).toBe(true);
+    expect(response.metadata.warnings ?? []).toEqual([]);
+  });
+
+  it('omits `format` when no responseFormat is set', () => {
+    expect(adapter.fromIR(makeRequest({})).format).toBeUndefined();
   });
 });
 
