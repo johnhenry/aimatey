@@ -1,5 +1,12 @@
 # @johnhenry/aimatey-wrapper
 
+## 0.2.3
+
+### Patch Changes
+
+- Updated dependencies [3a31c05]
+  - @johnhenry/aimatey-frontend@0.5.0
+
 ## 0.2.2
 
 ### Patch Changes

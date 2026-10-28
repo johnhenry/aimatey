@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-middleware",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Middleware components for Aimatey - Universal AI Adapter System",
   "type": "module",
   "main": "./dist/cjs/index.js",

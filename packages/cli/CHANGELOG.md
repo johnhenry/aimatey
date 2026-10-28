@@ -1,5 +1,13 @@
 # @johnhenry/aimatey-cli
 
+## 0.2.5
+
+### Patch Changes
+
+- Updated dependencies [3a31c05]
+  - @johnhenry/aimatey-backend@0.10.0
+  - @johnhenry/aimatey-frontend@0.5.0
+
 ## 0.2.4
 
 ### Patch Changes
