@@ -3,7 +3,7 @@ import type { ModelCatalog } from './types.js';
 
 export const CATALOG: ModelCatalog = {
   "schemaVersion": 1,
-  "generatedOn": "2026-10-20",
+  "generatedOn": "2026-10-26",
   "providers": {
     "anthropic": {
       "label": "Anthropic",
@@ -35,8 +35,8 @@ export const CATALOG: ModelCatalog = {
           "notes": "Most capable; for demanding reasoning and long-horizon agentic work.",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
           "pricingAsOf": "2026-10-20"
@@ -56,8 +56,8 @@ export const CATALOG: ModelCatalog = {
           "retiresNoSoonerThan": "2027-09-22",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
           "pricingAsOf": "2026-10-20"
@@ -77,8 +77,8 @@ export const CATALOG: ModelCatalog = {
           "retiresNoSoonerThan": "2027-09-28",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
           "pricingAsOf": "2026-10-20"
@@ -99,8 +99,8 @@ export const CATALOG: ModelCatalog = {
           "retiresNoSoonerThan": "2027-10-07",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
           "pricingAsOf": "2026-10-20"
@@ -120,11 +120,12 @@ export const CATALOG: ModelCatalog = {
           "retiresNoSoonerThan": "2027-06-09",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 128000
         },
         "claude-opus-5": {
           "id": "claude-opus-5",
@@ -141,11 +142,12 @@ export const CATALOG: ModelCatalog = {
           "retiresNoSoonerThan": "2027-07-24",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 128000
         },
         "claude-sonnet-5": {
           "id": "claude-sonnet-5",
@@ -162,11 +164,12 @@ export const CATALOG: ModelCatalog = {
           "retiresNoSoonerThan": "2027-06-30",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 128000
         },
         "claude-opus-4-8": {
           "id": "claude-opus-4-8",
@@ -183,11 +186,12 @@ export const CATALOG: ModelCatalog = {
           "retiresNoSoonerThan": "2027-05-28",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 128000
         },
         "claude-opus-4-7": {
           "id": "claude-opus-4-7",
@@ -204,11 +208,12 @@ export const CATALOG: ModelCatalog = {
           "retiresNoSoonerThan": "2027-04-16",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 128000
         },
         "claude-opus-4-6": {
           "id": "claude-opus-4-6",
@@ -225,11 +230,12 @@ export const CATALOG: ModelCatalog = {
           "retiresNoSoonerThan": "2027-02-05",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 128000
         },
         "claude-opus-4-5-20251101": {
           "id": "claude-opus-4-5-20251101",
@@ -266,11 +272,12 @@ export const CATALOG: ModelCatalog = {
           "retiresNoSoonerThan": "2027-02-17",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 128000
         },
         "claude-haiku-4-5-20251001": {
           "id": "claude-haiku-4-5-20251001",
@@ -607,8 +614,8 @@ export const CATALOG: ModelCatalog = {
           "notes": "Flagship for complex reasoning.",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
@@ -629,8 +636,8 @@ export const CATALOG: ModelCatalog = {
           "notes": "Near-Astra performance at lower cost.",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
@@ -651,8 +658,8 @@ export const CATALOG: ModelCatalog = {
           "notes": "Most efficient; the documented replacement for gpt-4o-mini / gpt-4.1.",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
@@ -671,12 +678,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000
         },
         "gpt-5.6-sol": {
           "id": "gpt-5.6-sol",
@@ -691,12 +700,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000
         },
         "gpt-5.6-terra": {
           "id": "gpt-5.6-terra",
@@ -711,12 +722,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000
         },
         "gpt-5.6-luna": {
           "id": "gpt-5.6-luna",
@@ -731,12 +744,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000
         },
         "gpt-5.5": {
           "id": "gpt-5.5",
@@ -751,12 +766,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000
         },
         "gpt-5.4": {
           "id": "gpt-5.4",
@@ -771,12 +788,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000
         },
         "gpt-5.4-mini": {
           "id": "gpt-5.4-mini",
@@ -791,12 +810,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 400000,
+          "maxOutputTokens": 128000
         },
         "gpt-5.2": {
           "id": "gpt-5.2",
@@ -811,12 +832,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 400000,
+          "maxOutputTokens": 128000
         },
         "gpt-5.4-nano": {
           "id": "gpt-5.4-nano",
@@ -833,12 +856,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 400000,
+          "maxOutputTokens": 128000
         },
         "gpt-5.1": {
           "id": "gpt-5.1",
@@ -855,12 +880,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 400000,
+          "maxOutputTokens": 128000
         },
         "gpt-5.3-codex": {
           "id": "gpt-5.3-codex",
@@ -872,11 +899,13 @@ export const CATALOG: ModelCatalog = {
           "successor": "gpt-6-sol",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
-          }
+          },
+          "contextWindow": 400000,
+          "maxOutputTokens": 128000
         },
         "gpt-5": {
           "id": "gpt-5",
@@ -893,12 +922,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 400000,
+          "maxOutputTokens": 128000
         },
         "gpt-5-mini": {
           "id": "gpt-5-mini",
@@ -915,12 +946,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 400000,
+          "maxOutputTokens": 128000
         },
         "gpt-5-nano": {
           "id": "gpt-5-nano",
@@ -937,12 +970,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 400000,
+          "maxOutputTokens": 128000
         },
         "gpt-5-pro": {
           "id": "gpt-5-pro",
@@ -954,11 +989,13 @@ export const CATALOG: ModelCatalog = {
           "successor": "gpt-5.6-sol",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
-          }
+          },
+          "contextWindow": 400000,
+          "maxOutputTokens": 128000
         },
         "o3": {
           "id": "o3",
@@ -975,12 +1012,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 200000,
+          "maxOutputTokens": 100000
         },
         "o3-pro": {
           "id": "o3-pro",
@@ -996,18 +1035,20 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 200000,
+          "maxOutputTokens": 100000
         },
         "o4-mini": {
           "id": "o4-mini",
           "name": "o4-mini",
           "family": "o-series",
-          "status": "deprecated",
+          "status": "retired",
           "deprecatedOn": "2026-06-11",
           "retiresOn": "2026-10-23",
           "successor": "gpt-5.6-terra",
@@ -1018,12 +1059,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 200000,
+          "maxOutputTokens": 100000
         },
         "o3-mini": {
           "id": "o3-mini",
@@ -1039,12 +1082,14 @@ export const CATALOG: ModelCatalog = {
           "notes": "Not on the deprecations page as of 2026-10-20; successor is the nearest current small model (inference).",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 200000,
+          "maxOutputTokens": 100000
         },
         "gpt-4o": {
           "id": "gpt-4o",
@@ -1061,12 +1106,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 128000,
+          "maxOutputTokens": 16384
         },
         "gpt-4o-mini": {
           "id": "gpt-4o-mini",
@@ -1083,12 +1130,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 128000,
+          "maxOutputTokens": 16384
         },
         "gpt-4.1": {
           "id": "gpt-4.1",
@@ -1105,12 +1154,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 1047576,
+          "maxOutputTokens": 32768
         },
         "gpt-4.1-mini": {
           "id": "gpt-4.1-mini",
@@ -1127,12 +1178,14 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 1047576,
+          "maxOutputTokens": 32768
         },
         "gpt-4.1-nano": {
           "id": "gpt-4.1-nano",
@@ -1148,12 +1201,14 @@ export const CATALOG: ModelCatalog = {
           "notes": "Not on the deprecations page as of 2026-10-20; the sibling 4.1 models were deprecated 2026-10-14.",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true,
             "maxTools": 128
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 1047576,
+          "maxOutputTokens": 942818
         }
       }
     },
@@ -1189,8 +1244,8 @@ export const CATALOG: ModelCatalog = {
           "pricingEffectiveUntil": "2026-11-30",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
           "pricingAsOf": "2026-10-20"
@@ -1209,11 +1264,13 @@ export const CATALOG: ModelCatalog = {
           "pricingEffectiveUntil": "2026-12-31",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536
         },
         "gemini-3.6-flash": {
           "id": "gemini-3.6-flash",
@@ -1230,11 +1287,13 @@ export const CATALOG: ModelCatalog = {
           "pricingEffectiveUntil": "2026-12-31",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536
         },
         "gemini-3.5-flash-lite": {
           "id": "gemini-3.5-flash-lite",
@@ -1247,11 +1306,13 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536
         },
         "gemini-3.7-flash": {
           "id": "gemini-3.7-flash",
@@ -1262,10 +1323,12 @@ export const CATALOG: ModelCatalog = {
           "notes": "Already shut down; requests auto-route to the successor.",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
-          }
+          },
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536
         },
         "gemini-3.5-flash": {
           "id": "gemini-3.5-flash",
@@ -1276,10 +1339,12 @@ export const CATALOG: ModelCatalog = {
           "notes": "Already shut down; requests auto-route to the successor.",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
-          }
+          },
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536
         },
         "gemini-2.5-flash": {
           "id": "gemini-2.5-flash",
@@ -1294,11 +1359,13 @@ export const CATALOG: ModelCatalog = {
           "notes": "Access limited to accounts that already used 2.5 models.",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65535
         },
         "gemini-2.5-flash-lite": {
           "id": "gemini-2.5-flash-lite",
@@ -1313,11 +1380,13 @@ export const CATALOG: ModelCatalog = {
           "notes": "Access limited to accounts that already used 2.5 models.",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65535
         },
         "gemini-2.5-pro": {
           "id": "gemini-2.5-pro",
@@ -1328,10 +1397,12 @@ export const CATALOG: ModelCatalog = {
           "notes": "Access limited to accounts that already used 2.5 models. Price not captured (tiered by prompt size).",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
-          }
+          },
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536
         }
       }
     },
@@ -1364,11 +1435,12 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 450000
         },
         "grok-4.6": {
           "id": "grok-4.6",
@@ -1384,11 +1456,12 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 450000
         },
         "grok-4.5": {
           "id": "grok-4.5",
@@ -1404,11 +1477,12 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 450000
         },
         "grok-4.3": {
           "id": "grok-4.3",
@@ -1423,11 +1497,12 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 900000
         },
         "grok-4.20-0309-reasoning": {
           "id": "grok-4.20-0309-reasoning",
@@ -1482,11 +1557,12 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 230400
         },
         "grok-3": {
           "id": "grok-3",
@@ -1546,11 +1622,12 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-09-03"
+          "pricingAsOf": "2026-09-03",
+          "maxOutputTokens": 209715
         },
         "mistral-small-2603": {
           "id": "mistral-small-2603",
@@ -1564,11 +1641,12 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-09-03"
+          "pricingAsOf": "2026-09-03",
+          "maxOutputTokens": 209715
         },
         "mistral-large-2512": {
           "id": "mistral-large-2512",
@@ -1583,11 +1661,12 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-09-03"
+          "pricingAsOf": "2026-09-03",
+          "maxOutputTokens": 209715
         },
         "mistral-large-4": {
           "id": "mistral-large-4",
@@ -1711,8 +1790,8 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": false,
             "json": true,
+            "vision": false,
             "streaming": true
           },
           "pricingAsOf": "2026-10-20"
@@ -1726,10 +1805,12 @@ export const CATALOG: ModelCatalog = {
           "notes": "Still accepted; served by deepseek-flash and billed at the Flash price.",
           "capabilities": {
             "tools": true,
-            "vision": false,
             "json": true,
+            "vision": false,
             "streaming": true
-          }
+          },
+          "contextWindow": 1048575,
+          "maxOutputTokens": 943717
         },
         "deepseek-v4-flash-vision-exp": {
           "id": "deepseek-v4-flash-vision-exp",
@@ -1740,10 +1821,12 @@ export const CATALOG: ModelCatalog = {
           "notes": "Still accepted; served by deepseek-flash.",
           "capabilities": {
             "tools": true,
-            "vision": false,
             "json": true,
+            "vision": false,
             "streaming": true
-          }
+          },
+          "contextWindow": 1048576,
+          "maxOutputTokens": 262144
         },
         "deepseek-chat": {
           "id": "deepseek-chat",
@@ -1754,10 +1837,12 @@ export const CATALOG: ModelCatalog = {
           "notes": "Not listed on the 2026-10-20 pricing or updates pages; status is inferred, the live list settles it.",
           "capabilities": {
             "tools": true,
-            "vision": false,
             "json": true,
+            "vision": false,
             "streaming": true
-          }
+          },
+          "contextWindow": 128000,
+          "maxOutputTokens": 16000
         },
         "deepseek-reasoner": {
           "id": "deepseek-reasoner",
@@ -1798,10 +1883,11 @@ export const CATALOG: ModelCatalog = {
           "contextWindow": 1000000,
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
-          }
+          },
+          "maxOutputTokens": 943718
         },
         "kimi-k2.7-code": {
           "id": "kimi-k2.7-code",
@@ -1811,10 +1897,11 @@ export const CATALOG: ModelCatalog = {
           "contextWindow": 256000,
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
-          }
+          },
+          "maxOutputTokens": 235929
         },
         "kimi-k2.7-code-highspeed": {
           "id": "kimi-k2.7-code-highspeed",
@@ -1837,10 +1924,11 @@ export const CATALOG: ModelCatalog = {
           "contextWindow": 256000,
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
-          }
+          },
+          "maxOutputTokens": 235929
         },
         "kimi-k2.5": {
           "id": "kimi-k2.5",
@@ -1851,10 +1939,12 @@ export const CATALOG: ModelCatalog = {
           "successor": "kimi-k3",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
-          }
+          },
+          "contextWindow": 262144,
+          "maxOutputTokens": 235929
         },
         "moonshot-v1-128k": {
           "id": "moonshot-v1-128k",
@@ -2004,11 +2094,12 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 128000
         },
         "anthropic/claude-sonnet-5.5": {
           "id": "anthropic/claude-sonnet-5.5",
@@ -2022,11 +2113,12 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 128000
         },
         "anthropic/claude-haiku-5.5": {
           "id": "anthropic/claude-haiku-5.5",
@@ -2040,11 +2132,12 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20"
+          "pricingAsOf": "2026-10-20",
+          "maxOutputTokens": 128000
         },
         "anthropic/claude-sonnet-4-6": {
           "id": "anthropic/claude-sonnet-4-6",
@@ -2054,10 +2147,12 @@ export const CATALOG: ModelCatalog = {
           "successor": "anthropic/claude-sonnet-5.5",
           "capabilities": {
             "tools": true,
-            "vision": true,
             "json": true,
+            "vision": true,
             "streaming": true
-          }
+          },
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000
         }
       }
     },
