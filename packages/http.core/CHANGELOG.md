@@ -1,5 +1,32 @@
 # @johnhenry/aimatey-http-core
 
+## 0.5.0
+
+### Minor Changes
+
+- 2c26308: Anthropic `/messages` streams through the request handler (Node, Express, Fastify, Koa, Hono, Deno) are now framed as Anthropic's API frames them: named events (`event: message_start`, `content_block_delta`, … `message_stop`) and no trailing `data: [DONE]`. Previously they were bare `data:` lines ending in `data: [DONE]`, which Anthropic's SDKs don't expect. `handleStreamingRequest(…, 'anthropic')` already did this and is unchanged.
+- 2c26308: Streams are now framed the way each API frames them, instead of always as SSE ending in `data: [DONE]`:
+  - Gemini `…:streamGenerateContent?alt=sse`: SSE `data:` lines, no `[DONE]`. Without `alt=sse` (and for `:generateContent`): one JSON array (`application/json`). A `:streamGenerateContent` URL streams with no `stream` field in the body, as Gemini clients send it.
+  - Ollama `/api/chat`, `/api/generate`: NDJSON (`application/x-ndjson`), one object per line, no `[DONE]`.
+  - OpenAI `/chat/completions` and every other path: unchanged (SSE ending in `data: [DONE]`).
+
+  Each API also decides _whether_ to stream its own way, and the request handler now follows it: Ollama's `/api/chat` and `/api/generate` stream unless the body says `stream: false` (Ollama's default is `true`; previously a body without `stream` got one JSON response). For Gemini URLs (`…/models/{model}:generateContent` or `:streamGenerateContent`) the model named in the URL is put into the body as `model` when the body has none, so the Gemini frontend routes it.
+
+  http-core exports `createStreamFramer`, `detectStreamFraming`, `isGeminiStreamURL`, `geminiModelFromURL`, `requestWantsStream`, `streamHeaders` and the `StreamFraming` type. `GenericResponse.stream()` takes an optional second argument `{ framing }`, which the Node, Express, Fastify, Koa, Hono and Deno adapters honour; without it they behave as before.
+
+- 2c26308: A streamed request that fails before anything was produced now gets a real HTTP error response instead of a `200` stream that carries an error frame:
+  - New `RequestOptions.throwBeforeFirstChunk` for `Bridge.chatStream()`: when the backend throws before its first chunk, or its first chunk is an IR `error` chunk, the call throws that error (code and status kept), as `chat()` does, instead of yielding the frontend's in-band error frame. Off by default, so direct `chatStream()` callers see no change. Failures after the first chunk are error frames either way.
+  - The HTTP request handler (Node, Express, Fastify, Koa, Hono, Deno) turns it on and waits for the first chunk before starting the stream, so a rate limit, bad key or unknown model is answered with its status (429, 401, ...) and the API's error body. The official SDKs then raise their typed errors (`RateLimitError` in `openai` and `@anthropic-ai/sdk`, `ApiError` with `status` in `@google/genai`, `ResponseError` with `status_code` in `ollama`).
+
+### Patch Changes
+
+- Updated dependencies [2c26308]
+- Updated dependencies [2c26308]
+  - @johnhenry/aimatey-core@0.7.0
+  - @johnhenry/aimatey-types@0.9.0
+  - @johnhenry/aimatey-errors@0.5.1
+  - @johnhenry/aimatey-utils@0.6.3
+
 ## 0.4.2
 
 ### Patch Changes

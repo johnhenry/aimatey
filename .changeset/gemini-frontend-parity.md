@@ -1,9 +1,0 @@
----
-'@johnhenry/aimatey-frontend': minor
----
-
-Gemini frontend brought to parity with the Anthropic and OpenAI frontends:
-
-- `toIR` reads the model (`model`, with or without the `models/` prefix, since Gemini puts it in the URL) and `stream`; `systemInstruction` (Content or string); `functionCall` parts as `tool_use` (call id and `thoughtSignature` kept in `providerMetadata.gemini`, as the Gemini backend expects) and `functionResponse` parts as `tool_result` (matched by id, or by name in call order; a lone `error` key marks `isError`); `fileData` parts as URL sources; `tools[].functionDeclarations` (`parameters` or `parametersJsonSchema`); `toolConfig.functionCallingConfig` as `toolChoice`; and all of `generationConfig` (`seed`, penalties, and `responseSchema` / `responseJsonSchema` / `responseMimeType: application/json` as `responseFormat`). snake_case field names are accepted too. Bad requests reject with `AdapterConversionError`. What IR cannot express is flagged with a `parameter-unsupported` warning in `metadata.warnings`: `candidateCount` above 1 (the answer has one candidate) and `allowedFunctionNames` with more than one name (mapped to `toolChoice: 'required'`).
-- `fromIR` returns a full `GenerateContentResponse`: `functionCall` parts, media as `inlineData`/`fileData`, `finishReason` (incl. `SAFETY`), `usageMetadata`, `modelVersion`, `responseId`, `index`.
-- `fromIRStream` now yields `GenerateContentResponse` objects instead of pre-framed `data: ...` strings (framing is the transport's job, as for the other frontends). Text streams as it comes; function calls are sent whole in the final chunk, which carries `finishReason` and `usageMetadata`. A failed stream ends with a Google-style `{ error: { code, message, status } }` (`isGeminiStreamError()`). Callers that wrote the old strings straight to the wire must now serialise each object (`data: ${JSON.stringify(chunk)}\n\n` for `?alt=sse`).

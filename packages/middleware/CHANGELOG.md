@@ -1,5 +1,16 @@
 # @johnhenry/aimatey-middleware
 
+## 0.3.4
+
+### Patch Changes
+
+- Updated dependencies [2c26308]
+- Updated dependencies [2c26308]
+  - @johnhenry/aimatey-core@0.7.0
+  - @johnhenry/aimatey-types@0.9.0
+  - @johnhenry/aimatey-errors@0.5.1
+  - @johnhenry/aimatey-utils@0.6.3
+
 ## 0.3.3
 
 ### Patch Changes

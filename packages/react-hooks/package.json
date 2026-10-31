@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-react-hooks",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Additional React hooks for Aimatey - useAssistant, useStream, useTokenCount",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -36,9 +36,9 @@
     "lint:fix": "eslint src --ext .ts,.tsx --fix"
   },
   "dependencies": {
-    "@johnhenry/aimatey-types": "^0.8.0",
-    "@johnhenry/aimatey-react-core": "^0.1.7",
-    "@johnhenry/aimatey-utils": "^0.6.2"
+    "@johnhenry/aimatey-types": "^0.9.0",
+    "@johnhenry/aimatey-react-core": "^0.1.8",
+    "@johnhenry/aimatey-utils": "^0.6.3"
   },
   "peerDependencies": {
     "react": ">=18.0.0"

@@ -1,5 +1,16 @@
 # @johnhenry/aimatey-react-core
 
+## 0.1.8
+
+### Patch Changes
+
+- Updated dependencies [2c26308]
+- Updated dependencies [2c26308]
+- Updated dependencies [2c26308]
+  - @johnhenry/aimatey-wrapper@0.2.4
+  - @johnhenry/aimatey-core@0.7.0
+  - @johnhenry/aimatey-types@0.9.0
+
 ## 0.1.7
 
 ### Patch Changes

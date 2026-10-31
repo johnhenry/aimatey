@@ -1,5 +1,39 @@
 # @johnhenry/aimatey-frontend
 
+## 0.6.0
+
+### Minor Changes
+
+- 2c26308: Gemini frontend brought to parity with the Anthropic and OpenAI frontends:
+  - `toIR` reads the model (`model`, with or without the `models/` prefix, since Gemini puts it in the URL) and `stream`; `systemInstruction` (Content or string); `functionCall` parts as `tool_use` (call id and `thoughtSignature` kept in `providerMetadata.gemini`, as the Gemini backend expects) and `functionResponse` parts as `tool_result` (matched by id, or by name in call order; a lone `error` key marks `isError`); `fileData` parts as URL sources; `tools[].functionDeclarations` (`parameters` or `parametersJsonSchema`); `toolConfig.functionCallingConfig` as `toolChoice`; and all of `generationConfig` (`seed`, penalties, and `responseSchema` / `responseJsonSchema` / `responseMimeType: application/json` as `responseFormat`). snake_case field names are accepted too. Bad requests reject with `AdapterConversionError`. What IR cannot express is flagged with a `parameter-unsupported` warning in `metadata.warnings`: `candidateCount` above 1 (the answer has one candidate) and `allowedFunctionNames` with more than one name (mapped to `toolChoice: 'required'`).
+  - `fromIR` returns a full `GenerateContentResponse`: `functionCall` parts, media as `inlineData`/`fileData`, `finishReason` (incl. `SAFETY`), `usageMetadata`, `modelVersion`, `responseId`, `index`.
+  - `fromIRStream` now yields `GenerateContentResponse` objects instead of pre-framed `data: ...` strings (framing is the transport's job, as for the other frontends). Text streams as it comes; function calls are sent whole in the final chunk, which carries `finishReason` and `usageMetadata`. A failed stream ends with a Google-style `{ error: { code, message, status } }` (`isGeminiStreamError()`). Callers that wrote the old strings straight to the wire must now serialise each object (`data: ${JSON.stringify(chunk)}\n\n` for `?alt=sse`).
+
+- 2c26308: Ollama frontend gains tools and the rest of `/api/chat`:
+  - `toIR` maps `tools` to IR tools, an assistant message's `tool_calls` (object arguments; ids kept or generated) to `tool_use` blocks, and `role: 'tool'` messages to `tool_result` blocks (matched by `tool_call_id`, or by `tool_name` in call order). It also maps `images` (base64, media type sniffed), `format` (`'json'` or a JSON Schema) to `responseFormat`, and the `seed`, `frequency_penalty`, `presence_penalty`, `repeat_penalty` options. Bad requests reject with `AdapterConversionError`.
+  - `fromIR` returns `message.tool_calls`, `done_reason` and the token counts.
+  - `fromIRStream` now yields `/api/chat` response objects (one per NDJSON line) instead of pre-serialised strings: text as partial messages, tool calls whole in one partial message, then the `done: true` response with `done_reason` and counts; a failed stream ends with `{ error }` (`isOllamaStreamError()`). Callers that wrote the old strings must now write `JSON.stringify(chunk) + '\n'`.
+
+- 2c26308: New `OllamaGenerateFrontendAdapter` for Ollama's `/api/generate` (use it for that endpoint; `OllamaFrontendAdapter` serves `/api/chat`):
+  - `toIR` maps `system` to a system message, `prompt` plus `images` to a user message, and `format` and `options` as the chat adapter does.
+  - `raw`, `suffix`, `template` and the deprecated `context` have no IR equivalent. They are kept in `metadata.custom.ollama`, and each adds a `parameter-unsupported` warning. `keep_alive` is kept there too, with no warning.
+  - `fromIR` and `fromIRStream` produce the generate shape: `response` text instead of `message`, then a `done: true` line with `done_reason` and token counts, or `{ error }` on failure.
+
+- 2c26308: OpenAI frontend: a failed stream no longer ends silently as if it had finished. An IR `error` chunk (or a stream that throws) now yields a final `{ error: { message, type, param, code } }` frame, the shape OpenAI-compatible servers send as `data: {"error": ...}` and that the OpenAI SDKs raise; nothing is emitted after it. An upstream OpenAI error's own `type`/`code` (from the IR error's `details`) are kept. `fromIRStream` now yields `OpenAIStreamEvent` (`OpenAIStreamChunk | OpenAIStreamError`); use the new `isOpenAIStreamError()` guard before reading `choices`. The OpenAI SDK wrapper raises the error frame as an `AdapterError` (`STREAM_ERROR`), and the CLI's `toOpenAIStream` is typed accordingly.
+
+### Patch Changes
+
+- 2c26308: Anthropic frontend: `message_start` now carries the full message skeleton Anthropic sends (`content: []`, `stop_reason: null`, `stop_sequence: null`, `usage: { input_tokens, output_tokens }`), so Anthropic SDKs that read the first event no longer trip over missing fields. `message_delta` also reports `input_tokens` when the IR usage has them. A failed stream now ends with Anthropic's `error` event carrying an Anthropic error type (`rate_limit_error`, `overloaded_error`, `invalid_request_error`, `authentication_error`, `permission_error`, `not_found_error`, otherwise `api_error`) instead of the IR error code, and nothing is emitted after it (a stream that throws reports `api_error` instead of `stream_error`).
+- 2c26308: OpenAI frontend streams now pass the official `openai` SDK's stream helpers (`chat.completions.stream()`, `finalChatCompletion()`):
+  - The first delta carries `role: 'assistant'`, as OpenAI sends it. Without it the SDK failed with "missing role for choice 0", for text and tool-call streams alike.
+  - The chunk with `finish_reason` carries `usage` (`prompt_tokens`, `completion_tokens`, `total_tokens`) when the backend reported it, so `stream_options: { include_usage: true }` clients get the token counts. `OpenAIStreamChunk` gains the optional `usage` field.
+
+- Updated dependencies [2c26308]
+- Updated dependencies [2c26308]
+  - @johnhenry/aimatey-types@0.9.0
+  - @johnhenry/aimatey-errors@0.5.1
+  - @johnhenry/aimatey-utils@0.6.3
+
 ## 0.5.0
 
 ### Minor Changes

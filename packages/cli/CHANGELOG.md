@@ -1,5 +1,25 @@
 # @johnhenry/aimatey-cli
 
+## 0.2.6
+
+### Patch Changes
+
+- 2c26308: OpenAI frontend: a failed stream no longer ends silently as if it had finished. An IR `error` chunk (or a stream that throws) now yields a final `{ error: { message, type, param, code } }` frame, the shape OpenAI-compatible servers send as `data: {"error": ...}` and that the OpenAI SDKs raise; nothing is emitted after it. An upstream OpenAI error's own `type`/`code` (from the IR error's `details`) are kept. `fromIRStream` now yields `OpenAIStreamEvent` (`OpenAIStreamChunk | OpenAIStreamError`); use the new `isOpenAIStreamError()` guard before reading `choices`. The OpenAI SDK wrapper raises the error frame as an `AdapterError` (`STREAM_ERROR`), and the CLI's `toOpenAIStream` is typed accordingly.
+- Updated dependencies [2c26308]
+- Updated dependencies [2c26308]
+- Updated dependencies [2c26308]
+- Updated dependencies [2c26308]
+- Updated dependencies [2c26308]
+- Updated dependencies [2c26308]
+- Updated dependencies [2c26308]
+- Updated dependencies [2c26308]
+  - @johnhenry/aimatey-frontend@0.6.0
+  - @johnhenry/aimatey-core@0.7.0
+  - @johnhenry/aimatey-types@0.9.0
+  - @johnhenry/aimatey-errors@0.5.1
+  - @johnhenry/aimatey-utils@0.6.3
+  - @johnhenry/aimatey-backend@0.10.1
+
 ## 0.2.5
 
 ### Patch Changes
