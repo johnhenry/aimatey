@@ -21,6 +21,7 @@ import { createMetricsHandler } from './metrics.js';
 import { openaiEmbedRequestToIR, irToOpenAIEmbedResponse } from '@johnhenry/aimatey-utils';
 import { normalizeCORSOptions } from './cors.js';
 import { detectProviderFormat, sanitizeErrorMessage } from './response-formatter.js';
+import { detectStreamFraming, isGeminiStreamURL } from './stream-framing.js';
 import { getHTTPStatusCode } from './status-mapping.js';
 import { toUserMessage } from '@johnhenry/aimatey-errors';
 
@@ -254,7 +255,8 @@ export class CoreHTTPHandler {
         params: req.params,
         query: req.query,
         ip: req.ip,
-        stream: req.body?.stream === true,
+        // Gemini streams by URL (`:streamGenerateContent`), not by a body field.
+        stream: req.body?.stream === true || isGeminiStreamURL(req.url || ''),
       };
 
       // Log request if enabled
@@ -318,7 +320,12 @@ export class CoreHTTPHandler {
           }
         }
 
-        await res.stream(convertStream());
+        // Frame the stream as the requested API does. Anthropic paths keep the
+        // plain SSE + [DONE] framing this handler has always used for them.
+        const framing = detectStreamFraming(parsedRequest.url || '', parsedRequest.query);
+        await res.stream(convertStream(), {
+          framing: framing === 'anthropic' ? 'generic' : framing,
+        });
       } else {
         // Handle non-streaming request
         const response = await activeBridge.chat(parsedRequest.body);

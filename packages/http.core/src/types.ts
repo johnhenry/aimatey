@@ -7,6 +7,7 @@
  * @module
  */
 
+import type { StreamFraming } from './stream-framing.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Bridge } from '@johnhenry/aimatey-core';
 import type { FrontendAdapter } from '@johnhenry/aimatey-types';
@@ -142,6 +143,14 @@ export interface GenericRequest {
 }
 
 /**
+ * Options for {@link GenericResponse.stream}.
+ */
+export interface GenericStreamOptions {
+  /** Wire framing for the stream (default `'generic'`: SSE ending in `data: [DONE]`). */
+  framing?: StreamFraming;
+}
+
+/**
  * Generic HTTP response interface (framework-agnostic)
  */
 export interface GenericResponse {
@@ -161,9 +170,15 @@ export interface GenericResponse {
   send(data: any): void;
 
   /**
-   * Send streaming response (SSE)
+   * Send a streaming response. `options.framing` picks the wire format
+   * (SSE with `[DONE]` for OpenAI/generic, Gemini SSE or JSON array, Ollama
+   * NDJSON...); without it the response is SSE `data:` lines ending in
+   * `data: [DONE]`, as before.
    */
-  stream(generator: AsyncGenerator<any, void, undefined>): Promise<void>;
+  stream(
+    generator: AsyncGenerator<any, void, undefined>,
+    options?: GenericStreamOptions
+  ): Promise<void>;
 
   /**
    * Check if response is writable

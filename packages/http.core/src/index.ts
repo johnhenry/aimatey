@@ -27,6 +27,7 @@ export type {
   MatchedRoute,
   GenericRequest,
   GenericResponse,
+  GenericStreamOptions,
   GenericAuthValidator,
   GenericErrorHandler,
   GenericRateLimitKeyGenerator,
@@ -88,6 +89,15 @@ export {
   isClientError,
   isServerError,
 } from './error-handler.js';
+
+// Stream framing (per-API wire formats)
+export {
+  createStreamFramer,
+  detectStreamFraming,
+  isGeminiStreamURL,
+  streamHeaders,
+} from './stream-framing.js';
+export type { StreamFraming, StreamFramer } from './stream-framing.js';
 
 // Streaming
 export {
