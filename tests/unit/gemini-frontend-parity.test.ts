@@ -127,6 +127,26 @@ describe('GeminiFrontendAdapter.toIR', () => {
     });
   });
 
+  it('warns when allowedFunctionNames or candidateCount cannot be honoured', async () => {
+    const ir = await adapter.toIR({
+      contents: [{ role: 'user', parts: [{ text: 'Weather?' }] }],
+      tools: [{ functionDeclarations: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] }],
+      toolConfig: { functionCallingConfig: { mode: 'ANY', allowedFunctionNames: ['a', 'b'] } },
+      generationConfig: { candidateCount: 3 },
+    });
+    expect(ir.toolChoice).toBe('required');
+    expect(ir.metadata.warnings?.map((w) => [w.category, w.field])).toEqual([
+      ['parameter-unsupported', 'toolConfig.functionCallingConfig.allowedFunctionNames'],
+      ['parameter-unsupported', 'generationConfig.candidateCount'],
+    ]);
+
+    const plain = await adapter.toIR({
+      contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+      generationConfig: { candidateCount: 1 },
+    });
+    expect(plain.metadata.warnings).toBeUndefined();
+  });
+
   it('maps functionCall and functionResponse parts, matching by id or by name', async () => {
     const ir = await adapter.toIR({
       contents: [

@@ -22,6 +22,7 @@ import type {
   IRMessage,
   IRTool,
   IRUsage,
+  IRWarning,
   JSONSchema,
   MessageContent,
   FinishReason,
@@ -31,6 +32,7 @@ import type {
 import type { StreamConversionOptions } from '@johnhenry/aimatey-types';
 import { resolveServedModel } from '@johnhenry/aimatey-types';
 import { AdapterConversionError, ErrorCode } from '@johnhenry/aimatey-errors';
+import { createWarning } from '@johnhenry/aimatey-utils';
 
 // ============================================================================
 // Gemini API Types
@@ -578,11 +580,27 @@ export class GeminiFrontendAdapter implements FrontendAdapter<
       );
       const mode = str(fcc?.mode).toUpperCase();
       const allowed = field<string[]>(fcc, 'allowedFunctionNames', 'allowed_function_names');
+      const warnings: IRWarning[] = [];
       let toolChoice: IRChatRequest['toolChoice'];
       if (mode === 'NONE') {
         toolChoice = 'none';
       } else if (mode === 'ANY' || mode === 'VALIDATED') {
         toolChoice = allowed?.length === 1 ? { name: allowed[0]! } : 'required';
+        if (allowed && allowed.length > 1) {
+          // IR can force one named tool or any tool, not a subset.
+          warnings.push(
+            createWarning(
+              'parameter-unsupported',
+              'Gemini allowedFunctionNames with more than one name has no IR equivalent; any declared function may be called.',
+              {
+                field: 'toolConfig.functionCallingConfig.allowedFunctionNames',
+                originalValue: allowed,
+                transformedValue: 'required',
+                source: this.metadata.name,
+              }
+            )
+          );
+        }
       } else if (mode === 'AUTO') {
         toolChoice = 'auto';
       }
@@ -595,6 +613,23 @@ export class GeminiFrontendAdapter implements FrontendAdapter<
         (field(g, 'responseMimeType', 'response_mime_type') === 'application/json'
           ? { type: 'object' }
           : undefined);
+
+      // IR answers with one candidate; more cannot be honoured.
+      const candidateCount = field<number>(g, 'candidateCount', 'candidate_count');
+      if (typeof candidateCount === 'number' && candidateCount > 1) {
+        warnings.push(
+          createWarning(
+            'parameter-unsupported',
+            `Gemini candidateCount ${candidateCount} is not supported; the response has one candidate.`,
+            {
+              field: 'generationConfig.candidateCount',
+              originalValue: candidateCount,
+              transformedValue: 1,
+              source: this.metadata.name,
+            }
+          )
+        );
+      }
 
       const modelName =
         typeof raw.model === 'string' ? raw.model.replace(/^models\//, '') : undefined;
@@ -633,6 +668,7 @@ export class GeminiFrontendAdapter implements FrontendAdapter<
           requestId: 'gemini-' + crypto.randomUUID(),
           timestamp: Date.now(),
           provenance: { frontend: this.metadata.name },
+          ...(warnings.length > 0 ? { warnings } : {}),
         },
       });
     } catch (error) {
