@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-cli",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "CLI tools for Aimatey - proxy server, format converters, Ollama emulation",
   "type": "module",
   "main": "./dist/cjs/index.js",
@@ -43,8 +43,8 @@
     "@johnhenry/aimatey-core": "^0.6.2",
     "@johnhenry/aimatey-errors": "^0.5.0",
     "@johnhenry/aimatey-utils": "^0.6.2",
-    "@johnhenry/aimatey-backend": "^0.9.0",
-    "@johnhenry/aimatey-frontend": "^0.4.2"
+    "@johnhenry/aimatey-backend": "^0.10.0",
+    "@johnhenry/aimatey-frontend": "^0.5.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
