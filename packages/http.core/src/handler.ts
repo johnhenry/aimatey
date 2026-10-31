@@ -21,6 +21,7 @@ import { createMetricsHandler } from './metrics.js';
 import { openaiEmbedRequestToIR, irToOpenAIEmbedResponse } from '@johnhenry/aimatey-utils';
 import { normalizeCORSOptions } from './cors.js';
 import { detectProviderFormat, sanitizeErrorMessage } from './response-formatter.js';
+import { detectStreamFraming, geminiModelFromURL, requestWantsStream } from './stream-framing.js';
 import { getHTTPStatusCode } from './status-mapping.js';
 import { toUserMessage } from '@johnhenry/aimatey-errors';
 
@@ -245,16 +246,32 @@ export class CoreHTTPHandler {
         }
       }
 
+      // Gemini names the model in the URL (`models/{model}:generateContent`),
+      // not in the body: carry it into the body for the Gemini frontend.
+      let body = req.body;
+      const geminiModel = geminiModelFromURL(req.url || '');
+      if (
+        geminiModel &&
+        typeof body === 'object' &&
+        body !== null &&
+        !Array.isArray(body) &&
+        body.model === undefined
+      ) {
+        body = { ...body, model: geminiModel };
+      }
+
       // Parse request (create explicit object instead of spread to ensure all properties are copied)
       const parsedRequest: ParsedGenericRequest = {
         method: req.method,
         url: req.url,
         headers: req.headers,
-        body: req.body,
+        body,
         params: req.params,
         query: req.query,
         ip: req.ip,
-        stream: req.body?.stream === true,
+        // `stream: true` in the body; Gemini streams by URL (`:streamGenerateContent`)
+        // and Ollama's `/api/chat` and `/api/generate` stream unless `stream: false`.
+        stream: requestWantsStream(req.url || '', req.body),
       };
 
       // Log request if enabled
@@ -309,16 +326,32 @@ export class CoreHTTPHandler {
       // Handle streaming or non-streaming request
       if (this.options.streaming && parsedRequest.stream) {
         // Handle streaming request
-        const stream = activeBridge.chatStream(parsedRequest.body);
+        const stream = activeBridge.chatStream(parsedRequest.body, {
+          throwBeforeFirstChunk: true,
+        });
+
+        // Wait for the first chunk before committing to a streamed 200: a
+        // request that fails before anything was produced (rate limit, bad
+        // key, unknown model) is answered like a non-streamed failure, with
+        // its HTTP status and the API's error body, which SDKs raise as
+        // their typed errors.
+        const iterator = stream[Symbol.asyncIterator]();
+        const first = await iterator.next();
 
         // Convert to async generator for generic response
         async function* convertStream() {
-          for await (const chunk of stream) {
-            yield chunk;
+          if (first.done) {
+            return;
           }
+          yield first.value;
+          yield* { [Symbol.asyncIterator]: () => iterator };
         }
 
-        await res.stream(convertStream());
+        // Frame the stream as the requested API does: OpenAI SSE ending in
+        // [DONE], Anthropic named events, Gemini SSE or JSON array, Ollama NDJSON.
+        await res.stream(convertStream(), {
+          framing: detectStreamFraming(parsedRequest.url || '', parsedRequest.query),
+        });
       } else {
         // Handle non-streaming request
         const response = await activeBridge.chat(parsedRequest.body);

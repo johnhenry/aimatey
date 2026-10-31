@@ -111,6 +111,35 @@ export interface DecideBatchOptions extends DecisionOptions {
 }
 
 /**
+ * Pull a stream's first chunk now. If producing it throws, or it is an IR
+ * `error` chunk, the failure is thrown here (as an `AdapterError` keeping the
+ * error's code), before anything has been sent. Otherwise the returned stream
+ * yields that chunk and then the rest.
+ */
+async function primeStream(stream: IRChatStream): Promise<IRChatStream> {
+  const iterator = stream[Symbol.asyncIterator]();
+  const first = await iterator.next();
+  if (!first.done && first.value.type === 'error') {
+    const { code, message, details } = first.value.error;
+    await iterator.return?.();
+    throw new AdapterError({
+      code: code as ErrorCode,
+      message,
+      isRetryable: false,
+      details,
+      provenance: {},
+    });
+  }
+  return (async function* (): IRChatStream {
+    if (first.done) {
+      return;
+    }
+    yield first.value;
+    yield* { [Symbol.asyncIterator]: () => iterator };
+  })();
+}
+
+/**
  * Bridge connects frontend and backend adapters.
  *
  * @template TFrontend Frontend adapter type
@@ -431,10 +460,17 @@ export class Bridge<
       // The usage tap sits *after* enrichStream so it reads the same resolved
       // provenance `chat()` reads off the enriched response, keeping the two paths
       // in agreement about who served the request (#68).
+      // Step 6.5 (opt-in): pull the first IR chunk before converting, so a
+      // backend that fails before producing anything (a 429, a bad key) fails
+      // this call with its error, as chat() does, instead of becoming an
+      // in-band error frame. The HTTP handler uses this to answer with the
+      // real status.
+      const primedStream = options?.throwBeforeFirstChunk ? await primeStream(irStream) : irStream;
+
       let servedBy: string | undefined;
       const frontendStream = this.requireChatFrontend().fromIRStream(
         this.captureStreamBackend(
-          this.enrichStream(this.guardStream(irStream, options?.signal)),
+          this.enrichStream(this.guardStream(primedStream, options?.signal)),
           (name) => {
             servedBy = name;
           }

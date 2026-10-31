@@ -16,7 +16,7 @@ import type {
   JSONSchema,
   MessageContent,
 } from '@johnhenry/aimatey-types';
-import type { StreamConversionOptions } from '@johnhenry/aimatey-types';
+import type { StreamConversionOptions, IRUsage } from '@johnhenry/aimatey-types';
 import { resolveServedModel } from '@johnhenry/aimatey-types';
 import { AdapterConversionError, ErrorCode } from '@johnhenry/aimatey-errors';
 import { convertStreamMode, requireResolvedContent } from '@johnhenry/aimatey-utils';
@@ -327,6 +327,49 @@ export interface OpenAIStreamChunk {
     /** Non-null when stream is complete. Indicates why generation stopped */
     finish_reason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | null;
   }>;
+
+  /**
+   * Token usage, on the chunk that carries `finish_reason` when the backend
+   * reported it (what `stream_options: { include_usage: true }` asks for).
+   */
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+}
+
+/**
+ * An in-stream error, framed as OpenAI and OpenAI-compatible servers send it
+ * (`data: {"error": {...}}`). The official SDKs throw an `APIError` when a
+ * stream frame carries `error`, so a failed stream fails loudly instead of
+ * ending as if it had finished.
+ */
+export interface OpenAIStreamError {
+  error: {
+    /** Human-readable error message */
+    message: string;
+    /** Error type, e.g. 'api_error', 'server_error', 'rate_limit_error' */
+    type: string;
+    /** Parameter the error relates to (always null here) */
+    param: string | null;
+    /** Error code (the IR error code when there is no upstream one) */
+    code: string | null;
+  };
+}
+
+/** Anything the OpenAI frontend's stream yields: a completion chunk or an error frame. */
+export type OpenAIStreamEvent = OpenAIStreamChunk | OpenAIStreamError;
+
+/** True when a value yielded by `OpenAIFrontendAdapter.fromIRStream` is an error frame. */
+export function isOpenAIStreamError(event: unknown): event is OpenAIStreamError {
+  return (
+    typeof event === 'object' &&
+    event !== null &&
+    'error' in event &&
+    typeof (event as { error: unknown }).error === 'object' &&
+    (event as { error: unknown }).error !== null
+  );
 }
 
 // ============================================================================
@@ -339,7 +382,7 @@ export interface OpenAIStreamChunk {
 export class OpenAIFrontendAdapter implements FrontendAdapter<
   OpenAIRequest,
   OpenAIResponse,
-  OpenAIStreamChunk
+  OpenAIStreamEvent
 > {
   readonly metadata: AdapterMetadata = {
     name: 'openai-frontend',
@@ -539,13 +582,15 @@ export class OpenAIFrontendAdapter implements FrontendAdapter<
    *
    * @param stream - Universal IR chat stream
    * @param options - Optional stream conversion options (stream mode, etc.)
-   * @yields OpenAI-formatted streaming chunks
-   * @throws {AdapterConversionError} If stream conversion fails
+   * @yields OpenAI-formatted streaming chunks; when the IR stream fails (an IR
+   *   `error` chunk, or the stream throws), a final {@link OpenAIStreamError}
+   *   frame (`{ error: { message, type, param, code } }`) and then the end
    *
    * @example
    * ```typescript
    * const adapter = new OpenAIFrontendAdapter();
    * for await (const chunk of adapter.fromIRStream(irStream)) {
+   *   if (isOpenAIStreamError(chunk)) throw new Error(chunk.error.message);
    *   console.log(chunk.choices[0].delta.content);
    * }
    * ```
@@ -553,7 +598,7 @@ export class OpenAIFrontendAdapter implements FrontendAdapter<
   async *fromIRStream(
     stream: IRChatStream,
     options?: StreamConversionOptions
-  ): AsyncGenerator<OpenAIStreamChunk, void, undefined> {
+  ): AsyncGenerator<OpenAIStreamEvent, void, undefined> {
     try {
       // Apply stream mode conversion if options provided
       const processedStream = options ? convertStreamMode(stream, options) : stream;
@@ -564,6 +609,18 @@ export class OpenAIFrontendAdapter implements FrontendAdapter<
 
       // Tool-call ids already announced (id/name are only emitted once per call)
       const announcedToolCalls = new Map<string, number>();
+
+      // OpenAI's first delta carries `role: 'assistant'`; the SDKs' stream
+      // helpers refuse a choice whose role was never sent.
+      let roleSent = false;
+      let streamUsage: Partial<IRUsage> | undefined;
+      const role = (): { role?: 'assistant' } => {
+        if (roleSent) {
+          return {};
+        }
+        roleSent = true;
+        return { role: 'assistant' };
+      };
 
       for await (const chunk of processedStream) {
         switch (chunk.type) {
@@ -595,6 +652,7 @@ export class OpenAIFrontendAdapter implements FrontendAdapter<
                 {
                   index: 0,
                   delta: {
+                    ...role(),
                     tool_calls: [
                       {
                         index,
@@ -631,6 +689,7 @@ export class OpenAIFrontendAdapter implements FrontendAdapter<
                 {
                   index: 0,
                   delta: {
+                    ...role(),
                     content: chunk.delta,
                   },
                   finish_reason: null,
@@ -639,9 +698,16 @@ export class OpenAIFrontendAdapter implements FrontendAdapter<
             };
             break;
 
+          case 'metadata':
+            if (chunk.usage) {
+              streamUsage = { ...streamUsage, ...chunk.usage };
+            }
+            break;
+
           case 'done': {
             // Emit finish chunk
             const finishReason = this.mapFinishReason(chunk.finishReason);
+            const usage = chunk.usage ?? streamUsage;
             yield {
               id: messageId,
               object: 'chat.completion.chunk',
@@ -650,23 +716,48 @@ export class OpenAIFrontendAdapter implements FrontendAdapter<
               choices: [
                 {
                   index: 0,
-                  delta: {},
+                  delta: role(),
                   finish_reason: finishReason,
                 },
               ],
+              ...(usage?.promptTokens !== undefined && usage.completionTokens !== undefined
+                ? {
+                    usage: {
+                      prompt_tokens: usage.promptTokens,
+                      completion_tokens: usage.completionTokens,
+                      total_tokens:
+                        usage.totalTokens ?? usage.promptTokens + usage.completionTokens,
+                    },
+                  }
+                : {}),
             };
             break;
           }
-          case 'error':
-            // OpenAI doesn't have a standard error event in SSE
-            // We'll just stop the stream
-            break;
+          case 'error': {
+            // Surface the failure as OpenAI-compatible servers do: a final
+            // `{ error }` frame (which the OpenAI SDKs raise), then end.
+            const details = chunk.error.details;
+            yield this.streamError(
+              chunk.error.message,
+              typeof details?.type === 'string' ? details.type : 'api_error',
+              typeof details?.code === 'string' ? details.code : chunk.error.code
+            );
+            return;
+          }
         }
       }
-    } catch {
-      // Silently end stream on error
-      // OpenAI SSE format doesn't have a standard error event
+    } catch (error) {
+      // A stream that throws must not end as if it had finished.
+      yield this.streamError(
+        error instanceof Error ? error.message : String(error),
+        'api_error',
+        'stream_error'
+      );
     }
+  }
+
+  private streamError(message: string, type: string, code: string | null): OpenAIStreamError {
+    return { error: { message, type, param: null, code } };
   }
 
   // ==========================================================================

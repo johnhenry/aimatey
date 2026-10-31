@@ -7,8 +7,12 @@
  */
 
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import type { GenericRequest, GenericResponse } from '@johnhenry/aimatey-http-core';
-import { sendSSEHeaders, sendSSEChunk, sendSSEDone } from '@johnhenry/aimatey-http-core';
+import type {
+  GenericRequest,
+  GenericResponse,
+  GenericStreamOptions,
+} from '@johnhenry/aimatey-http-core';
+import { sendSSEHeaders, createStreamFramer } from '@johnhenry/aimatey-http-core';
 
 /**
  * Adapter that converts Fastify Request to GenericRequest
@@ -116,7 +120,10 @@ export class FastifyResponseAdapter implements GenericResponse {
     this.reply.code(this._statusCode).send(data);
   }
 
-  async stream(generator: AsyncGenerator<any, void, undefined>): Promise<void> {
+  async stream(
+    generator: AsyncGenerator<any, void, undefined>,
+    options?: GenericStreamOptions
+  ): Promise<void> {
     if (!this.canStartResponse()) {
       return;
     }
@@ -127,7 +134,8 @@ export class FastifyResponseAdapter implements GenericResponse {
     const nodeRes = this.reply.raw;
 
     // Set SSE headers
-    sendSSEHeaders(nodeRes, {});
+    const framer = createStreamFramer(options?.framing);
+    sendSSEHeaders(nodeRes, { 'Content-Type': framer.contentType });
 
     try {
       // Stream chunks
@@ -135,12 +143,12 @@ export class FastifyResponseAdapter implements GenericResponse {
         if (!this.isWritable()) {
           break;
         }
-        sendSSEChunk(nodeRes, chunk);
+        nodeRes.write(framer.frame(chunk));
       }
 
-      // Send done marker
+      // End the stream (`data: [DONE]` for OpenAI-style SSE)
       if (this.isWritable()) {
-        sendSSEDone(nodeRes);
+        nodeRes.end(framer.end());
       }
     } catch (error) {
       // If error occurs during streaming, we can't change status code

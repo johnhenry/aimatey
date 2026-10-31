@@ -7,7 +7,12 @@
  */
 
 import type { Context } from 'hono';
-import type { GenericRequest, GenericResponse } from '@johnhenry/aimatey-http-core';
+import type {
+  GenericRequest,
+  GenericResponse,
+  GenericStreamOptions,
+} from '@johnhenry/aimatey-http-core';
+import { createStreamFramer } from '@johnhenry/aimatey-http-core';
 
 /**
  * Adapter that converts Hono Context to GenericRequest
@@ -138,7 +143,10 @@ export class HonoResponseAdapter implements GenericResponse {
     });
   }
 
-  stream(generator: AsyncGenerator<any, void, undefined>): Promise<void> {
+  stream(
+    generator: AsyncGenerator<any, void, undefined>,
+    options?: GenericStreamOptions
+  ): Promise<void> {
     if (this._sent) {
       return Promise.resolve();
     }
@@ -150,18 +158,22 @@ export class HonoResponseAdapter implements GenericResponse {
       this.c.header(name, value);
     }
 
-    // Create SSE stream
+    const framer = createStreamFramer(options?.framing);
+    const encoder = new TextEncoder();
+
+    // Create the stream (SSE, JSON array or NDJSON, per the framing)
     const stream = new ReadableStream({
       async start(controller) {
         try {
           for await (const chunk of generator) {
-            const data = `data: ${JSON.stringify(chunk)}\n\n`;
-            controller.enqueue(new TextEncoder().encode(data));
+            controller.enqueue(encoder.encode(framer.frame(chunk)));
           }
 
-          // Send done marker
-          const done = 'data: [DONE]\n\n';
-          controller.enqueue(new TextEncoder().encode(done));
+          // End the stream (`data: [DONE]` for OpenAI-style SSE)
+          const end = framer.end();
+          if (end) {
+            controller.enqueue(encoder.encode(end));
+          }
 
           controller.close();
         } catch (error) {
@@ -172,7 +184,7 @@ export class HonoResponseAdapter implements GenericResponse {
     });
 
     // Set SSE headers and return stream
-    this.c.header('Content-Type', 'text/event-stream');
+    this.c.header('Content-Type', framer.contentType);
     this.c.header('Cache-Control', 'no-cache');
     this.c.header('Connection', 'keep-alive');
 

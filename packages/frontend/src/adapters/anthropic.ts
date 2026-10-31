@@ -267,7 +267,7 @@ export interface AnthropicResponse {
  * // Message start event
  * const start: AnthropicStreamEvent = {
  *   type: 'message_start',
- *   message: { id: 'msg_123', model: 'claude-3-5-sonnet-20241022' }
+ *   message: { id: 'msg_123', type: 'message', role: 'assistant', content: [], model: 'claude-3-5-sonnet-20241022', stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } }
  * };
  *
  * // Text delta event
@@ -299,7 +299,7 @@ export type AnthropicStreamEvent =
   | {
       type: 'message_delta';
       delta: { stop_reason: string; stop_sequence?: string | null };
-      usage: { output_tokens: number };
+      usage: { input_tokens?: number; output_tokens: number };
     }
   | { type: 'message_stop' }
   | { type: 'error'; error: { type: string; message: string } };
@@ -307,6 +307,41 @@ export type AnthropicStreamEvent =
 // ============================================================================
 // Anthropic Frontend Adapter
 // ============================================================================
+
+/**
+ * The Anthropic error type (`error.type` in an `error` event) for an IR error code.
+ *
+ * @see https://docs.anthropic.com/en/api/errors
+ */
+function anthropicErrorType(code: string): string {
+  switch (code) {
+    case ErrorCode.INVALID_REQUEST:
+    case ErrorCode.INVALID_MESSAGE_FORMAT:
+    case ErrorCode.INVALID_PARAMETERS:
+    case ErrorCode.CONTEXT_LENGTH_EXCEEDED:
+    case 'VALIDATION':
+      return 'invalid_request_error';
+    case ErrorCode.INVALID_API_KEY:
+    case ErrorCode.MISSING_API_KEY:
+    case ErrorCode.EXPIRED_API_KEY:
+    case 'AUTHENTICATION':
+      return 'authentication_error';
+    case ErrorCode.INSUFFICIENT_PERMISSIONS:
+    case 'AUTHORIZATION':
+      return 'permission_error';
+    case ErrorCode.UNSUPPORTED_MODEL:
+      return 'not_found_error';
+    case ErrorCode.RATE_LIMIT_EXCEEDED:
+    case ErrorCode.QUOTA_EXCEEDED:
+    case 'RATE_LIMIT':
+      return 'rate_limit_error';
+    case ErrorCode.PROVIDER_OVERLOADED:
+    case ErrorCode.PROVIDER_UNAVAILABLE:
+      return 'overloaded_error';
+    default:
+      return 'api_error';
+  }
+}
 
 /**
  * Frontend adapter for Anthropic Messages API.
@@ -520,10 +555,16 @@ export class AnthropicFrontendAdapter implements FrontendAdapter<
                 id: chunk.metadata.requestId,
                 type: 'message',
                 role: 'assistant',
+                // Anthropic's message_start carries the full message skeleton:
+                // empty content, null stop fields and the usage known so far.
+                content: [],
                 model:
                   resolveServedModel(chunk.metadata.provenance) ??
                   chunk.metadata.provenance?.backend ??
                   'unknown',
+                stop_reason: null,
+                stop_sequence: null,
+                usage: { input_tokens: 0, output_tokens: 0 },
               },
             };
             break;
@@ -596,6 +637,9 @@ export class AnthropicFrontendAdapter implements FrontendAdapter<
                 stop_reason: stopReason || 'end_turn',
               },
               usage: {
+                ...(chunk.usage?.promptTokens !== undefined
+                  ? { input_tokens: chunk.usage.promptTokens }
+                  : {}),
                 output_tokens: chunk.usage?.completionTokens ?? 0,
               },
             };
@@ -607,15 +651,16 @@ export class AnthropicFrontendAdapter implements FrontendAdapter<
           }
 
           case 'error':
-            // Emit error event
+            // Emit Anthropic's error event (`event: error`, with an Anthropic
+            // error type) and end: Anthropic sends nothing after an error.
             yield {
               type: 'error',
               error: {
-                type: chunk.error.code,
+                type: anthropicErrorType(chunk.error.code),
                 message: chunk.error.message,
               },
             };
-            break;
+            return;
         }
       }
     } catch (error) {
@@ -623,7 +668,7 @@ export class AnthropicFrontendAdapter implements FrontendAdapter<
       yield {
         type: 'error',
         error: {
-          type: 'stream_error',
+          type: 'api_error',
           message: error instanceof Error ? error.message : String(error),
         },
       };

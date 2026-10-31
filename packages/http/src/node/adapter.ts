@@ -7,12 +7,15 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { GenericRequest, GenericResponse } from '@johnhenry/aimatey-http-core';
+import type {
+  GenericRequest,
+  GenericResponse,
+  GenericStreamOptions,
+} from '@johnhenry/aimatey-http-core';
 import {
   parseRequest,
   sendSSEHeaders,
-  sendSSEChunk,
-  sendSSEDone,
+  createStreamFramer,
   sendJSON,
 } from '@johnhenry/aimatey-http-core';
 
@@ -154,15 +157,19 @@ export class NodeResponseAdapter implements GenericResponse {
     sendJSON(this.res, data, this._statusCode);
   }
 
-  async stream(generator: AsyncGenerator<any, void, undefined>): Promise<void> {
+  async stream(
+    generator: AsyncGenerator<any, void, undefined>,
+    options?: GenericStreamOptions
+  ): Promise<void> {
     if (!this.canStartResponse()) {
       return;
     }
 
     this._headersSent = true;
+    const framer = createStreamFramer(options?.framing);
 
-    // Set SSE headers
-    sendSSEHeaders(this.res, {});
+    // Set stream headers (SSE, JSON array or NDJSON, per the framing)
+    sendSSEHeaders(this.res, { 'Content-Type': framer.contentType });
 
     try {
       // Stream chunks
@@ -170,12 +177,12 @@ export class NodeResponseAdapter implements GenericResponse {
         if (!this.isWritable()) {
           break;
         }
-        sendSSEChunk(this.res, chunk);
+        this.res.write(framer.frame(chunk));
       }
 
-      // Send done marker
+      // End the stream (`data: [DONE]` for OpenAI-style SSE)
       if (this.isWritable()) {
-        sendSSEDone(this.res);
+        this.res.end(framer.end());
       }
     } catch (error) {
       // If error occurs during streaming, we can't change status code

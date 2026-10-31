@@ -124,6 +124,18 @@ export interface RequestOptions {
   readonly backend?: string;
 
   /**
+   * `chatStream()` only: throw when the backend fails before its first chunk
+   * (it throws, or its first chunk is an IR `error` chunk), as `chat()` does,
+   * instead of yielding the frontend's in-band error frame. The error keeps
+   * its code and status, so an HTTP server can still answer with a real
+   * error response (429, 401, ...) rather than a 200 stream that fails.
+   * Failures after the first chunk are yielded as error frames either way.
+   *
+   * @default false
+   */
+  readonly throwBeforeFirstChunk?: boolean;
+
+  /**
    * Additional metadata to attach to request.
    */
   readonly metadata?: Record<string, unknown>;

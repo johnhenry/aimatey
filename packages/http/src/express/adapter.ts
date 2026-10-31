@@ -7,7 +7,12 @@
  */
 
 import type { Request, Response } from 'express';
-import type { GenericRequest, GenericResponse } from '@johnhenry/aimatey-http-core';
+import type {
+  GenericRequest,
+  GenericResponse,
+  GenericStreamOptions,
+} from '@johnhenry/aimatey-http-core';
+import { createStreamFramer } from '@johnhenry/aimatey-http-core';
 
 /**
  * Adapter that converts Express Request to GenericRequest
@@ -118,16 +123,21 @@ export class ExpressResponseAdapter implements GenericResponse {
     this.res.status(this._statusCode).json(data);
   }
 
-  async stream(generator: AsyncGenerator<any, void, undefined>): Promise<void> {
+  async stream(
+    generator: AsyncGenerator<any, void, undefined>,
+    options?: GenericStreamOptions
+  ): Promise<void> {
     if (!this.isWritable()) {
       return;
     }
 
     this._headersSent = true;
 
-    // Set up SSE manually for Express compatibility
+    const framer = createStreamFramer(options?.framing);
+
+    // Set up the stream manually for Express compatibility
     this.res.status(200);
-    this.res.setHeader('Content-Type', 'text/event-stream');
+    this.res.setHeader('Content-Type', framer.contentType);
     this.res.setHeader('Cache-Control', 'no-cache');
     this.res.setHeader('Connection', 'keep-alive');
     this.res.setHeader('Transfer-Encoding', 'chunked');
@@ -142,15 +152,12 @@ export class ExpressResponseAdapter implements GenericResponse {
           break;
         }
 
-        // Write SSE formatted data
-        const json = JSON.stringify(chunk);
-        this.res.write(`data: ${json}\n\n`);
+        this.res.write(framer.frame(chunk));
       }
 
-      // Send done marker
+      // End the stream (`data: [DONE]` for OpenAI-style SSE)
       if (this.res.writable) {
-        this.res.write('data: [DONE]\n\n');
-        this.res.end();
+        this.res.end(framer.end());
       }
     } catch {
       // If error occurs during streaming, we can't change status code

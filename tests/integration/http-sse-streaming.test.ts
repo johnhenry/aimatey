@@ -13,7 +13,8 @@
  * them alone can pass against a broken adapter:
  *
  *   1. data lines actually arrive (the loop wrote something),
- *   2. the `[DONE]` sentinel is written (the tail after the loop ran),
+ *   2. the stream's tail is written (`message_stop` for Anthropic paths, which
+ *      the handler frames as Anthropic does; `[DONE]` for a bare adapter),
  *   3. the response actually ends (res.end() was reached, so the client is
  *      not left holding an open socket).
  *
@@ -159,8 +160,18 @@ function collectSSE(port: number, path = '/v1/messages', timeoutMs = 3000): Prom
   });
 }
 
-/** The three assertions the report calls for, applied together. */
-function expectCompleteSSEStream(result: SSEResult): void {
+/**
+ * The three assertions the report calls for, applied together.
+ *
+ * `framing: 'anthropic'` is for /v1/messages through the request handler,
+ * which streams as Anthropic does: named events, ending with `message_stop`,
+ * no `[DONE]`. `'generic'` is a bare adapter stream: `data:` lines ending in
+ * `data: [DONE]`.
+ */
+function expectCompleteSSEStream(
+  result: SSEResult,
+  framing: 'anthropic' | 'generic' = 'anthropic'
+): void {
   expect(result.status).toBe(200);
 
   // 1. Data lines actually arrived. Before the fix this was 0: the loop guard
@@ -169,9 +180,15 @@ function expectCompleteSSEStream(result: SSEResult): void {
   expect(payloadLines.length).toBeGreaterThan(0);
   expect(result.body).toContain('Hello');
 
-  // 2. The sentinel after the loop was written.
-  expect(result.dataLines).toContain('[DONE]');
-  expect(result.dataLines[result.dataLines.length - 1]).toBe('[DONE]');
+  // 2. The tail after the loop was written.
+  if (framing === 'anthropic') {
+    expect(result.dataLines).not.toContain('[DONE]');
+    expect(result.body).toContain('event: message_start\n');
+    expect(JSON.parse(result.dataLines[result.dataLines.length - 1]!).type).toBe('message_stop');
+  } else {
+    expect(result.dataLines).toContain('[DONE]');
+    expect(result.dataLines[result.dataLines.length - 1]).toBe('[DONE]');
+  }
 
   // 3. The server ended the response. A chunk-count assertion alone would
   //    still pass against a socket left hanging open.
@@ -200,7 +217,7 @@ describe('Node HTTP adapter SSE streaming (#89)', () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  it('delivers SSE chunks, the [DONE] sentinel, and closes the response', async () => {
+  it('delivers Anthropic SSE events, ends with message_stop, and closes the response', async () => {
     expectCompleteSSEStream(await collectSSE(port));
   });
 
@@ -250,7 +267,7 @@ describe('Fastify adapter SSE streaming (#89)', () => {
     await app.close();
   });
 
-  it('delivers SSE chunks, the [DONE] sentinel, and closes the response', async () => {
+  it('delivers Anthropic SSE events, ends with message_stop, and closes the response', async () => {
     expectCompleteSSEStream(await collectSSE(port));
   });
 });
@@ -309,6 +326,6 @@ describe('Koa adapter SSE streaming (#89)', () => {
   });
 
   it('delivers SSE chunks, the [DONE] sentinel, and closes the response', async () => {
-    expectCompleteSSEStream(await collectSSE(port));
+    expectCompleteSSEStream(await collectSSE(port), 'generic');
   });
 });

@@ -1412,7 +1412,17 @@ export class Router implements IRouter {
       strategy = 'first',
       timeout,
       cancelOnFirstSuccess = true,
+      customAggregator,
     } = options;
+
+    if (strategy === 'custom' && typeof customAggregator !== 'function') {
+      throw new AdapterError({
+        code: ErrorCode.INVALID_REQUEST,
+        message: "dispatchParallel strategy 'custom' requires a customAggregator function",
+        isRetryable: false,
+        provenance: { router: this.metadata.name },
+      });
+    }
 
     // Determine which backends to use
     const backendsToUse =
@@ -1445,7 +1455,15 @@ export class Router implements IRouter {
       const promises = backendsToUse.map(async (backendName) => {
         const backendStartTime = Date.now();
         try {
-          const response = await this.executeOnBackend(backendName, request, combinedSignal);
+          // Each leg gets the model name its own backend knows (previously the
+          // untranslated name went to every backend), with any substitution
+          // warning attached, as dispatch() and dispatchStream() do.
+          const translatedRequest = this.applyModelTranslation(request, backendName);
+          const response = await this.executeOnBackend(
+            backendName,
+            translatedRequest,
+            combinedSignal
+          );
           return {
             backend: backendName,
             response,
@@ -1500,14 +1518,37 @@ export class Router implements IRouter {
         });
       }
 
-      // 'fastest' picks the lowest-latency success; others take the first
-      const primary =
-        strategy === 'fastest'
-          ? successful.reduce((best, candidate) =>
-              (candidate.latencyMs ?? Infinity) < (best.latencyMs ?? Infinity) ? candidate : best
-            )
-          : successful[0];
-      if (!primary?.response) {
+      const allResponses = successful.map((s) => ({
+        backend: s.backend,
+        response: s.response!,
+        latencyMs: s.latencyMs!,
+      }));
+
+      let primaryResponse: IRChatResponse | undefined;
+      if (strategy === 'custom') {
+        // The caller's aggregator sees every successful leg and decides the answer.
+        try {
+          primaryResponse = await customAggregator!(allResponses);
+        } catch (error) {
+          throw new AdapterError({
+            code: ErrorCode.INTERNAL_ERROR,
+            message: `dispatchParallel customAggregator failed: ${error instanceof Error ? error.message : String(error)}`,
+            isRetryable: false,
+            provenance: { router: this.metadata.name },
+            cause: error instanceof Error ? error : undefined,
+          });
+        }
+      } else {
+        // 'fastest' picks the lowest-latency success; others take the first
+        const primary =
+          strategy === 'fastest'
+            ? successful.reduce((best, candidate) =>
+                (candidate.latencyMs ?? Infinity) < (best.latencyMs ?? Infinity) ? candidate : best
+              )
+            : successful[0];
+        primaryResponse = primary?.response;
+      }
+      if (!primaryResponse) {
         throw new AdapterError({
           code: ErrorCode.INTERNAL_ERROR,
           message: 'No successful response in parallel dispatch',
@@ -1517,15 +1558,8 @@ export class Router implements IRouter {
       }
 
       return {
-        response: primary.response,
-        allResponses:
-          strategy === 'all'
-            ? successful.map((s) => ({
-                backend: s.backend,
-                response: s.response!,
-                latencyMs: s.latencyMs!,
-              }))
-            : undefined,
+        response: primaryResponse,
+        allResponses: strategy === 'all' || strategy === 'custom' ? allResponses : undefined,
         successfulBackends: successful.map((s) => s.backend),
         failedBackends: failed,
         totalTimeMs: Date.now() - startTime,

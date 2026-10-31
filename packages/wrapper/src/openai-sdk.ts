@@ -18,6 +18,7 @@ import type {
 } from '@johnhenry/aimatey-types';
 import {
   OpenAIFrontendAdapter,
+  isOpenAIStreamError,
   type OpenAIRequest,
   type OpenAIMessage,
 } from '@johnhenry/aimatey-frontend';
@@ -32,6 +33,8 @@ export type {
   OpenAIRequest,
   OpenAIResponse,
   OpenAIStreamChunk,
+  OpenAIStreamError,
+  OpenAIStreamEvent,
   OpenAIMessage,
 } from '@johnhenry/aimatey-frontend';
 
@@ -272,6 +275,16 @@ export class ChatCompletions {
 
     // Use frontend adapter to convert stream
     for await (const chunk of this.adapter.fromIRStream(irStream)) {
+      // An error frame ends the stream: raise it, as the OpenAI SDK does.
+      if (isOpenAIStreamError(chunk)) {
+        throw new AdapterError({
+          code: ErrorCode.STREAM_ERROR,
+          message: chunk.error.message,
+          isRetryable: false,
+          details: { type: chunk.error.type, code: chunk.error.code },
+          provenance: { backend: this.backend.metadata.name },
+        });
+      }
       // Convert to SDK-style chunk
       yield {
         id: chunk.id,

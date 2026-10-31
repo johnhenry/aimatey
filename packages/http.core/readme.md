@@ -69,6 +69,36 @@ handler.dispose(): void
 | `metrics` | see `src/types.ts` | Metrics endpoint. |
 | `embeddings` | see `src/types.ts` | Embeddings endpoint. |
 
+### Stream framing
+
+Streamed answers are framed the way each API's clients expect, picked from
+the request path by `detectStreamFraming(url, query)`:
+
+| Path | Framing | Content-Type | End |
+|------|---------|--------------|-----|
+| `/chat/completions` (and anything unrecognised) | SSE `data:` lines | `text/event-stream` | `data: [DONE]` |
+| `/messages` | named SSE events (`event: message_start` ...) | `text/event-stream` | `message_stop` event |
+| `…:streamGenerateContent?alt=sse` | SSE `data:` lines | `text/event-stream` | nothing |
+| `…:streamGenerateContent` without `alt=sse` | one JSON array | `application/json` | `]` |
+| `/api/chat`, `/api/generate` | NDJSON, one object per line | `application/x-ndjson` | nothing |
+
+Whether a request streams also follows its API (`requestWantsStream(url, body)`):
+`stream: true` in the body for OpenAI and Anthropic, the URL for Gemini
+(`:streamGenerateContent`), and anything but `stream: false` for Ollama, whose
+default is to stream. For Gemini URLs the handler copies the model named in
+the URL (`geminiModelFromURL(url)`) into the body when the body has none.
+
+The handler waits for the first chunk before it starts a stream. A request
+that fails before anything was produced (rate limit, bad key, unknown model)
+gets a normal error response with its HTTP status and the API's error body,
+so the official SDKs raise their typed errors; a failure later in the stream
+ends it with the API's in-band error event. (This uses
+`Bridge.chatStream(request, { throwBeforeFirstChunk: true })`.)
+
+A custom `GenericResponse` receives the framing as `stream(generator, { framing })`
+and can build the wire text with `createStreamFramer(framing)` (`contentType`,
+`frame(chunk)`, `end()`).
+
 ### Utilities
 
 Request parsing (`parseRequest`, `extractBearerToken`, `getClientIP`), response
