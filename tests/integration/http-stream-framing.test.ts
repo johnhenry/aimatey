@@ -18,6 +18,7 @@ import { Bridge } from '@johnhenry/aimatey-core';
 import {
   GeminiFrontendAdapter,
   OllamaFrontendAdapter,
+  OllamaGenerateFrontendAdapter,
   OpenAIFrontendAdapter,
 } from '@johnhenry/aimatey-frontend';
 import type {
@@ -191,6 +192,19 @@ describe('Node listener stream framing', () => {
       prompt_eval_count: 3,
       eval_count: 2,
     });
+  });
+
+  it('Ollama /api/generate: NDJSON in the generate shape', async () => {
+    const port = await serve(new OllamaGenerateFrontendAdapter());
+    const res = await post(port, '/api/generate', { model: 'llama3', prompt: 'hi', stream: true });
+    expect(res.contentType).toContain('application/x-ndjson');
+    const lines = res.body
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(lines.map((l) => l.response)).toEqual(['Hello', ' world', '']);
+    expect(lines.every((l) => !('message' in l))).toBe(true);
+    expect(lines.at(-1)).toMatchObject({ done: true, done_reason: 'stop' });
   });
 
   it('OpenAI /v1/chat/completions: SSE ending with [DONE]', async () => {

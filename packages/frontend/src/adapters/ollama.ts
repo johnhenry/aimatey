@@ -16,6 +16,7 @@ import type {
   IRMessage,
   IRTool,
   IRUsage,
+  IRWarning,
   JSONSchema,
   MessageContent,
   ToolUseContent,
@@ -23,6 +24,7 @@ import type {
 import type { StreamConversionOptions } from '@johnhenry/aimatey-types';
 import { resolveServedModel } from '@johnhenry/aimatey-types';
 import { AdapterConversionError, ErrorCode } from '@johnhenry/aimatey-errors';
+import { createWarning } from '@johnhenry/aimatey-utils';
 
 // ============================================================================
 // Ollama API Types
@@ -227,6 +229,37 @@ function ollamaUsage(
   };
 }
 
+/** `format` (`'json'` or a JSON Schema) as an IR response format. */
+function ollamaResponseFormat(
+  format: OllamaRequest['format']
+): IRChatRequest['responseFormat'] | undefined {
+  const schema = format === 'json' ? { type: 'object' } : isObject(format) ? format : undefined;
+  return schema ? { type: 'json_schema', schema: schema as unknown as JSONSchema } : undefined;
+}
+
+/** The model and `options` as IR parameters (`repeat_penalty` as `custom.repeatPenalty`). */
+function ollamaParameters(
+  model: string,
+  options: OllamaRequest['options']
+): IRChatRequest['parameters'] {
+  const o = options ?? {};
+  const parameters: Record<string, unknown> = {
+    model,
+    temperature: o.temperature,
+    topP: o.top_p,
+    topK: o.top_k,
+    maxTokens: o.num_predict,
+    stopSequences: typeof o.stop === 'string' ? [o.stop] : o.stop,
+    seed: o.seed,
+    frequencyPenalty: o.frequency_penalty,
+    presencePenalty: o.presence_penalty,
+    custom: o.repeat_penalty !== undefined ? { repeatPenalty: o.repeat_penalty } : undefined,
+  };
+  return Object.fromEntries(
+    Object.entries(parameters).filter(([, v]) => v !== undefined)
+  ) as IRChatRequest['parameters'];
+}
+
 function doneReason(finishReason: IRChatResponse['finishReason']): string {
   // Ollama reports 'length' when num_predict was hit and 'stop' otherwise,
   // including after tool calls.
@@ -349,41 +382,13 @@ export class OllamaFrontendAdapter implements FrontendAdapter<
         parameters: (f.parameters ?? { type: 'object', properties: {} }) as unknown as JSONSchema,
       }));
 
-      const schema =
-        request.format === 'json'
-          ? { type: 'object' }
-          : isObject(request.format)
-            ? request.format
-            : undefined;
-
-      const o = request.options ?? {};
-      const parameters: Record<string, unknown> = {
-        model: request.model,
-        temperature: o.temperature,
-        topP: o.top_p,
-        topK: o.top_k,
-        maxTokens: o.num_predict,
-        stopSequences: typeof o.stop === 'string' ? [o.stop] : o.stop,
-        seed: o.seed,
-        frequencyPenalty: o.frequency_penalty,
-        presencePenalty: o.presence_penalty,
-        custom: o.repeat_penalty !== undefined ? { repeatPenalty: o.repeat_penalty } : undefined,
-      };
+      const responseFormat = ollamaResponseFormat(request.format);
 
       return Promise.resolve({
         messages,
         ...(tools.length > 0 ? { tools } : {}),
-        ...(schema
-          ? {
-              responseFormat: {
-                type: 'json_schema' as const,
-                schema: schema as unknown as JSONSchema,
-              },
-            }
-          : {}),
-        parameters: Object.fromEntries(
-          Object.entries(parameters).filter(([, v]) => v !== undefined)
-        ) as IRChatRequest['parameters'],
+        ...(responseFormat ? { responseFormat } : {}),
+        parameters: ollamaParameters(request.model, request.options),
         metadata: {
           requestId: `ollama-${crypto.randomUUID()}`,
           timestamp: Date.now(),
@@ -529,6 +534,284 @@ export class OllamaFrontendAdapter implements FrontendAdapter<
           case 'error':
             yield { error: chunk.error.message };
             return;
+        }
+      }
+    } catch (error) {
+      yield { error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+}
+
+// ============================================================================
+// Ollama /api/generate
+// ============================================================================
+
+/**
+ * Ollama `/api/generate` request: a single prompt (with optional system
+ * prompt and images) rather than a message list.
+ *
+ * @see https://docs.ollama.com/api/generate
+ *
+ * @example
+ * ```typescript
+ * const request: OllamaGenerateRequest = {
+ *   model: 'llama3.1:8b',
+ *   prompt: 'Why is the sky blue?',
+ *   system: 'Answer in one sentence.',
+ *   options: { temperature: 0.2 },
+ *   stream: false,
+ * };
+ * ```
+ */
+export interface OllamaGenerateRequest {
+  /** Model name */
+  model: string;
+
+  /** The prompt */
+  prompt: string;
+
+  /** System prompt */
+  system?: string;
+
+  /** Base64-encoded images (no data: prefix) */
+  images?: string[];
+
+  /** `'json'` or a JSON Schema the output must follow */
+  format?: 'json' | Record<string, unknown>;
+
+  /** Model options (same as `/api/chat`) */
+  options?: OllamaRequest['options'];
+
+  /** Stream the response (Ollama's own default is true) */
+  stream?: boolean;
+
+  /**
+   * Skip the model's prompt template. IR has no equivalent: the prompt is
+   * sent as a user message, the flag is kept in `metadata.custom.ollama.raw`,
+   * and a `parameter-unsupported` warning is attached.
+   */
+  raw?: boolean;
+
+  /** Text after the prompt for fill-in-the-middle models (kept in `metadata.custom.ollama`, with a warning) */
+  suffix?: string;
+
+  /** Prompt template override (kept in `metadata.custom.ollama`, with a warning) */
+  template?: string;
+
+  /**
+   * Deprecated Ollama conversation state from an earlier `/api/generate`
+   * response. Passed through untouched in `metadata.custom.ollama.context`
+   * (with a warning): IR carries the conversation as messages instead.
+   */
+  context?: number[];
+
+  /** How long the model stays loaded (kept in `metadata.custom.ollama.keep_alive`) */
+  keep_alive?: string | number;
+}
+
+/**
+ * Ollama `/api/generate` response. Also the shape of each streamed NDJSON
+ * line: partial `response` text with `done: false`, then a last one with
+ * `done: true`, `done_reason` and the token counts.
+ */
+export interface OllamaGenerateResponse {
+  /** Model that generated the response */
+  model: string;
+
+  /** ISO 8601 timestamp */
+  created_at: string;
+
+  /** Generated text (or a part of it, when streaming) */
+  response: string;
+
+  /** True on the last (or only) response */
+  done: boolean;
+
+  /** Why generation stopped (last response only) */
+  done_reason?: string;
+
+  /** Tokens in the prompt */
+  prompt_eval_count?: number;
+
+  /** Tokens generated */
+  eval_count?: number;
+}
+
+/** Anything `OllamaGenerateFrontendAdapter.fromIRStream` yields. */
+export type OllamaGenerateStreamEvent = OllamaGenerateResponse | OllamaStreamError;
+
+/**
+ * Frontend adapter for Ollama's `/api/generate`. Use it for requests to
+ * that endpoint; {@link OllamaFrontendAdapter} serves `/api/chat`.
+ *
+ * - `system` becomes a system message and `prompt` (with `images`) a user message.
+ * - `format` and `options` map as for `/api/chat`.
+ * - `raw`, `suffix`, `template`, `context` and `keep_alive` have no IR
+ *   equivalent: they are kept in `metadata.custom.ollama` for middleware or
+ *   a custom backend, and each of the first four adds a `parameter-unsupported`
+ *   warning to `metadata.warnings`.
+ * - Responses use the generate shape (`response`, not `message`).
+ */
+export class OllamaGenerateFrontendAdapter implements FrontendAdapter<
+  OllamaGenerateRequest,
+  OllamaGenerateResponse,
+  OllamaGenerateStreamEvent
+> {
+  readonly metadata: AdapterMetadata = {
+    name: 'ollama-generate-frontend',
+    version: '1.0.0',
+    provider: 'Ollama',
+    capabilities: {
+      streaming: true,
+      multiModal: true,
+      tools: false,
+      systemMessageStrategy: 'separate-parameter',
+      supportsMultipleSystemMessages: false,
+    },
+  };
+
+  toIR(request: OllamaGenerateRequest): Promise<IRChatRequest> {
+    try {
+      if (typeof request?.prompt !== 'string') {
+        throw new Error('an Ollama generate request needs a prompt string');
+      }
+
+      const messages: IRMessage[] = [];
+      if (request.system) {
+        messages.push({ role: 'system', content: request.system });
+      }
+      const images = request.images ?? [];
+      messages.push({
+        role: 'user',
+        content:
+          images.length === 0
+            ? request.prompt
+            : [
+                ...(request.prompt ? [{ type: 'text' as const, text: request.prompt }] : []),
+                ...images.map((image) => ({
+                  type: 'image' as const,
+                  source: {
+                    type: 'base64' as const,
+                    mediaType: imageMediaType(image),
+                    data: image,
+                  },
+                })),
+              ],
+      });
+
+      // Fields with no IR equivalent: kept for middleware / custom backends, and flagged.
+      const ollama: Record<string, unknown> = {};
+      const warnings: IRWarning[] = [];
+      const keep = (field: 'raw' | 'suffix' | 'template' | 'context', why: string): void => {
+        const value = request[field];
+        if (value === undefined || value === false) {
+          return;
+        }
+        ollama[field] = value;
+        warnings.push(
+          createWarning('parameter-unsupported', `Ollama generate '${field}' ${why}`, {
+            field,
+            originalValue: field === 'context' ? '[context]' : value,
+            source: this.metadata.name,
+          })
+        );
+      };
+      keep('raw', 'has no IR equivalent; the prompt is sent as a templated user message.');
+      keep('suffix', 'has no IR equivalent and is not forwarded to the backend.');
+      keep('template', 'has no IR equivalent and is not forwarded to the backend.');
+      keep(
+        'context',
+        'is deprecated by Ollama and not forwarded; send the conversation as /api/chat messages instead.'
+      );
+      if (request.keep_alive !== undefined) {
+        ollama.keep_alive = request.keep_alive;
+      }
+
+      const responseFormat = ollamaResponseFormat(request.format);
+      return Promise.resolve({
+        messages,
+        ...(responseFormat ? { responseFormat } : {}),
+        parameters: ollamaParameters(request.model, request.options),
+        metadata: {
+          requestId: `ollama-generate-${crypto.randomUUID()}`,
+          timestamp: Date.now(),
+          provenance: { frontend: this.metadata.name },
+          ...(warnings.length > 0 ? { warnings } : {}),
+          ...(Object.keys(ollama).length > 0 ? { custom: { ollama } } : {}),
+        },
+        stream: request.stream,
+      });
+    } catch (error) {
+      return Promise.reject(
+        new AdapterConversionError({
+          code: ErrorCode.ADAPTER_CONVERSION_ERROR,
+          message: `Failed to convert Ollama generate request to IR: ${error instanceof Error ? error.message : String(error)}`,
+          provenance: { frontend: this.metadata.name },
+          cause: error instanceof Error ? error : undefined,
+        })
+      );
+    }
+  }
+
+  /** Convert a Universal IR response to an `/api/generate` response. */
+  fromIR(response: IRChatResponse): Promise<OllamaGenerateResponse> {
+    const content = response.message.content;
+    return Promise.resolve({
+      model: resolveServedModel(response.metadata.provenance) ?? 'unknown',
+      created_at: new Date().toISOString(),
+      response:
+        typeof content === 'string'
+          ? content
+          : content.map((b) => (b.type === 'text' ? b.text : '')).join(''),
+      done: true,
+      done_reason: doneReason(response.finishReason),
+      ...ollamaUsage(response.usage),
+    });
+  }
+
+  /**
+   * Convert a Universal IR stream to `/api/generate` streamed responses (one
+   * object per NDJSON line): partial `response` text, then the `done: true`
+   * response with `done_reason` and counts; `{ error }` on failure.
+   */
+  async *fromIRStream(
+    stream: IRChatStream,
+    _options?: StreamConversionOptions
+  ): AsyncGenerator<OllamaGenerateStreamEvent, void, undefined> {
+    let model = 'unknown';
+    let usage: Partial<IRUsage> | undefined;
+    const head = () => ({ model, created_at: new Date().toISOString() });
+
+    try {
+      for await (const chunk of stream) {
+        switch (chunk.type) {
+          case 'start':
+            model = resolveServedModel(chunk.metadata.provenance) ?? model;
+            break;
+          case 'content':
+            if (chunk.delta) {
+              yield { ...head(), response: chunk.delta, done: false };
+            }
+            break;
+          case 'metadata':
+            if (chunk.usage) {
+              usage = { ...usage, ...chunk.usage };
+            }
+            break;
+          case 'done':
+            yield {
+              ...head(),
+              response: '',
+              done: true,
+              done_reason: doneReason(chunk.finishReason),
+              ...ollamaUsage(chunk.usage ?? usage),
+            };
+            break;
+          case 'error':
+            yield { error: chunk.error.message };
+            return;
+          default:
+            break;
         }
       }
     } catch (error) {
