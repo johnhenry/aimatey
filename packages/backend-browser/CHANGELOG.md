@@ -1,5 +1,15 @@
 # @johnhenry/aimatey-backend-browser
 
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies [2c26308]
+- Updated dependencies [2c26308]
+  - @johnhenry/aimatey-types@0.9.0
+  - @johnhenry/aimatey-errors@0.5.1
+  - @johnhenry/aimatey-utils@0.6.3
+
 ## 0.2.1
 
 ### Patch Changes
