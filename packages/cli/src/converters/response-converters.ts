@@ -12,7 +12,7 @@ import type { StreamConversionOptions } from '@johnhenry/aimatey-types';
 import {
   OpenAIFrontendAdapter,
   type OpenAIResponse,
-  type OpenAIStreamChunk,
+  type OpenAIStreamEvent,
 } from '@johnhenry/aimatey-frontend';
 import {
   AnthropicFrontendAdapter,
@@ -123,7 +123,7 @@ export async function toMistral(response: IRChatResponse): Promise<unknown> {
 export async function* toOpenAIStream(
   stream: IRChatStream,
   options?: StreamConversionOptions
-): AsyncGenerator<OpenAIStreamChunk, void, undefined> {
+): AsyncGenerator<OpenAIStreamEvent, void, undefined> {
   const adapter = new OpenAIFrontendAdapter();
   yield* adapter.fromIRStream(stream, options);
 }

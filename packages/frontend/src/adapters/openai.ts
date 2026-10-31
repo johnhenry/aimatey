@@ -329,6 +329,39 @@ export interface OpenAIStreamChunk {
   }>;
 }
 
+/**
+ * An in-stream error, framed as OpenAI and OpenAI-compatible servers send it
+ * (`data: {"error": {...}}`). The official SDKs throw an `APIError` when a
+ * stream frame carries `error`, so a failed stream fails loudly instead of
+ * ending as if it had finished.
+ */
+export interface OpenAIStreamError {
+  error: {
+    /** Human-readable error message */
+    message: string;
+    /** Error type, e.g. 'api_error', 'server_error', 'rate_limit_error' */
+    type: string;
+    /** Parameter the error relates to (always null here) */
+    param: string | null;
+    /** Error code (the IR error code when there is no upstream one) */
+    code: string | null;
+  };
+}
+
+/** Anything the OpenAI frontend's stream yields: a completion chunk or an error frame. */
+export type OpenAIStreamEvent = OpenAIStreamChunk | OpenAIStreamError;
+
+/** True when a value yielded by `OpenAIFrontendAdapter.fromIRStream` is an error frame. */
+export function isOpenAIStreamError(event: unknown): event is OpenAIStreamError {
+  return (
+    typeof event === 'object' &&
+    event !== null &&
+    'error' in event &&
+    typeof (event as { error: unknown }).error === 'object' &&
+    (event as { error: unknown }).error !== null
+  );
+}
+
 // ============================================================================
 // OpenAI Frontend Adapter
 // ============================================================================
@@ -339,7 +372,7 @@ export interface OpenAIStreamChunk {
 export class OpenAIFrontendAdapter implements FrontendAdapter<
   OpenAIRequest,
   OpenAIResponse,
-  OpenAIStreamChunk
+  OpenAIStreamEvent
 > {
   readonly metadata: AdapterMetadata = {
     name: 'openai-frontend',
@@ -539,13 +572,15 @@ export class OpenAIFrontendAdapter implements FrontendAdapter<
    *
    * @param stream - Universal IR chat stream
    * @param options - Optional stream conversion options (stream mode, etc.)
-   * @yields OpenAI-formatted streaming chunks
-   * @throws {AdapterConversionError} If stream conversion fails
+   * @yields OpenAI-formatted streaming chunks; when the IR stream fails (an IR
+   *   `error` chunk, or the stream throws), a final {@link OpenAIStreamError}
+   *   frame (`{ error: { message, type, param, code } }`) and then the end
    *
    * @example
    * ```typescript
    * const adapter = new OpenAIFrontendAdapter();
    * for await (const chunk of adapter.fromIRStream(irStream)) {
+   *   if (isOpenAIStreamError(chunk)) throw new Error(chunk.error.message);
    *   console.log(chunk.choices[0].delta.content);
    * }
    * ```
@@ -553,7 +588,7 @@ export class OpenAIFrontendAdapter implements FrontendAdapter<
   async *fromIRStream(
     stream: IRChatStream,
     options?: StreamConversionOptions
-  ): AsyncGenerator<OpenAIStreamChunk, void, undefined> {
+  ): AsyncGenerator<OpenAIStreamEvent, void, undefined> {
     try {
       // Apply stream mode conversion if options provided
       const processedStream = options ? convertStreamMode(stream, options) : stream;
@@ -657,16 +692,31 @@ export class OpenAIFrontendAdapter implements FrontendAdapter<
             };
             break;
           }
-          case 'error':
-            // OpenAI doesn't have a standard error event in SSE
-            // We'll just stop the stream
-            break;
+          case 'error': {
+            // Surface the failure as OpenAI-compatible servers do: a final
+            // `{ error }` frame (which the OpenAI SDKs raise), then end.
+            const details = chunk.error.details;
+            yield this.streamError(
+              chunk.error.message,
+              typeof details?.type === 'string' ? details.type : 'api_error',
+              typeof details?.code === 'string' ? details.code : chunk.error.code
+            );
+            return;
+          }
         }
       }
-    } catch {
-      // Silently end stream on error
-      // OpenAI SSE format doesn't have a standard error event
+    } catch (error) {
+      // A stream that throws must not end as if it had finished.
+      yield this.streamError(
+        error instanceof Error ? error.message : String(error),
+        'api_error',
+        'stream_error'
+      );
     }
+  }
+
+  private streamError(message: string, type: string, code: string | null): OpenAIStreamError {
+    return { error: { message, type, param: null, code } };
   }
 
   // ==========================================================================
