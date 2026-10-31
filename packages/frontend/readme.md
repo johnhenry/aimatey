@@ -87,13 +87,15 @@ them on the wire (SSE, NDJSON, a JSON array) is the transport's job, which
 
 | Adapter | Yields | A failed stream ends with | Guard |
 |---------|--------|---------------------------|-------|
-| `OpenAIFrontendAdapter` | `chat.completion.chunk` objects | `{ error: { message, type, param, code } }` | `isOpenAIStreamError()` |
+| `OpenAIFrontendAdapter` | `chat.completion.chunk` objects (the first delta has `role: 'assistant'`; the `finish_reason` chunk has `usage` when known) | `{ error: { message, type, param, code } }` | `isOpenAIStreamError()` |
 | `AnthropicFrontendAdapter` | Messages stream events (`message_start` ... `message_stop`) | `{ type: 'error', error: { type, message } }` | `event.type === 'error'` |
 | `GeminiFrontendAdapter` | `GenerateContentResponse` objects; function calls arrive whole in the last one, with `finishReason` and `usageMetadata` | `{ error: { code, message, status } }` | `isGeminiStreamError()` |
 | `OllamaFrontendAdapter` (`/api/chat`) | `/api/chat` response lines (`done: false`, then `done: true` with `done_reason` and counts) | `{ error: string }` | `isOllamaStreamError()` |
 | `OllamaGenerateFrontendAdapter` (`/api/generate`) | `/api/generate` response lines (`response` text) | `{ error: string }` | `isOllamaStreamError()` |
 
-Nothing follows an error event. Writing a stream yourself:
+Nothing follows an error event. These shapes are checked against the official
+`openai`, `@anthropic-ai/sdk`, `@google/genai` and `ollama` SDKs in
+`tests/integration/sdk-conformance/`. Writing a stream yourself:
 
 ```typescript
 import { GeminiFrontendAdapter, isGeminiStreamError } from '@johnhenry/aimatey-frontend';
