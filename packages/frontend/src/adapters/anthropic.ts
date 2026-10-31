@@ -267,7 +267,7 @@ export interface AnthropicResponse {
  * // Message start event
  * const start: AnthropicStreamEvent = {
  *   type: 'message_start',
- *   message: { id: 'msg_123', model: 'claude-3-5-sonnet-20241022' }
+ *   message: { id: 'msg_123', type: 'message', role: 'assistant', content: [], model: 'claude-3-5-sonnet-20241022', stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } }
  * };
  *
  * // Text delta event
@@ -299,7 +299,7 @@ export type AnthropicStreamEvent =
   | {
       type: 'message_delta';
       delta: { stop_reason: string; stop_sequence?: string | null };
-      usage: { output_tokens: number };
+      usage: { input_tokens?: number; output_tokens: number };
     }
   | { type: 'message_stop' }
   | { type: 'error'; error: { type: string; message: string } };
@@ -520,10 +520,16 @@ export class AnthropicFrontendAdapter implements FrontendAdapter<
                 id: chunk.metadata.requestId,
                 type: 'message',
                 role: 'assistant',
+                // Anthropic's message_start carries the full message skeleton:
+                // empty content, null stop fields and the usage known so far.
+                content: [],
                 model:
                   resolveServedModel(chunk.metadata.provenance) ??
                   chunk.metadata.provenance?.backend ??
                   'unknown',
+                stop_reason: null,
+                stop_sequence: null,
+                usage: { input_tokens: 0, output_tokens: 0 },
               },
             };
             break;
@@ -596,6 +602,9 @@ export class AnthropicFrontendAdapter implements FrontendAdapter<
                 stop_reason: stopReason || 'end_turn',
               },
               usage: {
+                ...(chunk.usage?.promptTokens !== undefined
+                  ? { input_tokens: chunk.usage.promptTokens }
+                  : {}),
                 output_tokens: chunk.usage?.completionTokens ?? 0,
               },
             };
