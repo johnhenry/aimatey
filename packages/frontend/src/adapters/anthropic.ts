@@ -309,6 +309,41 @@ export type AnthropicStreamEvent =
 // ============================================================================
 
 /**
+ * The Anthropic error type (`error.type` in an `error` event) for an IR error code.
+ *
+ * @see https://docs.anthropic.com/en/api/errors
+ */
+function anthropicErrorType(code: string): string {
+  switch (code) {
+    case ErrorCode.INVALID_REQUEST:
+    case ErrorCode.INVALID_MESSAGE_FORMAT:
+    case ErrorCode.INVALID_PARAMETERS:
+    case ErrorCode.CONTEXT_LENGTH_EXCEEDED:
+    case 'VALIDATION':
+      return 'invalid_request_error';
+    case ErrorCode.INVALID_API_KEY:
+    case ErrorCode.MISSING_API_KEY:
+    case ErrorCode.EXPIRED_API_KEY:
+    case 'AUTHENTICATION':
+      return 'authentication_error';
+    case ErrorCode.INSUFFICIENT_PERMISSIONS:
+    case 'AUTHORIZATION':
+      return 'permission_error';
+    case ErrorCode.UNSUPPORTED_MODEL:
+      return 'not_found_error';
+    case ErrorCode.RATE_LIMIT_EXCEEDED:
+    case ErrorCode.QUOTA_EXCEEDED:
+    case 'RATE_LIMIT':
+      return 'rate_limit_error';
+    case ErrorCode.PROVIDER_OVERLOADED:
+    case ErrorCode.PROVIDER_UNAVAILABLE:
+      return 'overloaded_error';
+    default:
+      return 'api_error';
+  }
+}
+
+/**
  * Frontend adapter for Anthropic Messages API.
  */
 export class AnthropicFrontendAdapter implements FrontendAdapter<
@@ -616,15 +651,16 @@ export class AnthropicFrontendAdapter implements FrontendAdapter<
           }
 
           case 'error':
-            // Emit error event
+            // Emit Anthropic's error event (`event: error`, with an Anthropic
+            // error type) and end: Anthropic sends nothing after an error.
             yield {
               type: 'error',
               error: {
-                type: chunk.error.code,
+                type: anthropicErrorType(chunk.error.code),
                 message: chunk.error.message,
               },
             };
-            break;
+            return;
         }
       }
     } catch (error) {
@@ -632,7 +668,7 @@ export class AnthropicFrontendAdapter implements FrontendAdapter<
       yield {
         type: 'error',
         error: {
-          type: 'stream_error',
+          type: 'api_error',
           message: error instanceof Error ? error.message : String(error),
         },
       };

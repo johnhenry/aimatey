@@ -87,4 +87,49 @@ describe('AnthropicFrontendAdapter stream shape', () => {
     expect(delta).toMatchObject({ usage: { output_tokens: 0 } });
     expect((delta as { usage: Record<string, unknown> }).usage).not.toHaveProperty('input_tokens');
   });
+
+  it('an IR error becomes an Anthropic error event with an Anthropic error type, and ends the stream', async () => {
+    const events = await collect([
+      start,
+      { type: 'content', sequence: 1, delta: 'Hi' },
+      {
+        type: 'error',
+        sequence: 2,
+        error: { code: 'RATE_LIMIT_EXCEEDED', message: 'slow down' },
+      },
+      // Nothing after the error may be emitted.
+      { type: 'done', sequence: 3, finishReason: 'stop' },
+    ]);
+    expect(events.at(-1)).toEqual({
+      type: 'error',
+      error: { type: 'rate_limit_error', message: 'slow down' },
+    });
+    expect(events.map((e) => e.type)).not.toContain('message_stop');
+  });
+
+  it.each([
+    ['PROVIDER_OVERLOADED', 'overloaded_error'],
+    ['INVALID_REQUEST', 'invalid_request_error'],
+    ['INVALID_API_KEY', 'authentication_error'],
+    ['SOMETHING_ELSE', 'api_error'],
+  ])('maps IR code %s to %s', async (code, type) => {
+    const events = await collect([
+      start,
+      { type: 'error', sequence: 1, error: { code, message: 'x' } } as IRStreamChunk,
+    ]);
+    expect(events.at(-1)).toMatchObject({ type: 'error', error: { type } });
+  });
+
+  it('a stream that throws ends with an api_error event', async () => {
+    async function* broken(): AsyncGenerator<IRStreamChunk, void, undefined> {
+      yield start;
+      throw new Error('socket closed');
+    }
+    const out: AnthropicStreamEvent[] = [];
+    for await (const e of new AnthropicFrontendAdapter().fromIRStream(broken())) out.push(e);
+    expect(out.at(-1)).toEqual({
+      type: 'error',
+      error: { type: 'api_error', message: 'socket closed' },
+    });
+  });
 });
