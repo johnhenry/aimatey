@@ -79,6 +79,37 @@ const anthropicFrontend = new AnthropicFrontendAdapter();
 const bridge = new Bridge(openAIFrontend, yourBackend);
 ```
 
+## Streams
+
+`fromIRStream()` yields one object per event in each API's own shape; framing
+them on the wire (SSE, NDJSON, a JSON array) is the transport's job, which
+`@johnhenry/aimatey-http` does per API.
+
+| Adapter | Yields | A failed stream ends with | Guard |
+|---------|--------|---------------------------|-------|
+| `OpenAIFrontendAdapter` | `chat.completion.chunk` objects | `{ error: { message, type, param, code } }` | `isOpenAIStreamError()` |
+| `AnthropicFrontendAdapter` | Messages stream events (`message_start` ... `message_stop`) | `{ type: 'error', error: { type, message } }` | `event.type === 'error'` |
+| `GeminiFrontendAdapter` | `GenerateContentResponse` objects; function calls arrive whole in the last one, with `finishReason` and `usageMetadata` | `{ error: { code, message, status } }` | `isGeminiStreamError()` |
+| `OllamaFrontendAdapter` (`/api/chat`) | `/api/chat` response lines (`done: false`, then `done: true` with `done_reason` and counts) | `{ error: string }` | `isOllamaStreamError()` |
+| `OllamaGenerateFrontendAdapter` (`/api/generate`) | `/api/generate` response lines (`response` text) | `{ error: string }` | `isOllamaStreamError()` |
+
+Nothing follows an error event. Writing a stream yourself:
+
+```typescript
+import { GeminiFrontendAdapter, isGeminiStreamError } from '@johnhenry/aimatey-frontend';
+
+for await (const chunk of new GeminiFrontendAdapter().fromIRStream(irStream)) {
+  res.write(`data: ${JSON.stringify(chunk)}\r\n\r\n`); // ?alt=sse framing
+  if (isGeminiStreamError(chunk)) break;
+}
+```
+
+The Gemini and Ollama adapters also map tools (`functionDeclarations` /
+`functionCall` / `functionResponse` parts; Ollama `tools`, `tool_calls` and
+`role: 'tool'` messages), images, and structured output (`responseSchema` /
+`responseJsonSchema`; Ollama `format`). Request fields IR cannot express are
+reported as `parameter-unsupported` warnings in `metadata.warnings`.
+
 ## Generic Adapter
 
 The Generic adapter passes IR format directly without conversion:

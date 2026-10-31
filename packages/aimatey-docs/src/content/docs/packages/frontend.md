@@ -61,7 +61,7 @@ const response = await bridge.chat({
 ### Supported Features
 
 - ✅ Chat completions
-- ✅ Streaming
+- ✅ Streaming: yields `chat.completion.chunk` objects; a failed stream ends with `{ error: { message, type, param, code } }`, which OpenAI SDKs raise (check `isOpenAIStreamError()` before reading `.choices`)
 - ✅ Function calling/tools
 - ✅ Vision (image inputs)
 - ✅ System messages
@@ -133,7 +133,7 @@ const response = await bridge.chat({
 ### Supported Features
 
 - ✅ Chat completions
-- ✅ Streaming
+- ✅ Streaming: Messages stream events (`message_start` with the full message skeleton ... `message_stop`); a failed stream ends with an `error` event carrying an Anthropic error type
 - ✅ Tool use
 - ✅ Vision (image inputs)
 - ✅ System messages (as parameter)
@@ -188,14 +188,18 @@ const response = await bridge.chat({
 
 ### Supported Features
 
-- ✅ Chat completions
-- ✅ Streaming
-- ✅ Function calling
-- ✅ Vision (native multi-modal support)
+- ✅ Chat completions (`generateContent`)
+- ✅ Streaming (`streamGenerateContent`): yields `GenerateContentResponse` objects; function calls arrive whole in the last chunk with `finishReason` and `usageMetadata`; a failed stream ends with `{ error: { code, message, status } }` (`isGeminiStreamError()`)
+- ✅ Function calling (`functionDeclarations`, `functionCall` / `functionResponse` parts, `toolConfig`)
+- ✅ Vision (`inlineData` and `fileData` parts)
 - ✅ System instructions
-- ✅ Temperature, topP, topK
-- ✅ Stop sequences
-- ✅ Safety settings
+- ✅ Structured output (`responseSchema`, `responseJsonSchema`, `responseMimeType: application/json`)
+- ✅ Temperature, topP, topK, seed, penalties, stop sequences
+- ⚠️ One candidate only (`candidateCount` above 1 adds a warning)
+
+The model is part of Gemini's URL, not its body: pass it as `model` (with or
+without the `models/` prefix). `@johnhenry/aimatey-http` does this for you
+from `…/models/{model}:generateContent` URLs.
 
 ## Ollama Frontend Adapter
 
@@ -231,11 +235,20 @@ const response = await bridge.chat({
 
 ### Supported Features
 
-- ✅ Chat completions
-- ✅ Streaming
+- ✅ Chat completions (`/api/chat`)
+- ✅ Streaming: yields `/api/chat` response objects (one per NDJSON line), ending with `done: true`; a failed stream ends with `{ error }` (`isOllamaStreamError()`)
+- ✅ Tools (`tools`, `message.tool_calls`, `role: 'tool'` results)
+- ✅ Images and structured output (`format`)
 - ✅ System messages
-- ✅ Temperature, top_p, top_k
-- ⚠️ Limited tool support (model-dependent)
+- ✅ Temperature, top_p, top_k, seed, penalties, stop
+
+For `/api/generate` (a single `prompt`, optional `system` and `images`), use
+`OllamaGenerateFrontendAdapter`, which answers in the generate shape
+(`response` instead of `message`). `raw`, `suffix`, `template` and `context`
+have no IR equivalent: they are kept in `metadata.custom.ollama` with a warning.
+
+Ollama streams by default: `@johnhenry/aimatey-http` streams `/api/chat` and
+`/api/generate` requests unless the body says `stream: false`.
 
 ## Mistral Frontend Adapter
 
@@ -304,8 +317,8 @@ available on the backend side, as `@johnhenry/aimatey-backend/groq`.)
 |---------|--------|-----------|--------|--------|---------|-----------|
 | Chat | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Streaming | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Tools/Functions | ✅ | ✅ | ✅ | ⚠️ | ✅ | ❌ |
-| Vision | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ❌ |
+| Tools/Functions | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Vision | ✅ | ✅ | ✅ | ✅ | ⚠️ | ❌ |
 | System Messages | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ✅ Fully supported | ⚠️ Partially supported | ❌ Not supported
