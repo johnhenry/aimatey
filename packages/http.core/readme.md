@@ -88,6 +88,13 @@ Whether a request streams also follows its API (`requestWantsStream(url, body)`)
 default is to stream. For Gemini URLs the handler copies the model named in
 the URL (`geminiModelFromURL(url)`) into the body when the body has none.
 
+The handler waits for the first chunk before it starts a stream. A request
+that fails before anything was produced (rate limit, bad key, unknown model)
+gets a normal error response with its HTTP status and the API's error body,
+so the official SDKs raise their typed errors; a failure later in the stream
+ends it with the API's in-band error event. (This uses
+`Bridge.chatStream(request, { throwBeforeFirstChunk: true })`.)
+
 A custom `GenericResponse` receives the framing as `stream(generator, { framing })`
 and can build the wire text with `createStreamFramer(framing)` (`contentType`,
 `frame(chunk)`, `end()`).

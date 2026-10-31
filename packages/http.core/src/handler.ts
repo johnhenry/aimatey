@@ -326,13 +326,25 @@ export class CoreHTTPHandler {
       // Handle streaming or non-streaming request
       if (this.options.streaming && parsedRequest.stream) {
         // Handle streaming request
-        const stream = activeBridge.chatStream(parsedRequest.body);
+        const stream = activeBridge.chatStream(parsedRequest.body, {
+          throwBeforeFirstChunk: true,
+        });
+
+        // Wait for the first chunk before committing to a streamed 200: a
+        // request that fails before anything was produced (rate limit, bad
+        // key, unknown model) is answered like a non-streamed failure, with
+        // its HTTP status and the API's error body, which SDKs raise as
+        // their typed errors.
+        const iterator = stream[Symbol.asyncIterator]();
+        const first = await iterator.next();
 
         // Convert to async generator for generic response
         async function* convertStream() {
-          for await (const chunk of stream) {
-            yield chunk;
+          if (first.done) {
+            return;
           }
+          yield first.value;
+          yield* { [Symbol.asyncIterator]: () => iterator };
         }
 
         // Frame the stream as the requested API does: OpenAI SSE ending in
