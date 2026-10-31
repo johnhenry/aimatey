@@ -1,8 +1,15 @@
 /**
  * Gemini Frontend Adapter
  *
- * Adapts Google Gemini API format to Universal IR.
- * Handles Gemini's systemInstruction field and content array format.
+ * Adapts the Google Gemini API (`generateContent` / `streamGenerateContent`)
+ * to Universal IR and back: `contents`/`parts` (text, inlineData, fileData,
+ * functionCall, functionResponse), `systemInstruction`, `tools[].functionDeclarations`,
+ * `toolConfig`, `generationConfig` (including structured output), and
+ * `GenerateContentResponse` objects with `finishReason` and `usageMetadata`,
+ * streamed or not.
+ *
+ * Gemini's REST API accepts both camelCase and snake_case field names; so does
+ * this adapter's `toIR`. Responses are produced in camelCase, as Gemini sends them.
  *
  * @module
  */
@@ -11,170 +18,389 @@ import type { FrontendAdapter, AdapterMetadata } from '@johnhenry/aimatey-types'
 import type {
   IRChatRequest,
   IRChatResponse,
-  IRStreamChunk,
+  IRChatStream,
   IRMessage,
+  IRTool,
+  IRUsage,
+  JSONSchema,
   MessageContent,
+  FinishReason,
+  ToolResultContent,
+  ToolUseContent,
 } from '@johnhenry/aimatey-types';
 import type { StreamConversionOptions } from '@johnhenry/aimatey-types';
+import { resolveServedModel } from '@johnhenry/aimatey-types';
+import { AdapterConversionError, ErrorCode } from '@johnhenry/aimatey-errors';
 
 // ============================================================================
 // Gemini API Types
 // ============================================================================
 
+/** A function call the model asks for (`Part.functionCall`). */
+export interface GeminiFunctionCall {
+  /** Optional call id; when present the matching `functionResponse` carries it back. */
+  id?: string;
+  /** Name of the declared function. */
+  name: string;
+  /** Arguments as a JSON object. */
+  args?: Record<string, unknown>;
+}
+
+/** The result of a function call, sent back by the client (`Part.functionResponse`). */
+export interface GeminiFunctionResponse {
+  /** Id of the `functionCall` this answers, when the call had one. */
+  id?: string;
+  /** Name of the function that was called. */
+  name: string;
+  /** The function's output as a JSON object (an `error` key reports a failure). */
+  response: Record<string, unknown>;
+}
+
+/**
+ * One part of a Gemini `Content`.
+ *
+ * @see https://ai.google.dev/api/caching#Part
+ */
+export type GeminiPart =
+  | { text: string; thought?: boolean; thoughtSignature?: string }
+  | { inlineData: { mimeType: string; data: string } }
+  | { fileData: { mimeType?: string; fileUri: string } }
+  | { functionCall: GeminiFunctionCall; thoughtSignature?: string }
+  | { functionResponse: GeminiFunctionResponse };
+
 /**
  * Gemini content structure for messages.
  *
- * Google Gemini uses a unique `parts` array format where each message contains
- * an array of content parts. Each part can be text or inline data (images).
- * Role is either 'user' or 'model' (Gemini calls the assistant 'model').
+ * Role is `user` or `model` (Gemini's name for the assistant); it may be
+ * omitted on requests, where it defaults to `user`.
  *
- * @see GeminiRequest
- * @see https://ai.google.dev/api/rest/v1/Content
+ * @see https://ai.google.dev/api/caching#Content
  *
  * @example
  * ```typescript
- * // Text-only message
- * const textContent: GeminiContent = {
- *   role: 'user',
- *   parts: [{ text: 'Hello, Gemini!' }]
- * };
- *
- * // Multimodal message with image
- * const multimodalContent: GeminiContent = {
+ * const content: GeminiContent = {
  *   role: 'user',
  *   parts: [
  *     { text: 'What is in this image?' },
- *     {
- *       inlineData: {
- *         mimeType: 'image/jpeg',
- *         data: 'base64-encoded-image-data...'
- *       }
- *     }
- *   ]
+ *     { inlineData: { mimeType: 'image/jpeg', data: 'base64...' } },
+ *   ],
  * };
  * ```
  */
 export interface GeminiContent {
   /** Message role - 'user' or 'model' (Gemini's term for assistant) */
-  role: 'user' | 'model';
+  role?: 'user' | 'model';
 
-  /** Array of content parts - can mix text and inline data (images) */
-  parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }>;
+  /** Content parts */
+  parts: GeminiPart[];
+}
+
+/** A function the model may call (`Tool.functionDeclarations[]`). */
+export interface GeminiFunctionDeclaration {
+  name: string;
+  description?: string;
+  /** OpenAPI-subset schema of the arguments. */
+  parameters?: Record<string, unknown>;
+  /** JSON Schema of the arguments (alternative to `parameters`). */
+  parametersJsonSchema?: Record<string, unknown>;
+}
+
+/** `toolConfig`: how the model may use the declared functions. */
+export interface GeminiToolConfig {
+  functionCallingConfig?: {
+    /** AUTO (default), ANY (must call one), NONE (must not call), VALIDATED */
+    mode?: 'AUTO' | 'ANY' | 'NONE' | 'VALIDATED' | 'MODE_UNSPECIFIED';
+    /** Limits the functions the model may call (ANY / VALIDATED only). */
+    allowedFunctionNames?: string[];
+  };
+}
+
+/** `generationConfig` */
+export interface GeminiGenerationConfig {
+  /** Sampling temperature (passed through unmodified) */
+  temperature?: number;
+  /** Nucleus sampling parameter */
+  topP?: number;
+  /** Top-K sampling parameter */
+  topK?: number;
+  /** Maximum tokens to generate */
+  maxOutputTokens?: number;
+  /** Stop sequences */
+  stopSequences?: string[];
+  /** Number of candidates (only 1 is supported through IR) */
+  candidateCount?: number;
+  /** Seed for deterministic sampling */
+  seed?: number;
+  /** Presence penalty */
+  presencePenalty?: number;
+  /** Frequency penalty */
+  frequencyPenalty?: number;
+  /** `application/json` asks for JSON output */
+  responseMimeType?: string;
+  /** OpenAPI-subset schema of the JSON output */
+  responseSchema?: Record<string, unknown>;
+  /** JSON Schema of the JSON output (alternative to `responseSchema`) */
+  responseJsonSchema?: Record<string, unknown>;
 }
 
 /**
- * Google Gemini API request structure.
+ * Google Gemini `generateContent` / `streamGenerateContent` request body.
  *
- * Defines parameters for making a request to Google's Gemini API. Key differences
- * from other providers: uses `contents` (plural) for messages, `systemInstruction`
- * for system prompts, and generation parameters in a nested `generationConfig` object.
- * Temperature range is 0-1 (not 0-2 like some other providers).
+ * The model is part of Gemini's URL (`models/{model}:generateContent`), not
+ * of the body, so it is carried here in the optional `model` field (with or
+ * without the `models/` prefix); set it from the URL when serving Gemini's
+ * endpoints. Likewise `stream` says whether the call was `streamGenerateContent`.
  *
- * @see GeminiContent
- * @see GeminiResponse
- * @see https://ai.google.dev/api/rest/v1/models/generateContent
+ * @see https://ai.google.dev/api/generate-content#method:-models.generatecontent
  *
  * @example
  * ```typescript
  * const request: GeminiRequest = {
- *   contents: [
- *     {
- *       role: 'user',
- *       parts: [{ text: 'Explain quantum computing' }]
- *     }
- *   ],
- *   systemInstruction: {
- *     parts: [{ text: 'You are a helpful physics teacher.' }]
- *   },
- *   generationConfig: {
- *     temperature: 0.7,
- *     maxOutputTokens: 1024
- *   }
+ *   model: 'gemini-2.5-flash',
+ *   contents: [{ role: 'user', parts: [{ text: 'Weather in Paris?' }] }],
+ *   systemInstruction: { parts: [{ text: 'Be brief.' }] },
+ *   tools: [{ functionDeclarations: [{ name: 'get_weather', parameters: { type: 'object' } }] }],
+ *   generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
  * };
  * ```
  */
 export interface GeminiRequest {
-  /** Array of conversation contents (user and model messages) */
+  /** Model name (from the URL), e.g. `gemini-2.5-flash` or `models/gemini-2.5-flash` */
+  model?: string;
+
+  /** Conversation contents (user and model turns) */
   contents: GeminiContent[];
 
-  /** System instruction/prompt (separate from contents) */
-  systemInstruction?: { parts: Array<{ text: string }> };
+  /** System instruction (separate from contents) */
+  systemInstruction?: { role?: string; parts: Array<{ text: string }> } | string;
 
-  /** Generation parameters nested in config object */
-  generationConfig?: {
-    /** Sampling temperature (passed through unmodified; see Gemini API docs for the valid range for a given model) */
-    temperature?: number;
+  /** Tools the model may call */
+  tools?: Array<{ functionDeclarations?: GeminiFunctionDeclaration[] }>;
 
-    /** Nucleus sampling parameter 0-1 */
-    topP?: number;
+  /** Function calling configuration */
+  toolConfig?: GeminiToolConfig;
 
-    /** Top-K sampling parameter */
-    topK?: number;
+  /** Generation parameters */
+  generationConfig?: GeminiGenerationConfig;
 
-    /** Maximum tokens to generate */
-    maxOutputTokens?: number;
+  /** True for `streamGenerateContent` */
+  stream?: boolean;
+}
 
-    /** Stop sequences - generation stops when encountered */
-    stopSequences?: string[];
-  };
+/** Why a Gemini candidate stopped. */
+export type GeminiFinishReason =
+  | 'FINISH_REASON_UNSPECIFIED'
+  | 'STOP'
+  | 'MAX_TOKENS'
+  | 'SAFETY'
+  | 'RECITATION'
+  | 'LANGUAGE'
+  | 'OTHER'
+  | 'BLOCKLIST'
+  | 'PROHIBITED_CONTENT'
+  | 'SPII'
+  | 'MALFORMED_FUNCTION_CALL';
+
+/** Gemini `UsageMetadata`. */
+export interface GeminiUsageMetadata {
+  /** Tokens in the prompt */
+  promptTokenCount: number;
+  /** Tokens in all candidates */
+  candidatesTokenCount: number;
+  /** Total tokens (prompt + candidates + thoughts) */
+  totalTokenCount: number;
+  /** Tokens read from the context cache, when known */
+  cachedContentTokenCount?: number;
+  /** Thinking tokens, when known */
+  thoughtsTokenCount?: number;
 }
 
 /**
- * Google Gemini API response structure.
+ * Google Gemini `GenerateContentResponse`. Also the shape of every chunk of
+ * `streamGenerateContent`: text arrives in chunks without `finishReason`, and
+ * the last chunk carries `finishReason` and `usageMetadata`.
  *
- * Contains the response from Gemini including generated content, finish reason,
- * and token usage. Gemini can return multiple candidates (alternative completions)
- * though typically only one is returned. Finish reasons include safety-related
- * stops unique to Gemini.
- *
- * @see GeminiRequest
- * @see GeminiContent
- * @see https://ai.google.dev/api/rest/v1/GenerateContentResponse
+ * @see https://ai.google.dev/api/generate-content#v1beta.GenerateContentResponse
  *
  * @example
  * ```typescript
  * const response: GeminiResponse = {
- *   candidates: [
- *     {
- *       content: {
- *         role: 'model',
- *         parts: [{ text: 'Quantum computing uses quantum mechanics...' }]
- *       },
- *       finishReason: 'STOP'
- *     }
- *   ],
- *   usageMetadata: {
- *     promptTokenCount: 15,
- *     candidatesTokenCount: 120,
- *     totalTokenCount: 135
- *   }
+ *   candidates: [{
+ *     content: { role: 'model', parts: [{ functionCall: { name: 'get_weather', args: { city: 'Paris' } } }] },
+ *     finishReason: 'STOP',
+ *     index: 0,
+ *   }],
+ *   usageMetadata: { promptTokenCount: 15, candidatesTokenCount: 8, totalTokenCount: 23 },
+ *   modelVersion: 'gemini-2.5-flash',
  * };
  * ```
  */
 export interface GeminiResponse {
-  /** Array of candidate responses (usually just one) */
+  /** Candidate responses (one through IR) */
   candidates: Array<{
-    /** Generated content from the model */
+    /** Generated content */
     content: GeminiContent;
-
-    /** Reason generation stopped: 'STOP' (natural), 'MAX_TOKENS', 'SAFETY', 'RECITATION', 'OTHER' */
-    finishReason: 'STOP' | 'MAX_TOKENS' | 'SAFETY' | 'RECITATION' | 'OTHER';
+    /** Why generation stopped; absent on stream chunks before the last */
+    finishReason?: GeminiFinishReason;
+    /** Candidate index */
+    index?: number;
   }>;
 
-  /** Token usage statistics */
-  usageMetadata?: {
-    /** Number of tokens in the prompt */
-    promptTokenCount: number;
+  /** Token usage (on the response, or on the last stream chunk) */
+  usageMetadata?: GeminiUsageMetadata;
 
-    /** Number of tokens in all candidates */
-    candidatesTokenCount: number;
+  /** The model that answered */
+  modelVersion?: string;
 
-    /** Total tokens used (prompt + candidates) */
-    totalTokenCount: number;
+  /** Response id */
+  responseId?: string;
+}
+
+/**
+ * An in-stream error, as Google APIs report one (`google.rpc.Status` under
+ * `error`). The stream ends after it.
+ */
+export interface GeminiStreamError {
+  error: {
+    /** HTTP status code */
+    code: number;
+    /** Error message */
+    message: string;
+    /** Canonical status, e.g. `INTERNAL`, `RESOURCE_EXHAUSTED` */
+    status: string;
   };
 }
 
-export class GeminiFrontendAdapter implements FrontendAdapter<GeminiRequest, GeminiResponse> {
+/** Anything `GeminiFrontendAdapter.fromIRStream` yields. */
+export type GeminiStreamEvent = GeminiResponse | GeminiStreamError;
+
+/** True when a value yielded by `GeminiFrontendAdapter.fromIRStream` is an error. */
+export function isGeminiStreamError(event: unknown): event is GeminiStreamError {
+  return (
+    typeof event === 'object' &&
+    event !== null &&
+    'error' in event &&
+    typeof (event as { error: unknown }).error === 'object' &&
+    (event as { error: unknown }).error !== null
+  );
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+type Loose = Record<string, unknown>;
+
+const isObject = (v: unknown): v is Loose =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** A string field's value, or '' when it is missing or not a string. */
+const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+/** Read a field by its camelCase name or its snake_case alias. */
+function field<T = unknown>(obj: unknown, camel: string, snake: string): T | undefined {
+  if (!isObject(obj)) {
+    return undefined;
+  }
+  return (obj[camel] ?? obj[snake]) as T | undefined;
+}
+
+function blockKind(mimeType: string | undefined): 'image' | 'audio' | 'video' | 'document' {
+  const mt = mimeType ?? '';
+  if (mt.startsWith('image/')) {
+    return 'image';
+  }
+  if (mt.startsWith('audio/')) {
+    return 'audio';
+  }
+  if (mt.startsWith('video/')) {
+    return 'video';
+  }
+  return 'document';
+}
+
+const FINISH_TO_GEMINI: Record<FinishReason, GeminiFinishReason> = {
+  stop: 'STOP',
+  tool_calls: 'STOP', // Gemini reports STOP for a turn that ends in function calls
+  length: 'MAX_TOKENS',
+  content_filter: 'SAFETY',
+  error: 'OTHER',
+  cancelled: 'OTHER',
+};
+
+/** IR error code -> HTTP status and Google canonical status. */
+function googleStatusOf(code: string): { code: number; status: string } {
+  switch (code) {
+    case ErrorCode.INVALID_API_KEY:
+    case ErrorCode.MISSING_API_KEY:
+    case ErrorCode.EXPIRED_API_KEY:
+    case 'AUTHENTICATION':
+      return { code: 401, status: 'UNAUTHENTICATED' };
+    case ErrorCode.INSUFFICIENT_PERMISSIONS:
+    case 'AUTHORIZATION':
+      return { code: 403, status: 'PERMISSION_DENIED' };
+    case ErrorCode.RATE_LIMIT_EXCEEDED:
+    case ErrorCode.QUOTA_EXCEEDED:
+    case 'RATE_LIMIT':
+      return { code: 429, status: 'RESOURCE_EXHAUSTED' };
+    case ErrorCode.INVALID_REQUEST:
+    case ErrorCode.INVALID_MESSAGE_FORMAT:
+    case ErrorCode.INVALID_PARAMETERS:
+    case ErrorCode.CONTEXT_LENGTH_EXCEEDED:
+    case 'VALIDATION':
+      return { code: 400, status: 'INVALID_ARGUMENT' };
+    case ErrorCode.UNSUPPORTED_MODEL:
+      return { code: 404, status: 'NOT_FOUND' };
+    case ErrorCode.PROVIDER_UNAVAILABLE:
+    case ErrorCode.PROVIDER_OVERLOADED:
+    case ErrorCode.MODEL_LOADING:
+      return { code: 503, status: 'UNAVAILABLE' };
+    case ErrorCode.PROVIDER_TIMEOUT:
+    case ErrorCode.CONNECTION_TIMEOUT:
+      return { code: 504, status: 'DEADLINE_EXCEEDED' };
+    case ErrorCode.STREAM_CANCELLED:
+      return { code: 499, status: 'CANCELLED' };
+    default:
+      return { code: 500, status: 'INTERNAL' };
+  }
+}
+
+function toGeminiUsage(usage: Partial<IRUsage> | undefined): GeminiUsageMetadata | undefined {
+  if (!usage) {
+    return undefined;
+  }
+  const prompt = usage.promptTokens ?? 0;
+  const completion = usage.completionTokens ?? 0;
+  return {
+    promptTokenCount: prompt,
+    candidatesTokenCount: completion,
+    totalTokenCount: usage.totalTokens ?? prompt + completion,
+  };
+}
+
+/** A `functionCall` part for an IR tool_use block, keeping Gemini's own id and thought signature. */
+function functionCallPart(
+  block: Pick<ToolUseContent, 'id' | 'name' | 'input' | 'providerMetadata'>
+): GeminiPart {
+  const meta = (block.providerMetadata?.gemini ?? {}) as {
+    thoughtSignature?: string;
+    callId?: string;
+  };
+  return {
+    functionCall: { id: meta.callId ?? block.id, name: block.name, args: block.input ?? {} },
+    ...(meta.thoughtSignature ? { thoughtSignature: meta.thoughtSignature } : {}),
+  };
+}
+
+// ============================================================================
+// Gemini Frontend Adapter
+// ============================================================================
+
+export class GeminiFrontendAdapter implements FrontendAdapter<
+  GeminiRequest,
+  GeminiResponse,
+  GeminiStreamEvent
+> {
   readonly metadata: AdapterMetadata = {
     name: 'gemini-frontend',
     version: '1.0.0',
@@ -185,187 +411,444 @@ export class GeminiFrontendAdapter implements FrontendAdapter<GeminiRequest, Gem
       tools: true,
       systemMessageStrategy: 'separate-parameter',
       supportsMultipleSystemMessages: false,
+      supportsTemperature: true,
+      supportsTopP: true,
+      supportsTopK: true,
     },
   };
 
   /**
-   * Convert Google Gemini API request to Universal IR format.
+   * Convert a Gemini `generateContent` request to Universal IR.
    *
-   * This method transforms a Gemini-formatted request into the standardized
-   * Intermediate Representation (IR) format. It handles Gemini's unique
-   * content structure (parts array), converts 'model' role to 'assistant',
-   * and passes temperature through unmodified (like every other frontend
-   * adapter -- no scale conversion is applied).
+   * - `model` (from the URL, `models/` prefix optional) becomes `parameters.model`.
+   * - `systemInstruction` becomes a leading system message.
+   * - `functionCall` parts become `tool_use` blocks (call id and `thoughtSignature`
+   *   kept in `providerMetadata.gemini`); `functionResponse` parts become a `tool`
+   *   message of `tool_result` blocks, matched to their call by id, or by name in
+   *   call order when Gemini sent no ids.
+   * - `fileData` parts become URL sources; `inlineData` parts base64 sources.
+   * - `tools[].functionDeclarations` become IR tools; `toolConfig` becomes `toolChoice`.
+   * - `generationConfig` maps onto IR parameters; `responseSchema` /
+   *   `responseJsonSchema` / `responseMimeType: application/json` onto `responseFormat`.
    *
-   * @param request - Google Gemini API request
-   * @returns Promise resolving to IR chat request
-   *
-   * @example
-   * ```typescript
-   * const adapter = new GeminiFrontendAdapter();
-   * const irRequest = await adapter.toIR({
-   *   contents: [{ role: 'user', parts: [{ text: 'Hello!' }] }],
-   *   generationConfig: { temperature: 0.7 }
-   * });
-   * ```
+   * Temperature is passed through unmodified, like every other frontend adapter.
    */
   toIR(request: GeminiRequest): Promise<IRChatRequest> {
-    const messages: IRMessage[] = request.contents.map((c: GeminiContent) => {
-      // Check if there are any non-text parts (inlineData)
-      const hasInlineData = c.parts.some((p) => 'inlineData' in p);
-
-      if (!hasInlineData) {
-        // All text parts - join into a simple string
-        return {
-          role: c.role === 'model' ? 'assistant' : 'user',
-          content: c.parts.map((p) => ('text' in p ? p.text : '')).join(''),
-        } as IRMessage;
+    try {
+      const raw = request as unknown as Loose;
+      if (!Array.isArray(raw.contents)) {
+        throw new Error('a Gemini request needs a contents array');
       }
 
-      // Multimodal content - convert to structured MessageContent[]
-      const contentBlocks: MessageContent[] = c.parts.map((p) => {
-        if ('text' in p) {
-          return { type: 'text', text: p.text } as MessageContent;
-        }
-        // inlineData part - determine IR type based on mimeType
-        const mimeType = p.inlineData.mimeType;
-        if (mimeType.startsWith('image/')) {
-          return {
-            type: 'image',
-            source: { type: 'base64', mediaType: mimeType, data: p.inlineData.data },
-          } as MessageContent;
-        } else if (mimeType.startsWith('audio/')) {
-          return {
-            type: 'audio',
-            source: { type: 'base64', mediaType: mimeType, data: p.inlineData.data },
-          } as MessageContent;
-        } else if (mimeType.startsWith('video/')) {
-          return {
-            type: 'video',
-            source: { type: 'base64', mediaType: mimeType, data: p.inlineData.data },
-          } as MessageContent;
-        } else if (mimeType === 'application/pdf' || mimeType.startsWith('application/')) {
-          return {
-            type: 'document',
-            source: { type: 'base64', mediaType: mimeType, data: p.inlineData.data },
-          } as MessageContent;
-        }
-        // Fallback: treat as document
-        return {
-          type: 'document',
-          source: { type: 'base64', mediaType: mimeType, data: p.inlineData.data },
-        } as MessageContent;
-      });
+      const messages: IRMessage[] = [];
 
-      return {
-        role: c.role === 'model' ? 'assistant' : 'user',
-        content: contentBlocks,
-      } as IRMessage;
-    });
-    if (request.systemInstruction) {
-      messages.unshift({
-        role: 'system',
-        content: request.systemInstruction.parts.map((p: { text: string }) => p.text).join(''),
-      });
-    }
-    return Promise.resolve({
-      messages,
-      parameters: {
+      const sys = field<GeminiRequest['systemInstruction']>(
+        raw,
+        'systemInstruction',
+        'system_instruction'
+      );
+      if (sys) {
+        const text =
+          typeof sys === 'string'
+            ? sys
+            : (sys.parts ?? []).map((p) => (typeof p.text === 'string' ? p.text : '')).join('');
+        messages.push({ role: 'system', content: text });
+      }
+
+      // function name -> ids of its calls not yet answered (for responses without ids)
+      const pendingByName = new Map<string, string[]>();
+      let callCounter = 0;
+
+      for (const content of raw.contents as unknown[]) {
+        if (!isObject(content) || !Array.isArray(content.parts)) {
+          throw new Error('every content needs a parts array');
+        }
+        const role = content.role === 'model' ? 'assistant' : 'user';
+        const blocks: MessageContent[] = [];
+        const results: ToolResultContent[] = [];
+
+        for (const part of content.parts as unknown[]) {
+          if (!isObject(part)) {
+            throw new Error('every part must be an object');
+          }
+          const inline = field<Loose>(part, 'inlineData', 'inline_data');
+          const file = field<Loose>(part, 'fileData', 'file_data');
+          const call = field<Loose>(part, 'functionCall', 'function_call');
+          const reply = field<Loose>(part, 'functionResponse', 'function_response');
+
+          if (typeof part.text === 'string') {
+            // Thought summaries are the model's own reasoning, not conversation text.
+            if (part.thought === true) {
+              continue;
+            }
+            blocks.push({ type: 'text', text: part.text });
+          } else if (inline) {
+            const mediaType = str(field(inline, 'mimeType', 'mime_type'));
+            blocks.push({
+              type: blockKind(mediaType),
+              source: { type: 'base64', mediaType, data: str(inline.data) },
+            } as MessageContent);
+          } else if (file) {
+            const mediaType = field<string>(file, 'mimeType', 'mime_type');
+            blocks.push({
+              type: blockKind(mediaType),
+              source: { type: 'url', url: str(field(file, 'fileUri', 'file_uri')) },
+            } as MessageContent);
+          } else if (call) {
+            const name = str(call.name);
+            const nativeId = typeof call.id === 'string' && call.id ? call.id : undefined;
+            const id = nativeId ?? `call_${callCounter++}`;
+            pendingByName.set(name, [...(pendingByName.get(name) ?? []), id]);
+            const signature = field<string>(part, 'thoughtSignature', 'thought_signature');
+            const gemini = {
+              ...(signature ? { thoughtSignature: signature } : {}),
+              ...(nativeId ? { callId: nativeId } : {}),
+            };
+            blocks.push({
+              type: 'tool_use',
+              id,
+              name,
+              input: isObject(call.args) ? call.args : {},
+              ...(Object.keys(gemini).length > 0 ? { providerMetadata: { gemini } } : {}),
+            });
+          } else if (reply) {
+            const name = str(reply.name);
+            const replyId = typeof reply.id === 'string' && reply.id ? reply.id : undefined;
+            const queue = pendingByName.get(name);
+            let toolUseId: string;
+            if (replyId) {
+              toolUseId = replyId;
+              if (queue) {
+                const at = queue.indexOf(replyId);
+                if (at >= 0) {
+                  queue.splice(at, 1);
+                }
+              }
+            } else {
+              toolUseId = queue?.shift() ?? `call_${name}`;
+            }
+            const response = isObject(reply.response) ? reply.response : {};
+            const keys = Object.keys(response);
+            results.push({
+              type: 'tool_result',
+              toolUseId,
+              content: JSON.stringify(response),
+              ...(keys.length === 1 && keys[0] === 'error' ? { isError: true } : {}),
+            });
+          } else {
+            throw new Error(
+              'a part needs text, inlineData, fileData, functionCall or functionResponse'
+            );
+          }
+        }
+
+        if (results.length > 0) {
+          messages.push({ role: 'tool', content: results });
+        }
+        if (blocks.length > 0) {
+          const allText = blocks.every((b) => b.type === 'text');
+          messages.push({
+            role,
+            content: allText
+              ? blocks.map((b) => (b.type === 'text' ? b.text : '')).join('')
+              : blocks,
+          });
+        }
+      }
+
+      // Tools
+      const declarations = ((raw.tools as unknown[] | undefined) ?? []).flatMap(
+        (t) =>
+          field<GeminiFunctionDeclaration[]>(t, 'functionDeclarations', 'function_declarations') ??
+          []
+      );
+      const tools: IRTool[] = declarations.map((f) => ({
+        name: f.name,
+        description: f.description ?? '',
+        parameters: (f.parametersJsonSchema ??
+          (f as unknown as Loose).parameters_json_schema ??
+          f.parameters ?? { type: 'object', properties: {} }) as unknown as JSONSchema,
+      }));
+
+      // Tool choice
+      const fcc = field<Loose>(
+        field(raw, 'toolConfig', 'tool_config'),
+        'functionCallingConfig',
+        'function_calling_config'
+      );
+      const mode = str(fcc?.mode).toUpperCase();
+      const allowed = field<string[]>(fcc, 'allowedFunctionNames', 'allowed_function_names');
+      let toolChoice: IRChatRequest['toolChoice'];
+      if (mode === 'NONE') {
+        toolChoice = 'none';
+      } else if (mode === 'ANY' || mode === 'VALIDATED') {
+        toolChoice = allowed?.length === 1 ? { name: allowed[0]! } : 'required';
+      } else if (mode === 'AUTO') {
+        toolChoice = 'auto';
+      }
+
+      // Generation config
+      const g = field<Loose>(raw, 'generationConfig', 'generation_config') ?? {};
+      const schema =
+        field<Loose>(g, 'responseJsonSchema', 'response_json_schema') ??
+        field<Loose>(g, 'responseSchema', 'response_schema') ??
+        (field(g, 'responseMimeType', 'response_mime_type') === 'application/json'
+          ? { type: 'object' }
+          : undefined);
+
+      const modelName =
+        typeof raw.model === 'string' ? raw.model.replace(/^models\//, '') : undefined;
+
+      const parameters: Record<string, unknown> = {
+        model: modelName,
         // Pass temperature through unmodified, like every other frontend
-        // adapter -- do not rescale it. A previous `? value * 2 : undefined`
-        // transform both applied an undocumented scale conversion and used
-        // truthiness, which silently dropped an explicit `temperature: 0`.
-        temperature: request.generationConfig?.temperature,
-        topP: request.generationConfig?.topP,
-        topK: request.generationConfig?.topK,
-        maxTokens: request.generationConfig?.maxOutputTokens,
-        stopSequences: request.generationConfig?.stopSequences,
-      },
-      metadata: {
-        requestId: 'gemini-' + Date.now(),
-        timestamp: Date.now(),
-        provenance: { frontend: this.metadata.name },
-      },
-    });
+        // adapter -- do not rescale it (an explicit 0 must survive).
+        temperature: g.temperature,
+        topP: field(g, 'topP', 'top_p'),
+        topK: field(g, 'topK', 'top_k'),
+        maxTokens: field(g, 'maxOutputTokens', 'max_output_tokens'),
+        stopSequences: field(g, 'stopSequences', 'stop_sequences'),
+        seed: g.seed,
+        presencePenalty: field(g, 'presencePenalty', 'presence_penalty'),
+        frequencyPenalty: field(g, 'frequencyPenalty', 'frequency_penalty'),
+      };
+
+      return Promise.resolve({
+        messages,
+        ...(tools.length > 0 ? { tools } : {}),
+        ...(toolChoice ? { toolChoice } : {}),
+        ...(schema
+          ? {
+              responseFormat: {
+                type: 'json_schema' as const,
+                schema: schema as unknown as JSONSchema,
+              },
+            }
+          : {}),
+        parameters: Object.fromEntries(
+          Object.entries(parameters).filter(([, v]) => v !== undefined)
+        ) as IRChatRequest['parameters'],
+        stream: request.stream ?? false,
+        metadata: {
+          requestId: 'gemini-' + crypto.randomUUID(),
+          timestamp: Date.now(),
+          provenance: { frontend: this.metadata.name },
+        },
+      });
+    } catch (error) {
+      return Promise.reject(
+        new AdapterConversionError({
+          code: ErrorCode.ADAPTER_CONVERSION_ERROR,
+          message: `Failed to convert Gemini request to IR: ${error instanceof Error ? error.message : String(error)}`,
+          provenance: { frontend: this.metadata.name },
+          cause: error instanceof Error ? error : undefined,
+        })
+      );
+    }
   }
 
   /**
-   * Convert Universal IR response back to Google Gemini API format.
+   * Convert a Universal IR response to a Gemini `GenerateContentResponse`.
    *
-   * This method transforms the standardized IR response into the format
-   * expected by Gemini's API. It converts 'assistant' role back to 'model',
-   * structures content as parts array, and maps finish reasons to Gemini's
-   * specific format (STOP, MAX_TOKENS, OTHER).
-   *
-   * @param response - Universal IR chat response
-   * @returns Promise resolving to Gemini API response
-   *
-   * @example
-   * ```typescript
-   * const adapter = new GeminiFrontendAdapter();
-   * const geminiResponse = await adapter.fromIR(irResponse);
-   * console.log(geminiResponse.candidates[0].content.parts[0].text);
-   * ```
+   * Text becomes text parts, `tool_use` blocks become `functionCall` parts
+   * (with their call id and `thoughtSignature`), media becomes `inlineData` /
+   * `fileData`; `finishReason`, `usageMetadata`, `modelVersion` and `responseId`
+   * are filled from the IR response.
    */
   fromIR(response: IRChatResponse): Promise<GeminiResponse> {
+    const parts = this.partsFromIR(response.message.content);
     return Promise.resolve({
       candidates: [
         {
-          content: {
-            role: 'model',
-            parts: [
-              {
-                text: typeof response.message.content === 'string' ? response.message.content : '',
-              },
-            ],
-          },
-          finishReason:
-            response.finishReason === 'stop'
-              ? 'STOP'
-              : response.finishReason === 'length'
-                ? 'MAX_TOKENS'
-                : 'OTHER',
+          content: { role: 'model', parts },
+          finishReason: FINISH_TO_GEMINI[response.finishReason] ?? 'OTHER',
+          index: 0,
         },
       ],
-      usageMetadata: response.usage
-        ? {
-            promptTokenCount: response.usage.promptTokens,
-            candidatesTokenCount: response.usage.completionTokens,
-            totalTokenCount: response.usage.totalTokens,
-          }
-        : undefined,
+      ...(response.usage ? { usageMetadata: toGeminiUsage(response.usage) } : {}),
+      ...this.modelVersionOf(response.metadata.provenance),
+      responseId: response.metadata.providerResponseId ?? response.metadata.requestId,
     });
   }
 
   /**
-   * Convert Universal IR stream to Google Gemini Server-Sent Events format.
+   * Convert a Universal IR stream to `streamGenerateContent` chunks.
    *
-   * This async generator method transforms a stream of IR chunks into
-   * Gemini-formatted SSE responses. It yields Server-Sent Event strings
-   * with the "data: " prefix containing JSON candidates with parts array.
-   *
-   * @param stream - Universal IR chat stream
-   * @param _options - Optional stream conversion options (currently unused)
-   * @yields Server-Sent Event formatted strings
-   *
-   * @example
-   * ```typescript
-   * const adapter = new GeminiFrontendAdapter();
-   * for await (const sseData of adapter.fromIRStream(irStream)) {
-   *   console.log(sseData); // "data: {...}\n\n"
-   * }
-   * ```
+   * Yields one `GenerateContentResponse` object per text delta; function
+   * calls are gathered and sent whole (as Gemini does) in the final chunk,
+   * which also carries `finishReason` and `usageMetadata`. A failed stream
+   * yields a final {@link GeminiStreamError} and ends. Framing (SSE
+   * `data: ` lines for `?alt=sse`, or a JSON array) is the transport's job.
    */
   async *fromIRStream(
-    stream: AsyncGenerator<IRStreamChunk>,
+    stream: IRChatStream,
     _options?: StreamConversionOptions
-  ): AsyncGenerator<string> {
-    for await (const chunk of stream) {
-      if (chunk.type === 'content') {
-        yield 'data: ' +
-          JSON.stringify({ candidates: [{ content: { parts: [{ text: chunk.delta }] } }] }) +
-          '\n\n';
+  ): AsyncGenerator<GeminiStreamEvent, void, undefined> {
+    let modelVersion: { modelVersion?: string } = {};
+    let responseId: string | undefined;
+    let usage: Partial<IRUsage> | undefined;
+    const calls = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        args: string;
+        providerMetadata?: Readonly<Record<string, unknown>>;
+      }
+    >();
+
+    const meta = () => ({ ...modelVersion, ...(responseId ? { responseId } : {}) });
+
+    try {
+      for await (const chunk of stream) {
+        switch (chunk.type) {
+          case 'start':
+            modelVersion = this.modelVersionOf(chunk.metadata.provenance);
+            responseId = chunk.metadata.providerResponseId ?? chunk.metadata.requestId;
+            break;
+
+          case 'content':
+            if (chunk.delta) {
+              yield {
+                candidates: [
+                  { content: { role: 'model', parts: [{ text: chunk.delta }] }, index: 0 },
+                ],
+                ...meta(),
+              };
+            }
+            break;
+
+          case 'tool_use': {
+            const call = calls.get(chunk.id) ?? { id: chunk.id, name: chunk.name, args: '' };
+            call.args += chunk.inputDelta ?? '';
+            if (chunk.providerMetadata) {
+              call.providerMetadata = chunk.providerMetadata;
+            }
+            calls.set(chunk.id, call);
+            break;
+          }
+
+          case 'metadata':
+            if (chunk.usage) {
+              usage = { ...usage, ...chunk.usage };
+            }
+            if (chunk.metadata?.provenance) {
+              modelVersion = { ...modelVersion, ...this.modelVersionOf(chunk.metadata.provenance) };
+            }
+            break;
+
+          case 'done': {
+            const toolUses: ToolUseContent[] = [];
+            if (calls.size > 0) {
+              for (const c of calls.values()) {
+                let input: Record<string, unknown> = {};
+                try {
+                  const parsed: unknown = c.args ? JSON.parse(c.args) : {};
+                  if (isObject(parsed)) {
+                    input = parsed;
+                  }
+                } catch {
+                  // Unparseable arguments: send the call with empty args rather than drop it.
+                }
+                toolUses.push({
+                  type: 'tool_use',
+                  id: c.id,
+                  name: c.name,
+                  input,
+                  ...(c.providerMetadata ? { providerMetadata: c.providerMetadata } : {}),
+                });
+              }
+            } else if (chunk.message && typeof chunk.message.content !== 'string') {
+              for (const b of chunk.message.content) {
+                if (b.type === 'tool_use') {
+                  toolUses.push(b);
+                }
+              }
+            }
+            const parts: GeminiPart[] =
+              toolUses.length > 0 ? toolUses.map((t) => functionCallPart(t)) : [{ text: '' }];
+            const finalUsage = chunk.usage ?? usage;
+            yield {
+              candidates: [
+                {
+                  content: { role: 'model', parts },
+                  finishReason: FINISH_TO_GEMINI[chunk.finishReason] ?? 'OTHER',
+                  index: 0,
+                },
+              ],
+              ...(finalUsage ? { usageMetadata: toGeminiUsage(finalUsage) } : {}),
+              ...meta(),
+            };
+            break;
+          }
+
+          case 'error': {
+            const { code, status } = googleStatusOf(chunk.error.code);
+            yield { error: { code, message: chunk.error.message, status } };
+            return;
+          }
+        }
+      }
+    } catch (error) {
+      yield {
+        error: {
+          code: 500,
+          message: error instanceof Error ? error.message : String(error),
+          status: 'INTERNAL',
+        },
+      };
+    }
+  }
+
+  // ==========================================================================
+  // Private Helper Methods
+  // ==========================================================================
+
+  private modelVersionOf(provenance: IRChatResponse['metadata']['provenance']): {
+    modelVersion?: string;
+  } {
+    const served = resolveServedModel(provenance);
+    return served ? { modelVersion: served } : {};
+  }
+
+  private partsFromIR(content: string | readonly MessageContent[]): GeminiPart[] {
+    if (typeof content === 'string') {
+      return [{ text: content }];
+    }
+    const parts: GeminiPart[] = [];
+    for (const block of content) {
+      switch (block.type) {
+        case 'text':
+          parts.push({ text: block.text });
+          break;
+        case 'tool_use':
+          parts.push(functionCallPart(block));
+          break;
+        case 'image':
+        case 'audio':
+        case 'video':
+        case 'document': {
+          const source = block.source as
+            | { type: 'base64'; mediaType: string; data: string }
+            | { type: 'url'; url: string; mediaType?: string }
+            | { type: string };
+          if (source.type === 'base64' && 'data' in source) {
+            parts.push({ inlineData: { mimeType: source.mediaType, data: source.data } });
+          } else if (source.type === 'url' && 'url' in source) {
+            parts.push({
+              fileData: {
+                ...(source.mediaType ? { mimeType: source.mediaType } : {}),
+                fileUri: source.url,
+              },
+            });
+          }
+          break;
+        }
+        default:
+          // tool_result blocks do not appear in model output; anything else is dropped.
+          break;
       }
     }
+    return parts.length > 0 ? parts : [{ text: '' }];
   }
 }

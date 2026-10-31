@@ -98,7 +98,11 @@ describe('OpenAIFrontendAdapter stream errors', () => {
 
   it('does not add an error frame to a stream that finished', async () => {
     const events = await collect(
-      from([start, { type: 'content', sequence: 1, delta: 'ok' }, { type: 'done', sequence: 2, finishReason: 'stop' }])
+      from([
+        start,
+        { type: 'content', sequence: 1, delta: 'ok' },
+        { type: 'done', sequence: 2, finishReason: 'stop' },
+      ])
     );
     expect(events.some(isOpenAIStreamError)).toBe(false);
     expect(events.at(-1)).toMatchObject({ choices: [{ finish_reason: 'stop' }] });
