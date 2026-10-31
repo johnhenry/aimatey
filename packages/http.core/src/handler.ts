@@ -320,11 +320,10 @@ export class CoreHTTPHandler {
           }
         }
 
-        // Frame the stream as the requested API does. Anthropic paths keep the
-        // plain SSE + [DONE] framing this handler has always used for them.
-        const framing = detectStreamFraming(parsedRequest.url || '', parsedRequest.query);
+        // Frame the stream as the requested API does: OpenAI SSE ending in
+        // [DONE], Anthropic named events, Gemini SSE or JSON array, Ollama NDJSON.
         await res.stream(convertStream(), {
-          framing: framing === 'anthropic' ? 'generic' : framing,
+          framing: detectStreamFraming(parsedRequest.url || '', parsedRequest.query),
         });
       } else {
         // Handle non-streaming request
