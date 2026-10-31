@@ -8,6 +8,8 @@ import {
   createStreamFramer,
   detectStreamFraming,
   isGeminiStreamURL,
+  geminiModelFromURL,
+  requestWantsStream,
   type StreamFraming,
 } from '@johnhenry/aimatey-http-core';
 
@@ -78,5 +80,33 @@ describe('createStreamFramer', () => {
     expect(frameAll('anthropic', [{ type: 'message_stop' }])).toBe(
       'event: message_stop\ndata: {"type":"message_stop"}\n\n'
     );
+  });
+});
+
+describe('geminiModelFromURL', () => {
+  it.each([
+    ['/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse', 'gemini-2.5-flash'],
+    ['/v1beta/models/gemini-2.5-pro:generateContent', 'gemini-2.5-pro'],
+    ['/v1/models/my%2Dmodel:generateContent', 'my-model'],
+    ['/v1/chat/completions', undefined],
+    ['/api/chat', undefined],
+  ] as const)('%s -> %s', (url, expected) => {
+    expect(geminiModelFromURL(url)).toBe(expected);
+  });
+});
+
+describe('requestWantsStream', () => {
+  it.each([
+    ['/v1/chat/completions', { stream: true }, true],
+    ['/v1/chat/completions', {}, false],
+    ['/v1/messages', { stream: false }, false],
+    ['/v1beta/models/m:streamGenerateContent', {}, true],
+    ['/v1beta/models/m:generateContent', {}, false],
+    ['/api/chat', {}, true],
+    ['/api/chat', { stream: false }, false],
+    ['/api/generate?x=1', undefined, true],
+    ['/api/generate', { stream: false }, false],
+  ] as const)('%s %j -> %s', (url, body, expected) => {
+    expect(requestWantsStream(url, body)).toBe(expected);
   });
 });

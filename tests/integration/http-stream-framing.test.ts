@@ -28,6 +28,9 @@ import type {
   IRChatResponse,
 } from '@johnhenry/aimatey-types';
 
+/** The model of the last request the mock backend received. */
+let lastModel: string | undefined;
+
 class StreamingBackend implements BackendAdapter {
   metadata = {
     name: 'mock-backend',
@@ -44,6 +47,7 @@ class StreamingBackend implements BackendAdapter {
   };
 
   async execute(req: IRChatRequest): Promise<IRChatResponse> {
+    lastModel = req.parameters?.model;
     return {
       message: { role: 'assistant', content: 'x' },
       finishReason: 'stop',
@@ -52,6 +56,7 @@ class StreamingBackend implements BackendAdapter {
   }
 
   async *executeStream(req: IRChatRequest): AsyncGenerator<any> {
+    lastModel = req.parameters?.model;
     yield {
       type: 'start',
       sequence: 0,
@@ -261,5 +266,68 @@ describe('Hono adapter stream framing', () => {
   it('OpenAI: [DONE]', async () => {
     const res = await honoFetch(new OpenAIFrontendAdapter(), '/v1/chat/completions', openaiBody);
     expect(sseData(await res.text()).at(-1)).toBe('[DONE]');
+  });
+});
+
+describe('Node listener: how each API asks for a stream, and Gemini models in the URL', () => {
+  const ndjson = (body: string) =>
+    body
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+
+  it('Ollama /api/chat streams when the body has no stream field (Ollama defaults to true)', async () => {
+    const port = await serve(new OllamaFrontendAdapter());
+    const { stream: _omit, ...body } = ollamaBody;
+    const res = await post(port, '/api/chat', body);
+    expect(res.contentType).toContain('application/x-ndjson');
+    expect(ndjson(res.body).map((l) => l.done)).toEqual([false, false, true]);
+  });
+
+  it('Ollama /api/generate streams when the body has no stream field', async () => {
+    const port = await serve(new OllamaGenerateFrontendAdapter());
+    const res = await post(port, '/api/generate', { model: 'llama3', prompt: 'hi' });
+    expect(res.contentType).toContain('application/x-ndjson');
+    expect(ndjson(res.body).at(-1)).toMatchObject({ done: true });
+  });
+
+  it('Ollama stream: false answers with one JSON response', async () => {
+    const port = await serve(new OllamaFrontendAdapter());
+    const res = await post(port, '/api/chat', { ...ollamaBody, stream: false });
+    expect(res.contentType).toContain('application/json');
+    expect(JSON.parse(res.body)).toMatchObject({ done: true, message: { content: 'x' } });
+  });
+
+  it('OpenAI without a stream field still answers with one JSON response', async () => {
+    const port = await serve(new OpenAIFrontendAdapter());
+    const { stream: _omit, ...body } = openaiBody;
+    const res = await post(port, '/v1/chat/completions', body);
+    expect(res.contentType).toContain('application/json');
+    expect(JSON.parse(res.body).choices[0].message.content).toBe('x');
+  });
+
+  it('Gemini :streamGenerateContent takes the model from the URL', async () => {
+    lastModel = undefined;
+    const port = await serve(new GeminiFrontendAdapter());
+    await post(port, '/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse', geminiBody);
+    expect(lastModel).toBe('gemini-2.5-flash');
+  });
+
+  it('Gemini :generateContent takes the model from the URL', async () => {
+    lastModel = undefined;
+    const port = await serve(new GeminiFrontendAdapter());
+    const res = await post(port, '/v1beta/models/gemini-2.5-pro:generateContent', geminiBody);
+    expect(JSON.parse(res.body).candidates[0].content.parts[0].text).toBe('x');
+    expect(lastModel).toBe('gemini-2.5-pro');
+  });
+
+  it('a model in the Gemini body wins over the URL', async () => {
+    lastModel = undefined;
+    const port = await serve(new GeminiFrontendAdapter());
+    await post(port, '/v1beta/models/gemini-2.5-pro:generateContent', {
+      ...geminiBody,
+      model: 'models/gemini-2.0-flash',
+    });
+    expect(lastModel).toBe('gemini-2.0-flash');
   });
 });

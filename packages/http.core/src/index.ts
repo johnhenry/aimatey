@@ -95,6 +95,8 @@ export {
   createStreamFramer,
   detectStreamFraming,
   isGeminiStreamURL,
+  geminiModelFromURL,
+  requestWantsStream,
   streamHeaders,
 } from './stream-framing.js';
 export type { StreamFraming, StreamFramer } from './stream-framing.js';

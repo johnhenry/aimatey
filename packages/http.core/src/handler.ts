@@ -21,7 +21,7 @@ import { createMetricsHandler } from './metrics.js';
 import { openaiEmbedRequestToIR, irToOpenAIEmbedResponse } from '@johnhenry/aimatey-utils';
 import { normalizeCORSOptions } from './cors.js';
 import { detectProviderFormat, sanitizeErrorMessage } from './response-formatter.js';
-import { detectStreamFraming, isGeminiStreamURL } from './stream-framing.js';
+import { detectStreamFraming, geminiModelFromURL, requestWantsStream } from './stream-framing.js';
 import { getHTTPStatusCode } from './status-mapping.js';
 import { toUserMessage } from '@johnhenry/aimatey-errors';
 
@@ -246,17 +246,32 @@ export class CoreHTTPHandler {
         }
       }
 
+      // Gemini names the model in the URL (`models/{model}:generateContent`),
+      // not in the body: carry it into the body for the Gemini frontend.
+      let body = req.body;
+      const geminiModel = geminiModelFromURL(req.url || '');
+      if (
+        geminiModel &&
+        typeof body === 'object' &&
+        body !== null &&
+        !Array.isArray(body) &&
+        body.model === undefined
+      ) {
+        body = { ...body, model: geminiModel };
+      }
+
       // Parse request (create explicit object instead of spread to ensure all properties are copied)
       const parsedRequest: ParsedGenericRequest = {
         method: req.method,
         url: req.url,
         headers: req.headers,
-        body: req.body,
+        body,
         params: req.params,
         query: req.query,
         ip: req.ip,
-        // Gemini streams by URL (`:streamGenerateContent`), not by a body field.
-        stream: req.body?.stream === true || isGeminiStreamURL(req.url || ''),
+        // `stream: true` in the body; Gemini streams by URL (`:streamGenerateContent`)
+        // and Ollama's `/api/chat` and `/api/generate` stream unless `stream: false`.
+        stream: requestWantsStream(req.url || '', req.body),
       };
 
       // Log request if enabled

@@ -141,3 +141,39 @@ export function detectStreamFraming(
 export function isGeminiStreamURL(url: string): boolean {
   return /:streamgeneratecontent$/i.test(url.split('?', 1)[0] ?? '');
 }
+
+/**
+ * The model named in a Gemini URL (`.../models/{model}:generateContent` or
+ * `:streamGenerateContent`), or `undefined` for any other URL. Gemini puts
+ * the model in the URL, not in the request body.
+ */
+export function geminiModelFromURL(url: string): string | undefined {
+  const path = url.split('?', 1)[0] ?? '';
+  const match = /\/models\/([^/:]+):(?:stream)?generatecontent$/i.exec(path);
+  if (!match?.[1]) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
+/**
+ * Whether a request asks for a streamed answer, the way its API decides it:
+ *
+ * - Gemini: by URL (`:streamGenerateContent`), with no `stream` body field.
+ * - Ollama `/api/chat` and `/api/generate`: `stream` defaults to `true`, so
+ *   only `stream: false` asks for a single response.
+ * - Everything else (OpenAI, Anthropic, ...): `stream: true` in the body.
+ */
+export function requestWantsStream(url: string, body: unknown): boolean {
+  const stream =
+    typeof body === 'object' && body !== null ? (body as { stream?: unknown }).stream : undefined;
+  if (stream === true || isGeminiStreamURL(url)) {
+    return true;
+  }
+  const path = url.split('?', 1)[0] ?? '';
+  return /\/api\/(chat|generate)\/?$/.test(path) && stream !== false;
+}
