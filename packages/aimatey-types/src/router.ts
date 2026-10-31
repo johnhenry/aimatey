@@ -685,11 +685,14 @@ export interface ParallelDispatchOptions {
   readonly cancelOnFirstSuccess?: boolean;
 
   /**
-   * Custom aggregation function for 'custom' strategy.
+   * Aggregation function for the 'custom' strategy (required for it). It is
+   * called once every leg has settled, with each successful leg's response
+   * (after model translation for that leg's backend), and its return value
+   * becomes `ParallelDispatchResult.response`. It may be async.
    */
   readonly customAggregator?: (
     responses: Array<{ backend: string; response: IRChatResponse; latencyMs: number }>
-  ) => IRChatResponse;
+  ) => IRChatResponse | Promise<IRChatResponse>;
 }
 
 /**
@@ -702,7 +705,7 @@ export interface ParallelDispatchResult {
   readonly response: IRChatResponse;
 
   /**
-   * All responses (only for 'all' strategy).
+   * All successful responses (for the 'all' and 'custom' strategies).
    */
   readonly allResponses?: Array<{
     readonly backend: string;
