@@ -1,5 +1,11 @@
 # @johnhenry/aimatey-models
 
+## 0.3.1
+
+### Patch Changes
+
+- dc6538f: Refresh model catalog (2026-11-02).
+
 ## 0.3.0
 
 ### Minor Changes
