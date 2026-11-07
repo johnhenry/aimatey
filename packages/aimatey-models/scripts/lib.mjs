@@ -164,6 +164,62 @@ export function buildCatalog({ overrides, live = {}, openrouter = [], now = Date
   return { catalog: { schemaVersion: 1, generatedOn: today, providers }, report };
 }
 
+/** Model fields a `--live` run may add on top of what overrides alone produce. */
+const LIVE_MODEL_FIELDS = new Set([
+  'contextWindow',
+  'maxOutputTokens',
+  'capabilities',
+  'pricing',
+  'pricingAsOf',
+  'pricingSource',
+]);
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Is `committed` what `offline` (buildCatalog from overrides only, same date) becomes after a
+ * `--live` run? Every override-derived value must be present and unchanged; the only extras
+ * allowed are live-sourced models (`source: 'live'`) and the gap-fill fields above (an added
+ * capability key, OpenRouter context/output limits, OpenRouter pricing). Returns mismatches.
+ */
+export function liveExtensionMismatches(offline, committed) {
+  const out = [];
+  const { providers: op, ...otop } = offline;
+  const { providers: cp = {}, ...ctop } = committed ?? {};
+  if (!same(otop, ctop)) out.push('top-level fields differ');
+  for (const pid of new Set([...Object.keys(op), ...Object.keys(cp)])) {
+    const o = op[pid],
+      c = cp[pid];
+    if (!o || !c) {
+      out.push(`${pid}: provider ${o ? 'missing from catalog' : 'not in overrides'}`);
+      continue;
+    }
+    const { models: om, ...orest } = o;
+    const { models: cm = {}, ...crest } = c;
+    if (!same(orest, crest)) out.push(`${pid}: provider fields differ`);
+    for (const id of new Set([...Object.keys(om), ...Object.keys(cm)])) {
+      const a = om[id],
+        b = cm[id];
+      if (!a) {
+        if (b.source !== 'live') out.push(`${pid}/${id}: not in overrides and not live-sourced`);
+        continue;
+      }
+      if (!b) {
+        out.push(`${pid}/${id}: missing from catalog`);
+        continue;
+      }
+      for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+        if (!(k in a)) {
+          if (!LIVE_MODEL_FIELDS.has(k)) out.push(`${pid}/${id}.${k}: unexpected field`);
+        } else if (k === 'capabilities' && b.capabilities) {
+          for (const [ck, cv] of Object.entries(a.capabilities))
+            if (b.capabilities[ck] !== cv) out.push(`${pid}/${id}.capabilities.${ck} differs`);
+        } else if (!same(a[k], b[k])) out.push(`${pid}/${id}.${k} differs`);
+      }
+    }
+  }
+  return out;
+}
+
 const flat = (c) => {
   const m = new Map();
   for (const [pid, p] of Object.entries(c?.providers ?? {}))
