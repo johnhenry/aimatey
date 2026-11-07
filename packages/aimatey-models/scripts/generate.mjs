@@ -5,10 +5,19 @@
 //                                        (keys from env; providers without a key are skipped)
 //                                        and OpenRouter's public /api/v1/models
 //   --diff-out <file>   write the readable PR diff (markdown) there
-//   --check             exit 1 if the generated files differ from what is committed
+//   --check             exit 1 if the committed files are not what generate produces: offline,
+//                       catalog.json must equal the overrides-only build plus only the fields a
+//                       --live run adds (live-sourced models, OpenRouter gap-fills), and
+//                       catalog-data.ts must be exactly catalog.json rendered as TS
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { buildCatalog, diffCatalogs, formatDiffMarkdown, stripModelsPrefix } from './lib.mjs';
+import {
+  buildCatalog,
+  diffCatalogs,
+  formatDiffMarkdown,
+  liveExtensionMismatches,
+  stripModelsPrefix,
+} from './lib.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const args = process.argv.slice(2);
@@ -120,16 +129,31 @@ async function main() {
   const json = JSON.stringify(catalog, null, 2) + '\n';
   const ts = toTs(catalog);
   if (flag('--check')) {
-    const same = (f, s) => {
+    const read = (f) => {
       try {
-        return readFileSync(`${root}${f}`, 'utf8') === s;
+        return readFileSync(`${root}${f}`, 'utf8');
       } catch {
-        return false;
+        return undefined;
       }
     };
-    if (!same('data/catalog.json', json) || !same('src/catalog-data.ts', ts)) {
+    let problems;
+    if (flag('--live')) {
+      problems =
+        read('data/catalog.json') === json ? [] : ['catalog.json differs from a live build'];
+    } else {
+      // Offline we cannot reproduce the live inputs, so a committed --live refresh is accepted as
+      // long as it only adds live-derived data on top of the overrides-only build.
+      problems = previous
+        ? liveExtensionMismatches(catalog, previous)
+        : ['data/catalog.json missing or unreadable'];
+    }
+    const committedTs = previous ? toTs(previous) : ts;
+    if (read('src/catalog-data.ts') !== committedTs)
+      problems.push('src/catalog-data.ts differs from catalog.json');
+    if (problems.length) {
       console.error(
-        'catalog.json / catalog-data.ts are out of date: run `npm run generate -w @johnhenry/aimatey-models`'
+        'catalog.json / catalog-data.ts are out of date: run `npm run generate -w @johnhenry/aimatey-models`\n  ' +
+          problems.slice(0, 20).join('\n  ')
       );
       process.exit(1);
     }

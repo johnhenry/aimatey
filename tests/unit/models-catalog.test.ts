@@ -21,6 +21,7 @@ import {
   checkCatalog,
   fromOpenRouter,
   statusFromDates,
+  liveExtensionMismatches,
 } from '../../packages/aimatey-models/scripts/lib.mjs';
 import overrides from '../../packages/aimatey-models/data/overrides.json';
 import catalogJson from '../../packages/aimatey-models/data/catalog.json';
@@ -32,9 +33,11 @@ describe('shipped catalog', () => {
     expect(CATALOG).toEqual(catalogJson);
   });
 
-  it('is exactly what the generator produces from overrides.json (offline)', () => {
+  it('is what the generator produces from overrides.json, plus only live-derived data', () => {
+    // A --live refresh adds live-sourced models and OpenRouter gap-fills that an offline build
+    // cannot reproduce; everything that comes from overrides.json must still match exactly.
     const { catalog } = buildCatalog({ overrides, now: Date.parse(catalogJson.generatedOn) });
-    expect(catalog).toEqual(catalogJson);
+    expect(liveExtensionMismatches(catalog, catalogJson)).toEqual([]);
   });
 
   it('recommends the Claude 5 family for Anthropic', () => {
@@ -477,5 +480,63 @@ describe('tool-capable adapters have a recommended tool-capable model', () => {
     for (const [pid, id] of Object.entries(want)) {
       expect(recommendedModel(pid, 'default')?.id).toBe(id);
     }
+  });
+});
+
+describe('liveExtensionMismatches (generate --check offline)', () => {
+  const ov = {
+    providers: {
+      deepseek: {
+        label: 'DeepSeek',
+        verifiedOn: '2026-10-01',
+        recommended: { default: 'a-1' },
+        modelDefaults: { capabilities: { tools: true } },
+        models: { 'a-1': { name: 'A1', family: 'a', status: 'current' } },
+      },
+    },
+  };
+  const offline = () => buildCatalog({ overrides: ov, now: NOW }).catalog;
+  const live = () =>
+    buildCatalog({
+      overrides: ov,
+      now: NOW,
+      live: { deepseek: [{ id: 'a-1' }, { id: 'a-new', name: 'New' }] },
+      openrouter: [
+        {
+          id: 'deepseek/a-1',
+          context_length: 1000,
+          top_provider: { max_completion_tokens: 500 },
+          supported_parameters: ['tools', 'response_format'],
+          architecture: { input_modalities: ['text', 'image'] },
+          pricing: { prompt: '0.000001', completion: '0.000002' },
+        },
+      ],
+    }).catalog;
+
+  it('accepts the overrides-only build itself', () => {
+    expect(liveExtensionMismatches(offline(), offline())).toEqual([]);
+  });
+
+  it('accepts a live refresh that only adds live-sourced models and gap-fills', () => {
+    const l = live();
+    expect(l.providers.deepseek.models['a-1'].contextWindow).toBe(1000);
+    expect(l.providers.deepseek.models['a-new'].source).toBe('live');
+    expect(liveExtensionMismatches(offline(), l)).toEqual([]);
+  });
+
+  it('rejects a catalog that disagrees with overrides', () => {
+    const l = live();
+    l.providers.deepseek.models['a-1'].name = 'Edited by hand';
+    l.providers.deepseek.models['a-1'].capabilities.tools = false;
+    l.providers.deepseek.recommended = { default: 'a-new' };
+    delete l.providers.deepseek.models['a-1'].status;
+    l.providers.deepseek.models.ghost = { id: 'ghost', name: 'Ghost', status: 'current' };
+    expect(liveExtensionMismatches(offline(), l)).toEqual([
+      'deepseek: provider fields differ',
+      'deepseek/a-1.name differs',
+      'deepseek/a-1.status differs',
+      'deepseek/a-1.capabilities.tools differs',
+      'deepseek/ghost: not in overrides and not live-sourced',
+    ]);
   });
 });
