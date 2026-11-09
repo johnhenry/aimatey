@@ -3,7 +3,7 @@ import type { ModelCatalog } from './types.js';
 
 export const CATALOG: ModelCatalog = {
   "schemaVersion": 1,
-  "generatedOn": "2026-11-02",
+  "generatedOn": "2026-11-09",
   "providers": {
     "anthropic": {
       "label": "Anthropic",
@@ -1821,8 +1821,8 @@ export const CATALOG: ModelCatalog = {
             "vision": false,
             "streaming": true
           },
-          "contextWindow": 1048576,
-          "maxOutputTokens": 262144
+          "contextWindow": 1048575,
+          "maxOutputTokens": 943717
         },
         "deepseek-chat": {
           "id": "deepseek-chat",
@@ -1837,8 +1837,8 @@ export const CATALOG: ModelCatalog = {
             "vision": false,
             "streaming": true
           },
-          "contextWindow": 128000,
-          "maxOutputTokens": 16000
+          "contextWindow": 163840,
+          "maxOutputTokens": 16384
         },
         "deepseek-reasoner": {
           "id": "deepseek-reasoner",
@@ -1939,8 +1939,8 @@ export const CATALOG: ModelCatalog = {
             "vision": true,
             "streaming": true
           },
-          "contextWindow": 262144,
-          "maxOutputTokens": 235929
+          "contextWindow": 256000,
+          "maxOutputTokens": 65536
         },
         "moonshot-v1-128k": {
           "id": "moonshot-v1-128k",
