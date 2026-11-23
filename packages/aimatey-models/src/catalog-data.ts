@@ -3,7 +3,7 @@ import type { ModelCatalog } from './types.js';
 
 export const CATALOG: ModelCatalog = {
   "schemaVersion": 1,
-  "generatedOn": "2026-11-02",
+  "generatedOn": "2026-11-23",
   "providers": {
     "anthropic": {
       "label": "Anthropic",
@@ -1553,12 +1553,11 @@ export const CATALOG: ModelCatalog = {
           },
           "capabilities": {
             "tools": true,
-            "json": true,
             "vision": true,
+            "json": true,
             "streaming": true
           },
-          "pricingAsOf": "2026-10-20",
-          "maxOutputTokens": 230400
+          "pricingAsOf": "2026-10-20"
         },
         "grok-3": {
           "id": "grok-3",
@@ -1805,8 +1804,8 @@ export const CATALOG: ModelCatalog = {
             "vision": false,
             "streaming": true
           },
-          "contextWindow": 1048575,
-          "maxOutputTokens": 943717
+          "contextWindow": 1048576,
+          "maxOutputTokens": 393216
         },
         "deepseek-v4-flash-vision-exp": {
           "id": "deepseek-v4-flash-vision-exp",
