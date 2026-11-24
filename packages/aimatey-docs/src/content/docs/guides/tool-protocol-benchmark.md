@@ -93,6 +93,14 @@ These follow from the data plus the protocol designs; they are not proven by the
 - **`code` is not shown to be worth recommending yet.** It did not win on any task here. Its theoretical advantages (one model call for a fan-out, large intermediate results kept out of the prompt) were visible in call counts and prompt size, but did not produce more correct answers with a 3B model, and a model that has to write correct JavaScript is a harder ask than one that emits a JSON call. A re-run with a hosted or larger model is the real test.
 - **To settle this**, run the harness against a model that is strong at code (it already accepts any Ollama model; adding a hosted backend means constructing it in `run.ts`) with more repeats (10 or more per cell), and add the fuel figure to the executor result so it can be reported.
 
+## What the model was shown in `code` mode
+
+The `code` protocol sends no `tools` in the request. It adds one system message with the rules (one fenced `js` block, no imports/fetch/timers, `tools.name({...})`, `console.log`, `final(answer)`) and a `declare const tools: { ... }` interface generated from each tool's JSON schema. There is no worked example for the task and no prompt tuning: it was written once and not iterated.
+
+These bench tools declare no `outputSchema`, so every result was typed `Promise<unknown>`: the model could not see what a tool returns before writing code against it. The failed `code` runs fit that: fan-out summed objects with `+` and got `0[object Object]...`; a 200-row aggregate answered with literal `count=<count> sum=<totalAmount>` placeholders after one snippet; error recovery returned the error JSON as the final answer. In the last two the model called `final()` in the same snippet that fetched the data, so it answered without seeing the result. Native and text show results to the model as text, which hides this problem.
+
+So the `code` rows measure this minimal prompt on a 3B model, not the ceiling of code mode. A fair retest needs `outputSchema` on the bench tools, a prompt that makes the model look at results before finishing, and a stronger model.
+
 ## Limitations
 
 - Sample size: 1 to 2 runs per cell, one 3B model and a partial 0.8B model. No confidence intervals can be drawn.
