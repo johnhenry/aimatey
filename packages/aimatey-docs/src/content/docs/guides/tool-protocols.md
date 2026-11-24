@@ -76,4 +76,4 @@ The whole tool interface is placed in the prompt. For servers with very large to
 
 ## Choosing
 
-Start with `native` for models that support it, and `auto` when the model set varies. Reach for `code` for tasks that chain or loop over many tool calls or process large tool results, and when you can accept a sandbox dependency. The [benchmark](./tool-protocol-benchmark) compares the three on a small local model; treat its numbers as a starting point, not a verdict.
+Use `native` for models that support it, and `auto` when the model set varies (it falls back to `text`). `code` is the newest and least proven: it keeps large tool results out of the model's context and can chain calls in one turn, but the [benchmark](./tool-protocol-benchmark) did not show it beating `native` or `text` with a small local model (a 3B model, a handful of runs per cell, no hosted models). Try it on your own model and tasks before relying on it, and only if you can accept the sandbox dependency.
