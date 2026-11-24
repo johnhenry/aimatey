@@ -90,7 +90,7 @@ export function schemaToTs(schema: unknown, indent = '', depth = 0): string {
 
 /**
  * Generate the `declare const tools: { ... }` block shown to the model.
- * Outputs are typed `unknown`.
+ * Results are typed from a tool's `outputSchema` when it has one, else `unknown`.
  */
 export function generateToolsInterface(tools: Readonly<Record<string, ToolDefinition>>): string {
   const entries = Object.entries(tools).map(([name, def]) => {
@@ -98,7 +98,8 @@ export function generateToolsInterface(tools: Readonly<Record<string, ToolDefini
     const params = schemaToTs(def.parameters, '  ');
     const optional = params === '{}' || !(def.parameters as Schema | undefined)?.required;
     const key = /^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name);
-    return `${doc}  ${key}(input${optional ? '?' : ''}: ${params}): Promise<unknown>;`;
+    const output = def.outputSchema ? schemaToTs(def.outputSchema, '  ') : 'unknown';
+    return `${doc}  ${key}(input${optional ? '?' : ''}: ${params}): Promise<${output}>;`;
   });
   return `declare const tools: {\n${entries.join('\n')}\n};\ndeclare function final(answer: unknown): void;`;
 }

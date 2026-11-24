@@ -26,6 +26,8 @@ export interface McpToolSchema {
     readonly required?: readonly string[];
     readonly [key: string]: unknown;
   };
+  /** JSON Schema of `structuredContent`, when the server declares one. */
+  readonly outputSchema?: Record<string, unknown>;
 }
 
 /**

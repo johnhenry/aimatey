@@ -15,6 +15,7 @@ import type {
   IRParameters,
   IRTool,
   IRUsage,
+  JSONSchema,
 } from './ir.js';
 import type { IRDecisionResponse } from './decisions.js';
 
@@ -39,6 +40,13 @@ export interface ToolExecutionContext {
  * duplicate names); converted to the IR `tools` array internally.
  */
 export interface ToolDefinition extends Omit<IRTool, 'name'> {
+  /**
+   * JSON Schema of the value `execute` returns, when known (MCP tools may
+   * declare one). Protocols that show the model a typed API, such as the
+   * `code` protocol, use it to type results; absent means `unknown`.
+   */
+  readonly outputSchema?: JSONSchema;
+
   /**
    * Execute the tool. The return value is JSON-stringified (unless already
    * a string) and fed back to the model as a tool result. Thrown errors
