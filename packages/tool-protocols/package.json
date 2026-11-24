@@ -1,0 +1,78 @@
+{
+  "name": "@johnhenry/aimatey-tool-protocols",
+  "version": "0.0.0",
+  "description": "Tool-calling protocols for Aimatey runTools: text (models without native tools) and code (sandboxed JavaScript actions)",
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "readme.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "npm run build:esm && npm run build:cjs && npm run build:types",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:types": "tsc -p tsconfig.types.json",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@johnhenry/aimatey-types": "^0.9.0",
+    "@johnhenry/aimatey-utils": "^0.6.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "keywords": [
+    "ai",
+    "llm",
+    "tool-calling",
+    "code-mode",
+    "sandbox",
+    "ai-matey"
+  ],
+  "author": "Aimatey",
+  "license": "MIT",
+  "homepage": "https://github.com/johnhenry/aimatey#readme",
+  "bugs": {
+    "url": "https://github.com/johnhenry/aimatey/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnhenry/aimatey.git",
+    "directory": "packages/tool-protocols"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "peerDependencies": {
+    "@johnhenry/aimatey-core": ">=0.7.0",
+    "@johnhenry/andbox": ">=0.0.8"
+  },
+  "peerDependenciesMeta": {
+    "@johnhenry/andbox": {
+      "optional": true
+    }
+  }
+}
