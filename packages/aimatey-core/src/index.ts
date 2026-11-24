@@ -16,6 +16,12 @@ export * from './model-translation.js';
 
 export { createRunTools, type RunToolsBridge } from './run-tools.js';
 export {
+  nativeToolProtocol,
+  registerToolProtocol,
+  clearToolProtocols,
+  resolveToolProtocol,
+} from './tool-protocols.js';
+export {
   createDecisionGate,
   createDecisionTool,
   DEFAULT_GATE_QUESTIONS,
