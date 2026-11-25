@@ -1,5 +1,17 @@
 # @johnhenry/aimatey-mcp
 
+## 0.2.0
+
+### Minor Changes
+
+- 2c0700d: `ToolDefinition.outputSchema` (optional). `aimatey-mcp` carries an MCP tool's `outputSchema` onto its definition and, for such tools, returns `structuredContent` as the result value instead of flattened text. The `code` protocol types tool results from `outputSchema` (`Promise<unknown>` when absent).
+
+### Patch Changes
+
+- Updated dependencies [2c0700d]
+- Updated dependencies [211dc02]
+  - @johnhenry/aimatey-types@0.10.0
+
 ## 0.1.9
 
 ### Patch Changes

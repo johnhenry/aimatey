@@ -1,5 +1,15 @@
 # @johnhenry/aimatey-backend
 
+## 0.10.2
+
+### Patch Changes
+
+- Updated dependencies [2c0700d]
+- Updated dependencies [211dc02]
+  - @johnhenry/aimatey-types@0.10.0
+  - @johnhenry/aimatey-errors@0.5.2
+  - @johnhenry/aimatey-utils@0.6.4
+
 ## 0.10.1
 
 ### Patch Changes
