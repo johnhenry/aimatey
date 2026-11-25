@@ -15,6 +15,7 @@ import type {
   IRParameters,
   IRTool,
   IRUsage,
+  JSONSchema,
 } from './ir.js';
 import type { IRDecisionResponse } from './decisions.js';
 
@@ -39,6 +40,13 @@ export interface ToolExecutionContext {
  * duplicate names); converted to the IR `tools` array internally.
  */
 export interface ToolDefinition extends Omit<IRTool, 'name'> {
+  /**
+   * JSON Schema of the value `execute` returns, when known (MCP tools may
+   * declare one). Protocols that show the model a typed API, such as the
+   * `code` protocol, use it to type results; absent means `unknown`.
+   */
+  readonly outputSchema?: JSONSchema;
+
   /**
    * Execute the tool. The return value is JSON-stringified (unless already
    * a string) and fed back to the model as a tool result. Thrown errors
@@ -180,6 +188,99 @@ export interface RunToolsOptions {
 
   /** Additional request parameters (temperature, maxTokens, ...). */
   readonly parameters?: IRParameters;
+
+  /**
+   * How the model is asked to act and how its reply is read.
+   *
+   * - `'native'` (default): provider-native tool calling.
+   * - `'text'`, `'code'`, `'auto'`: provided by `@johnhenry/aimatey-tool-protocols`
+   *   (pass the protocol object, or register it with `registerToolProtocol`).
+   * - A {@link ToolProtocol} object: a custom protocol.
+   *
+   * Every protocol runs tool calls through the same unknown-tool check,
+   * argument validation, `gate` and `execute` path.
+   */
+  readonly protocol?: string | ToolProtocol;
+}
+
+/** A tool call a protocol extracted from a model reply. */
+export interface ToolProtocolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly input: Record<string, unknown>;
+}
+
+/** One tool result produced for a {@link ToolProtocolCall}. */
+export interface ToolProtocolResult {
+  readonly toolCallId: string;
+  readonly result: unknown;
+  readonly isError?: boolean;
+}
+
+/**
+ * What the loop hands a protocol each iteration.
+ */
+export interface ToolProtocolContext {
+  /** 1-based iteration number. */
+  readonly iteration: number;
+
+  /** The tools passed to `runTools`. */
+  readonly tools: Readonly<Record<string, ToolDefinition>>;
+
+  /** Conversation so far (before this iteration's reply). */
+  readonly messages: readonly IRMessage[];
+
+  /** Whether concurrent execution of several calls is allowed. */
+  readonly parallelToolCalls: boolean;
+
+  readonly signal?: AbortSignal;
+
+  /**
+   * Whether the backend advertises native tool calling
+   * (`capabilities.tools`). `undefined` when unknown.
+   */
+  readonly supportsNativeTools?: boolean;
+
+  /**
+   * Run one call through the unknown-tool check, argument validation, the
+   * gate and `execute`. Never throws for a stopped or failed call: that
+   * comes back as a result with `isError: true`. A protocol MUST route every
+   * tool call through this function so the gate cannot be bypassed.
+   */
+  readonly invoke: (call: ToolProtocolCall) => Promise<ToolProtocolResult>;
+}
+
+/**
+ * What a protocol decided after reading a model reply.
+ */
+export type ToolProtocolOutcome =
+  | {
+      /** The model answered; the loop ends. `text` overrides the reply text. */
+      readonly kind: 'final';
+      readonly text?: string;
+    }
+  | {
+      /** Tools ran; feed `messages` back and ask the model again. */
+      readonly kind: 'continue';
+      readonly calls: readonly ToolProtocolCall[];
+      readonly results: readonly ToolProtocolResult[];
+      /** Messages to append to the conversation (assistant reply, results). */
+      readonly messages: readonly IRMessage[];
+    };
+
+/**
+ * A way of asking a model to act and reading its reply. Owns the request
+ * shape and the reply parsing; the loop owns validation, gating, limits
+ * and step reporting.
+ */
+export interface ToolProtocol {
+  readonly name: string;
+
+  /** Rewrite the outgoing request (tool descriptions, system prompt, ...). */
+  prepare(request: IRChatRequest, context: ToolProtocolContext): IRChatRequest;
+
+  /** Read the reply, run any tool calls through `context.invoke`. */
+  interpret(response: IRChatResponse, context: ToolProtocolContext): Promise<ToolProtocolOutcome>;
 }
 
 /**
@@ -197,6 +298,9 @@ export interface RunToolsStep {
 
   /** Results fed back to the model. */
   readonly toolResults: readonly { toolCallId: string; result: unknown; isError?: boolean }[];
+
+  /** Name of the protocol that produced this step. */
+  readonly protocol?: string;
 }
 
 /**

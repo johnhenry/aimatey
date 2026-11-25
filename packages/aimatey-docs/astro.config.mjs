@@ -148,6 +148,7 @@ export default defineConfig({
           items: [
             { label: 'IR Format', slug: 'guides/architecture/ir-format' },
             { label: 'Decisions', slug: 'guides/decisions' },
+            { label: 'Tool Protocol Benchmark', slug: 'guides/tool-protocol-benchmark' },
             { label: 'Testing', slug: 'guides/testing' },
           ],
         },

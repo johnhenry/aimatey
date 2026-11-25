@@ -212,6 +212,14 @@ publish_batch "MCP" \
 wait_between "$DELAY_BETWEEN_BATCHES"
 
 # ============================================================================
+# BATCH 6d: Tool protocols (core is a peer; types + utils are dependencies)
+# ============================================================================
+publish_batch "Tool Protocols" \
+  "@johnhenry/aimatey-tool-protocols"
+
+wait_between "$DELAY_BETWEEN_BATCHES"
+
+# ============================================================================
 # BATCH 7: HTTP (depends on core, middleware)
 # ============================================================================
 publish_batch "HTTP Adapters" \

@@ -9,7 +9,7 @@
  * @module
  */
 
-import type { ToolDefinition } from '@johnhenry/aimatey-types';
+import type { JSONSchema, ToolDefinition } from '@johnhenry/aimatey-types';
 import { extractMcpResultText, mcpToolToIRTool } from './convert.js';
 import type { McpClientLike, McpToolSchema } from './types.js';
 
@@ -49,10 +49,16 @@ export async function mcpToolsToDefinitions(
     definitions[tool.name] = {
       description: irTool.description,
       parameters: irTool.parameters,
+      ...(tool.outputSchema && { outputSchema: tool.outputSchema as unknown as JSONSchema }),
       execute: async (input) => {
         const result = await client.callTool(tool.name, input, { server, signal });
         if (result.isError) {
           throw new Error(extractMcpResultText(result));
+        }
+        // A declared outputSchema describes structuredContent: return it as
+        // the typed value instead of flattening it to text.
+        if (tool.outputSchema && result.structuredContent !== undefined) {
+          return result.structuredContent;
         }
         return extractMcpResultText(result);
       },

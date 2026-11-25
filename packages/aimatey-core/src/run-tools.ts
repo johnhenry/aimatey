@@ -19,14 +19,13 @@ import type {
   RunToolsOptions,
   RunToolsResult,
   RunToolsStep,
+  ToolProtocolCall,
+  ToolProtocolContext,
+  ToolProtocolResult,
 } from '@johnhenry/aimatey-types';
 import { AdapterError, ErrorCode } from '@johnhenry/aimatey-errors';
-import {
-  extractToolCalls,
-  createToolResultMessage,
-  validateToolArgs,
-  type ToolCallResult,
-} from '@johnhenry/aimatey-utils';
+import { validateToolArgs, type ToolCallResult } from '@johnhenry/aimatey-utils';
+import { resolveToolProtocol } from './tool-protocols.js';
 
 /**
  * The subset of Bridge that runTools needs (avoids a circular type import).
@@ -34,6 +33,10 @@ import {
 export interface RunToolsBridge {
   executeIR(request: IRChatRequest, options?: { signal?: AbortSignal }): Promise<IRChatResponse>;
   readonly frontend: { readonly metadata: { readonly name: string } };
+  /** Used to tell protocols whether native tool calling is available. */
+  readonly backend?: {
+    readonly metadata?: { readonly capabilities?: { readonly tools?: boolean } };
+  };
 }
 
 /**
@@ -52,6 +55,8 @@ export function createRunTools(
       gate,
       maxDenials,
     } = options;
+
+    const protocol = resolveToolProtocol(options.protocol);
 
     if (!options.prompt && (!options.messages || options.messages.length === 0)) {
       throw new AdapterError({
@@ -79,7 +84,15 @@ export function createRunTools(
     let totalUsage: IRUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
     for (let iteration = 1; iteration <= maxIterations; iteration++) {
-      const request: IRChatRequest = {
+      const supportsNativeTools = bridge.backend?.metadata?.capabilities?.tools;
+      const baseContext = {
+        iteration,
+        tools,
+        parallelToolCalls,
+        signal,
+        ...(supportsNativeTools !== undefined && { supportsNativeTools }),
+      };
+      const draft: IRChatRequest = {
         messages,
         parameters: {
           ...options.parameters,
@@ -95,6 +108,12 @@ export function createRunTools(
           custom: { runToolsIteration: iteration },
         },
       };
+      const prepareContext: ToolProtocolContext = {
+        ...baseContext,
+        messages,
+        invoke: () => Promise.reject(new Error('invoke is not available while preparing')),
+      };
+      const request = protocol.prepare(draft, prepareContext);
 
       const response = await bridge.executeIR(request, { signal });
 
@@ -106,33 +125,13 @@ export function createRunTools(
         };
       }
 
-      const toolCalls = extractToolCalls(response);
-
-      // Model answered without tools: done
-      if (toolCalls.length === 0) {
-        const step: RunToolsStep = { iteration, response, toolCalls: [], toolResults: [] };
-        steps.push(step);
-        await options.onStepFinish?.(step);
-
-        return {
-          text: extractText(response),
-          response,
-          messages: [...messages, response.message],
-          steps,
-          finishReason: response.finishReason,
-          totalUsage,
-          status: 'completed',
-          denials,
-        };
-      }
-
-      // Append the assistant's tool-call message before executing
-      messages = [...messages, response.message];
+      // What the gate and tools see as history: the conversation plus this reply
+      const history = [...messages, response.message];
 
       // Ask the gate about one call; returns the tool result to feed back when
       // the call was stopped, undefined when it may run.
       const applyGate = async (
-        call: (typeof toolCalls)[number],
+        call: ToolProtocolCall,
         iterationNumber: number
       ): Promise<ToolCallResult | undefined> => {
         const context = {
@@ -140,7 +139,7 @@ export function createRunTools(
           input: call.input,
           iteration: iterationNumber,
           toolCallId: call.id,
-          history: messages,
+          history,
         };
 
         let decision: GateDecision;
@@ -192,8 +191,8 @@ export function createRunTools(
         };
       };
 
-      // Execute the requested tools
-      const executeOne = async (call: (typeof toolCalls)[number]): Promise<ToolCallResult> => {
+      // Unknown-tool check, validation, gate, execute: shared by every protocol
+      const invoke = async (call: ToolProtocolCall): Promise<ToolProtocolResult> => {
         const definition = tools[call.name];
         if (!definition) {
           return {
@@ -234,7 +233,7 @@ export function createRunTools(
         try {
           const result = await definition.execute(call.input, {
             toolCallId: call.id,
-            messages,
+            messages: history,
             signal,
           });
           return { toolCallId: call.id, result };
@@ -247,27 +246,48 @@ export function createRunTools(
         }
       };
 
-      let toolResults: ToolCallResult[];
-      if (parallelToolCalls) {
-        toolResults = await Promise.all(toolCalls.map(executeOne));
-      } else {
-        toolResults = [];
-        for (const call of toolCalls) {
-          toolResults.push(await executeOne(call));
-        }
+      const outcome = await protocol.interpret(response, {
+        ...baseContext,
+        messages,
+        invoke,
+      });
+
+      // Model answered without tools: done
+      if (outcome.kind === 'final') {
+        const step: RunToolsStep = {
+          iteration,
+          response,
+          toolCalls: [],
+          toolResults: [],
+          protocol: protocol.name,
+        };
+        steps.push(step);
+        await options.onStepFinish?.(step);
+
+        return {
+          text: outcome.text ?? extractText(response),
+          response,
+          messages: history,
+          steps,
+          finishReason: response.finishReason,
+          totalUsage,
+          status: 'completed',
+          denials,
+        };
       }
 
-      messages = [...messages, createToolResultMessage(toolResults)];
+      messages = [...messages, ...outcome.messages];
 
       const step: RunToolsStep = {
         iteration,
         response,
-        toolCalls: toolCalls.map((call) => ({
+        toolCalls: outcome.calls.map((call) => ({
           id: call.id,
           name: call.name,
           input: call.input,
         })),
-        toolResults,
+        toolResults: outcome.results,
+        protocol: protocol.name,
       };
       steps.push(step);
       await options.onStepFinish?.(step);
