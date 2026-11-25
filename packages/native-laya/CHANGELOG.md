@@ -1,5 +1,14 @@
 # @johnhenry/aimatey-native-laya
 
+## 0.2.4
+
+### Patch Changes
+
+- Updated dependencies [2c0700d]
+- Updated dependencies [211dc02]
+  - @johnhenry/aimatey-types@0.10.0
+  - @johnhenry/aimatey-errors@0.5.2
+
 ## 0.2.3
 
 ### Patch Changes

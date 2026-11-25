@@ -1,5 +1,14 @@
 # @johnhenry/aimatey-testing
 
+## 0.2.3
+
+### Patch Changes
+
+- Updated dependencies [2c0700d]
+- Updated dependencies [211dc02]
+  - @johnhenry/aimatey-types@0.10.0
+  - @johnhenry/aimatey-utils@0.6.4
+
 ## 0.2.2
 
 ### Patch Changes

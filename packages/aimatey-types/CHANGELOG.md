@@ -1,5 +1,12 @@
 # @johnhenry/aimatey-types
 
+## 0.10.0
+
+### Minor Changes
+
+- 2c0700d: `ToolDefinition.outputSchema` (optional). `aimatey-mcp` carries an MCP tool's `outputSchema` onto its definition and, for such tools, returns `structuredContent` as the result value instead of flattened text. The `code` protocol types tool results from `outputSchema` (`Promise<unknown>` when absent).
+- 211dc02: `runTools` takes a `protocol` option (`'native'` by default, or a `ToolProtocol` object or a registered name). A protocol shapes the request and reads the reply; the loop keeps argument validation, the gate, `maxIterations`, `parallelToolCalls` and step reporting for every protocol. Adds `ToolProtocol` types, `registerToolProtocol`, and `RunToolsStep.protocol`. No behavior change for existing callers.
+
 ## 0.9.0
 
 ### Minor Changes

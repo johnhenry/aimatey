@@ -1,5 +1,19 @@
 # @johnhenry/aimatey-core
 
+## 0.8.0
+
+### Minor Changes
+
+- 211dc02: `runTools` takes a `protocol` option (`'native'` by default, or a `ToolProtocol` object or a registered name). A protocol shapes the request and reads the reply; the loop keeps argument validation, the gate, `maxIterations`, `parallelToolCalls` and step reporting for every protocol. Adds `ToolProtocol` types, `registerToolProtocol`, and `RunToolsStep.protocol`. No behavior change for existing callers.
+
+### Patch Changes
+
+- Updated dependencies [2c0700d]
+- Updated dependencies [211dc02]
+  - @johnhenry/aimatey-types@0.10.0
+  - @johnhenry/aimatey-errors@0.5.2
+  - @johnhenry/aimatey-utils@0.6.4
+
 ## 0.7.0
 
 ### Minor Changes
