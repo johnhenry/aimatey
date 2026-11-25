@@ -15,10 +15,10 @@ import { dirname } from 'node:path';
 import { Bridge } from '@johnhenry/aimatey-core';
 import { OpenAIFrontendAdapter } from '@johnhenry/aimatey-frontend';
 import { OllamaBackendAdapter } from '@johnhenry/aimatey-backend/ollama';
-import { codeProtocol, andboxExecutor, textProtocol } from '@johnhenry/aimatey-tool-protocols';
+import { codeProtocol, andboxExecutor, textProtocol, buildLegacyCodePrompt } from '@johnhenry/aimatey-tool-protocols';
 import { parseArgs, type BenchArgs } from './args.js';
 import { toMarkdown } from './aggregate.js';
-import { instrumentBackend, instrumentExecutor, runOne, type RunnerDeps, type RunRecord } from './runner.js';
+import { instrumentBackend, instrumentExecutor, runOne, type Arm, type RunnerDeps, type RunRecord } from './runner.js';
 import { TASKS } from './tasks.js';
 
 export interface ResultsFile {
@@ -49,7 +49,7 @@ function save(file: string, data: ResultsFile): void {
 function makeDeps(args: BenchArgs): RunnerDeps {
   const base = new OllamaBackendAdapter({ baseURL: args.baseURL ?? 'http://localhost:11434' });
   return {
-    runTools(protocol, options, probe) {
+    runTools(protocol, options, probe, arm) {
       const bridge = new Bridge(new OpenAIFrontendAdapter(), instrumentBackend(base, probe));
       const withProtocol =
         protocol === 'native'
@@ -59,7 +59,10 @@ function makeDeps(args: BenchArgs): RunnerDeps {
               protocol:
                 protocol === 'text'
                   ? textProtocol()
-                  : codeProtocol({ executor: instrumentExecutor(andboxExecutor(), probe) }),
+                  : codeProtocol({
+                      executor: instrumentExecutor(andboxExecutor(), probe),
+                      ...(arm?.prompt === 'legacy' && { systemPrompt: buildLegacyCodePrompt }),
+                    }),
             };
       return bridge.runTools(withProtocol);
     },
@@ -101,17 +104,21 @@ async function main(): Promise<void> {
         };
   data.meta.complete = false;
   data.meta.models = [...new Set([...data.meta.models, ...args.models])];
-  const done = new Set(data.runs.map((r) => `${r.model}|${r.task}|${r.protocol}|${r.repeat}`));
+  const done = new Set(data.runs.map((r) => `${r.model}|${r.task}|${r.protocol}|${r.arm ?? ''}|${r.repeat}`));
   const deps = makeDeps(args);
 
-  const plan: { model: string; task: (typeof TASKS)[number]; protocol: BenchArgs['protocols'][number]; repeat: number }[] = [];
+  const armList: (Arm | undefined)[] = args.arms ?? [undefined];
+  const plan: { model: string; task: (typeof TASKS)[number]; protocol: BenchArgs['protocols'][number]; repeat: number; arm?: Arm }[] = [];
   for (const model of args.models) {
-    for (const task of tasks) {
-      const repeats = task.heavy ? args.heavyRepeats : args.repeats;
-      for (let repeat = 1; repeat <= repeats; repeat++) {
-        for (const protocol of args.protocols) {
-          if (!done.has(`${model}|${task.id}|${protocol}|${repeat}`)) {
-            plan.push({ model, task, protocol, repeat });
+    // Arms outermost so a partial run still holds whole arms, in the order given.
+    for (const arm of armList) {
+      for (const task of tasks) {
+        const repeats = task.heavy ? args.heavyRepeats : args.repeats;
+        for (let repeat = 1; repeat <= repeats; repeat++) {
+          for (const protocol of args.protocols) {
+            if (!done.has(`${model}|${task.id}|${protocol}|${arm?.id ?? ''}|${repeat}`)) {
+              plan.push({ model, task, protocol, repeat, ...(arm && { arm }) });
+            }
           }
         }
       }
@@ -126,12 +133,13 @@ async function main(): Promise<void> {
       timeoutMs: args.timeoutMs,
       maxIterations: args.maxIterations,
       temperature: args.temperature,
+      ...(p.arm && { arm: p.arm }),
     });
     data.runs.push(rec);
     data.meta.updatedAt = new Date().toISOString();
     save(args.out, data);
     console.log(
-      `[${n}/${plan.length}] ${p.model} ${p.task.id} ${p.protocol} #${p.repeat}: ` +
+      `[${n}/${plan.length}] ${p.model} ${p.task.id} ${p.protocol}${p.arm ? `/${p.arm.id}` : ''} #${p.repeat}: ` +
         `${rec.success ? 'ok' : 'FAIL'} calls=${rec.modelCalls} tools=${rec.toolCalls} ${(rec.wallMs / 1000).toFixed(1)}s` +
         (rec.error ? ` (${rec.error.slice(0, 80)})` : '')
     );

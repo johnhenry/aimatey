@@ -10,6 +10,8 @@ import { PROTOCOLS } from './runner.js';
 export interface Cell {
   readonly task: string;
   readonly protocol: string;
+  /** Ablation arm id, when the runs carry one. */
+  readonly arm?: string;
   readonly model: string;
   readonly runs: number;
   readonly successes: number;
@@ -31,7 +33,7 @@ const mean = (xs: number[]): number => (xs.length === 0 ? NaN : xs.reduce((a, b)
 export function aggregate(runs: readonly RunRecord[]): Cell[] {
   const groups = new Map<string, RunRecord[]>();
   for (const r of runs) {
-    const key = `${r.model}\u0000${r.task}\u0000${r.protocol}`;
+    const key = `${r.model}\u0000${r.task}\u0000${r.protocol}\u0000${r.arm ?? ''}`;
     const g = groups.get(key);
     if (g) {
       g.push(r);
@@ -46,6 +48,7 @@ export function aggregate(runs: readonly RunRecord[]): Cell[] {
     cells.push({
       task: first.task,
       protocol: first.protocol,
+      ...(first.arm && { arm: first.arm }),
       model: first.model,
       runs: g.length,
       successes: g.filter((r) => r.success).length,
@@ -62,7 +65,7 @@ export function aggregate(runs: readonly RunRecord[]): Cell[] {
   }
   const order = (p: string): number => PROTOCOLS.indexOf(p as (typeof PROTOCOLS)[number]);
   return cells.sort(
-    (a, b) => a.model.localeCompare(b.model) || a.task.localeCompare(b.task) || order(a.protocol) - order(b.protocol)
+    (a, b) => a.model.localeCompare(b.model) || a.task.localeCompare(b.task) || order(a.protocol) - order(b.protocol) || (a.arm ?? '').localeCompare(b.arm ?? '')
   );
 }
 
@@ -73,7 +76,7 @@ const secs = (ms: number): string => (Number.isNaN(ms) ? 'n/a' : (ms / 1000).toF
 function row(c: Cell, label: string): string {
   const tokens = Number.isNaN(c.meanTokens) ? 'n/a' : `${Math.round(c.meanTokens)}${c.tokensEstimated ? '*' : ''}`;
   const code = c.meanCodeMs === null ? '-' : secs(c.meanCodeMs);
-  return `| ${label} | ${c.protocol} | ${c.runs} | ${pct(c.successRate)} (${c.successes}/${c.runs}) | ${f1(c.meanSteps)} | ${f1(c.meanModelCalls)} | ${f1(c.meanToolCalls)} | ${tokens} | ${secs(c.meanWallMs)} | ${code} | ${c.timeouts} |`;
+  return `| ${label} | ${c.arm ? `${c.protocol} (arm ${c.arm})` : c.protocol} | ${c.runs} | ${pct(c.successRate)} (${c.successes}/${c.runs}) | ${f1(c.meanSteps)} | ${f1(c.meanModelCalls)} | ${f1(c.meanToolCalls)} | ${tokens} | ${secs(c.meanWallMs)} | ${code} | ${c.timeouts} |`;
 }
 
 const HEADER =

@@ -9,6 +9,22 @@
 import type { BackendAdapter, IRChatRequest, IRChatResponse, RunToolsOptions, RunToolsResult } from '@johnhenry/aimatey-types';
 import type { BenchTask } from './tasks.js';
 
+/**
+ * Ablation arms for the `code` protocol (#251): whether the tools declare an
+ * `outputSchema`, and which system prompt the model gets.
+ */
+export interface Arm {
+  readonly id: 'A' | 'B' | 'C' | 'D';
+  readonly outputSchema: boolean;
+  readonly prompt: 'legacy' | 'v2';
+}
+export const ARMS: readonly Arm[] = [
+  { id: 'A', outputSchema: false, prompt: 'legacy' },
+  { id: 'B', outputSchema: true, prompt: 'legacy' },
+  { id: 'C', outputSchema: false, prompt: 'v2' },
+  { id: 'D', outputSchema: true, prompt: 'v2' },
+];
+
 export const PROTOCOLS = ['native', 'text', 'code'] as const;
 export type ProtocolName = (typeof PROTOCOLS)[number];
 
@@ -42,6 +58,8 @@ export const newProbe = (): Probe => ({
 export interface RunRecord {
   readonly task: string;
   readonly protocol: ProtocolName;
+  /** Ablation arm id (`code` only), absent for the original runs. */
+  readonly arm?: string;
   readonly model: string;
   readonly repeat: number;
   readonly success: boolean;
@@ -68,13 +86,15 @@ export interface RunRecord {
 
 export interface RunnerDeps {
   /** Run the loop with the given protocol; the implementation wires `probe` into its backend/executor. */
-  runTools(protocol: ProtocolName, options: RunToolsOptions, probe: Probe): Promise<RunToolsResult>;
+  runTools(protocol: ProtocolName, options: RunToolsOptions, probe: Probe, arm?: Arm): Promise<RunToolsResult>;
 }
 
 export interface RunOptions {
   readonly timeoutMs: number;
   readonly maxIterations: number;
   readonly temperature?: number;
+  /** Ablation arm: controls the tools' outputSchema and (via deps) the code prompt. */
+  readonly arm?: Arm;
 }
 
 const ANSWER_LIMIT = 400;
@@ -87,7 +107,7 @@ export async function runOne(
   deps: RunnerDeps,
   opts: RunOptions
 ): Promise<RunRecord> {
-  const instance = task.build();
+  const instance = task.build(opts.arm ? { outputSchema: opts.arm.outputSchema } : undefined);
   const probe = newProbe();
   const controller = new AbortController();
   const started = Date.now();
@@ -115,7 +135,8 @@ export async function runOne(
           signal: controller.signal,
           ...(opts.temperature !== undefined && { parameters: { temperature: opts.temperature } }),
         },
-        probe
+        probe,
+        opts.arm
       ),
       timeout,
     ]);
@@ -145,6 +166,7 @@ export async function runOne(
   return {
     task: task.id,
     protocol,
+    ...(opts.arm && { arm: opts.arm.id }),
     model,
     repeat,
     success,

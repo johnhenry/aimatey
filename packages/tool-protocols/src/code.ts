@@ -11,6 +11,7 @@ import type {
   IRChatRequest,
   IRChatResponse,
   IRMessage,
+  ToolDefinition,
   ToolProtocol,
   ToolProtocolCall,
   ToolProtocolContext,
@@ -19,7 +20,12 @@ import type {
 } from '@johnhenry/aimatey-types';
 import { buildCodePrompt } from './code-api.js';
 
-export { generateToolsInterface, schemaToTs, buildCodePrompt } from './code-api.js';
+export {
+  generateToolsInterface,
+  schemaToTs,
+  buildCodePrompt,
+  buildLegacyCodePrompt,
+} from './code-api.js';
 export { andboxExecutor, type AndboxExecutorOptions } from './andbox-executor.js';
 
 /** Resource limits for one snippet. Executors apply what they support. */
@@ -71,6 +77,11 @@ export interface CodeProtocolOptions {
   /** Truncate the feedback message to this many characters. @default 4000 */
   maxLogChars?: number;
   limits?: CodeLimits;
+  /**
+   * Build the system prompt from the tools. Defaults to {@link buildCodePrompt} (v2).
+   * Pass `buildLegacyCodePrompt` to reproduce the original prompt.
+   */
+  systemPrompt?: (tools: Readonly<Record<string, ToolDefinition>>) => string;
 }
 
 const DEFAULT_MAX_LOG_CHARS = 4000;
@@ -122,13 +133,14 @@ function truncate(text: string, max: number): string {
  */
 export function codeProtocol(options: CodeProtocolOptions): ToolProtocol {
   const { executor, limits } = options;
+  const systemPrompt = options.systemPrompt ?? buildCodePrompt;
   const maxLogChars = options.maxLogChars ?? DEFAULT_MAX_LOG_CHARS;
 
   return {
     name: 'code',
 
     prepare(request: IRChatRequest, context: ToolProtocolContext): IRChatRequest {
-      const prompt = buildCodePrompt(context.tools);
+      const prompt = systemPrompt(context.tools);
       const messages: IRMessage[] = [...request.messages];
       const first = messages[0];
       if (first?.role === 'system' && typeof first.content === 'string') {

@@ -11,6 +11,8 @@ import {
   codeProtocol,
   registerCodeProtocol,
   generateToolsInterface,
+  buildCodePrompt,
+  buildLegacyCodePrompt,
   type CodeExecutor,
   type CodeRunOptions,
 } from '@johnhenry/aimatey-tool-protocols';
@@ -336,5 +338,62 @@ describe('generateToolsInterface', () => {
     expect(out).toContain('tags?: string[]');
     expect(out).toContain('Promise<unknown>');
     expect(out).toContain('/** query */');
+  });
+});
+
+describe('code prompt v2', () => {
+  const defs = {
+    add: {
+      description: 'Add two numbers',
+      parameters: { type: 'object', properties: { a: { type: 'number' } }, required: ['a'] },
+      execute: () => 1,
+    },
+  } as never;
+
+  it('has a worked two-step example and the log-first rule', () => {
+    const p = buildCodePrompt(defs);
+    expect(p).toMatch(/Example/);
+    // the example shows the tool call + console.log, then a later plain-text reply
+    expect(p).toMatch(/console\.log\(/);
+    expect(p).toMatch(/NEXT reply|next reply/i);
+    expect(p).toMatch(/never call final\(\)[^\n]*same snippet/i);
+    expect(p).toMatch(/plain text and no code block/i);
+    expect(p).toMatch(/optional/i);
+    expect(p).toMatch(/do not guess/i);
+    expect(p).toContain('declare const tools');
+  });
+
+  it('stays short for small models (rules + example under 2500 chars before the tools block)', () => {
+    const p = buildCodePrompt(defs);
+    expect(p.indexOf('Available tools:')).toBeLessThan(2500);
+  });
+
+  it('legacy prompt reproduces the original wording', () => {
+    const p = buildLegacyCodePrompt(defs);
+    expect(p).toContain('You act by writing JavaScript.');
+    expect(p).toContain('To finish, call `final(answer)` inside the code');
+    expect(p).not.toMatch(/Example/);
+  });
+
+  it('systemPrompt option overrides the default', async () => {
+    const b = backend(['done']);
+    await bridgeOf(b).runTools({
+      prompt: 'hi',
+      tools,
+      protocol: codeProtocol({
+        executor: fakeExecutor(),
+        systemPrompt: (t) => `CUSTOM ${Object.keys(t).join(',')}`,
+      }),
+    });
+    const sys = b.requests[0].messages.find((m) => m.role === 'system');
+    expect(JSON.stringify(sys?.content)).toContain('CUSTOM add');
+    expect(JSON.stringify(sys?.content)).not.toContain('declare const tools');
+  });
+
+  it('default prompt is v2', async () => {
+    const b = backend(['done']);
+    await bridgeOf(b).runTools({ prompt: 'hi', tools, protocol: codeProtocol({ executor: fakeExecutor() }) });
+    const sys = b.requests[0].messages.find((m) => m.role === 'system');
+    expect(JSON.stringify(sys?.content)).toMatch(/same snippet/);
   });
 });

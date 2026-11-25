@@ -17,6 +17,10 @@ export interface ToolCallRecord {
   readonly error?: string;
 }
 
+export interface BuildOptions {
+  readonly outputSchema?: boolean;
+}
+
 export interface TaskInstance {
   readonly tools: Record<string, ToolDefinition>;
   /** Every call the fake tools received (including ones that errored). */
@@ -31,7 +35,8 @@ export interface BenchTask {
   readonly heavy: boolean;
   /** The expected answer, for reports. */
   readonly expected: string;
-  build(): TaskInstance;
+  /** `outputSchema: false` strips every tool's outputSchema (benchmark ablation); default true. */
+  build(options?: BuildOptions): TaskInstance;
   check(answer: string, calls: readonly ToolCallRecord[]): boolean;
 }
 
@@ -63,6 +68,13 @@ function instrument(
   } as ToolDefinition;
 }
 
+const obj = (properties: Record<string, unknown>) => ({
+  type: 'object' as const,
+  properties,
+  required: Object.keys(properties),
+});
+const nullable = (type: string) => ({ type: [type, 'null'] });
+
 const str = (description: string) => ({ type: 'string' as const, description });
 
 // ---- 1. single call -------------------------------------------------------
@@ -85,6 +97,7 @@ const singleCall: BenchTask = {
           'get_temperature',
           {
             description: 'Current temperature in Fahrenheit for a city',
+            outputSchema: obj({ city: { type: 'string' }, fahrenheit: nullable('number') }),
             parameters: { type: 'object', properties: { city: str('City name') }, required: ['city'] },
           },
           ({ city }) => ({ city, fahrenheit: TEMPS[city as string] ?? null })
@@ -118,6 +131,7 @@ const chain: BenchTask = {
           'find_user',
           {
             description: 'Find a user by username; returns their userId',
+            outputSchema: obj({ userId: nullable('string') }),
             parameters: { type: 'object', properties: { username: str('Username') }, required: ['username'] },
           },
           ({ username }) => (username === 'alice' ? { userId: 'u-417' } : { userId: null })
@@ -127,6 +141,7 @@ const chain: BenchTask = {
           'list_orders',
           {
             description: 'List order ids for a userId, oldest first',
+            outputSchema: obj({ orders: { type: 'array', items: { type: 'string' } } }),
             parameters: { type: 'object', properties: { userId: str('A userId from find_user') }, required: ['userId'] },
           },
           ({ userId }) => ORDERS[userId as string] ?? { orders: [] }
@@ -136,6 +151,7 @@ const chain: BenchTask = {
           'get_order_total',
           {
             description: 'Total in dollars for an order id',
+            outputSchema: obj({ orderId: { type: 'string' }, total: nullable('number') }),
             parameters: { type: 'object', properties: { orderId: str('An order id from list_orders') }, required: ['orderId'] },
           },
           ({ orderId }) => ({ orderId, total: TOTALS[orderId as string] ?? null })
@@ -171,6 +187,7 @@ const fanOut: BenchTask = {
           'get_population',
           {
             description: 'Population of a city in thousands',
+            outputSchema: obj({ city: { type: 'string' }, thousands: nullable('number') }),
             parameters: { type: 'object', properties: { city: str('City name') }, required: ['city'] },
           },
           ({ city }) => ({ city, thousands: POPS[city as string] ?? null })
@@ -222,6 +239,10 @@ const aggregate: BenchTask = {
           'list_transactions',
           {
             description: 'List all 200 transactions as rows {id, category, amount}',
+            outputSchema: {
+              type: 'array',
+              items: obj({ id: { type: 'number' }, category: { type: 'string' }, amount: { type: 'number' } }),
+            },
             parameters: { type: 'object', properties: {} },
           },
           () => TX
@@ -252,6 +273,7 @@ const errorRecovery: BenchTask = {
           'get_balance',
           {
             description: 'Balance in dollars for an account id',
+            outputSchema: obj({ accountId: { type: 'string' }, balance: { type: 'number' } }),
             parameters: { type: 'object', properties: { accountId: str('Account id') }, required: ['accountId'] },
           },
           ({ accountId }) => {
@@ -272,6 +294,25 @@ const errorRecovery: BenchTask = {
     calls.some((c) => c.name === 'get_balance' && c.input.accountId === 'ACC-1042' && !c.error),
 };
 
-export const TASKS: readonly BenchTask[] = [singleCall, chain, fanOut, aggregate, errorRecovery];
+/** Same tools with `outputSchema` removed (the original, untyped-result bench). */
+function stripSchemas(instance: TaskInstance): TaskInstance {
+  const tools = Object.fromEntries(
+    Object.entries(instance.tools).map(([name, def]) => {
+      const { outputSchema: _dropped, ...rest } = def;
+      return [name, rest as ToolDefinition];
+    })
+  );
+  return { calls: instance.calls, tools };
+}
+
+const withBuildOptions = (task: BenchTask): BenchTask => ({
+  ...task,
+  build: (options) => {
+    const instance = task.build();
+    return options?.outputSchema === false ? stripSchemas(instance) : instance;
+  },
+});
+
+export const TASKS: readonly BenchTask[] = [singleCall, chain, fanOut, aggregate, errorRecovery].map(withBuildOptions);
 export const EXPECTED_TRAVEL = { count: TRAVEL_COUNT, sum: TRAVEL_SUM };
 export const EXPECTED_POP_TOTAL = POP_TOTAL;
