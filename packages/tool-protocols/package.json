@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/aimatey-tool-protocols",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Tool-calling protocols for Aimatey runTools: text (models without native tools) and code (sandboxed JavaScript actions)",
   "type": "module",
   "main": "./dist/cjs/index.js",
