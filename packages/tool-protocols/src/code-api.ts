@@ -104,8 +104,49 @@ export function generateToolsInterface(tools: Readonly<Record<string, ToolDefini
   return `declare const tools: {\n${entries.join('\n')}\n};\ndeclare function final(answer: unknown): void;`;
 }
 
-/** The system prompt that teaches a model the `code` protocol. */
+/**
+ * The system prompt that teaches a model the `code` protocol (v2): a worked
+ * two-step example, "log first, finish next turn", and read result types from
+ * the interface. Kept short for small models.
+ */
 export function buildCodePrompt(tools: Readonly<Record<string, ToolDefinition>>): string {
+  return [
+    'You act by writing JavaScript. To use tools, reply with exactly ONE fenced code block. To answer, reply with plain text and no code block.',
+    '',
+    'Example. The user asks: "How warm is it in Paris?"',
+    'Your first reply is only this:',
+    '```js',
+    "const r = await tools.get_weather({ city: 'Paris' });",
+    'console.log(r);',
+    '```',
+    'You then receive: Output: {"city":"Paris","celsius":18}',
+    'Your NEXT reply, now that you have seen the result, is plain text with no code block:',
+    'It is 18 degrees Celsius in Paris.',
+    '',
+    'Rules:',
+    '- Plain JavaScript only: no imports, no require, and no fetch, timers (setTimeout) or process in the sandbox.',
+    '- Call tools as `await tools.name({...})`. Arguments and results are JSON. Use Promise.all for independent calls.',
+    '- Read each result type in the interface below. Do not guess the shape of a result.',
+    '- Never call final() in the same snippet as a tool call whose result you have not seen. console.log the results first, then finish in your NEXT reply.',
+    '- final(answer) is optional sugar: its argument is the answer text itself, never a call written inside prose. Plain text is the normal way to answer.',
+    '- A tool call can throw (denied, invalid arguments, tool failure); the error comes back to you, so read it and retry if you can.',
+    '- You get the printed output and the value you `return` in the next message. Nothing persists between snippets.',
+    '',
+    'Available tools:',
+    '',
+    '```ts',
+    generateToolsInterface(tools),
+    '```',
+  ].join('\n');
+}
+
+/**
+ * The first (v1) system prompt, kept only so the benchmark ablation can
+ * reproduce it. Not part of the supported API.
+ *
+ * @internal
+ */
+export function buildLegacyCodePrompt(tools: Readonly<Record<string, ToolDefinition>>): string {
   return [
     'You act by writing JavaScript. To use tools, reply with exactly ONE fenced code block:',
     '',

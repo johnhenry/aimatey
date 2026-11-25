@@ -14,7 +14,7 @@ import {
   EXPECTED_TRAVEL,
   EXPECTED_POP_TOTAL,
 } from '../../examples/tools/bench/tasks';
-import { runOne, instrumentBackend, instrumentExecutor, newProbe, type RunRecord, type RunnerDeps } from '../../examples/tools/bench/runner';
+import { ARMS, runOne, instrumentBackend, instrumentExecutor, newProbe, type RunRecord, type RunnerDeps } from '../../examples/tools/bench/runner';
 import { aggregate, toMarkdown } from '../../examples/tools/bench/aggregate';
 import { parseArgs } from '../../examples/tools/bench/args';
 
@@ -45,6 +45,48 @@ describe('task data', () => {
     const travel = a.filter((r) => r.category === 'travel');
     expect(travel.length).toBe(EXPECTED_TRAVEL.count);
     expect(travel.reduce((s, r) => s + r.amount, 0)).toBe(EXPECTED_TRAVEL.sum);
+  });
+  it('every tool declares an outputSchema that its real results satisfy (by default)', async () => {
+    const samples: Record<string, [string, Record<string, unknown>][]> = {
+      't1-single': [['get_temperature', { city: 'Boston' }]],
+      't2-chain': [
+        ['find_user', { username: 'alice' }],
+        ['list_orders', { userId: 'u-417' }],
+        ['get_order_total', { orderId: 'o-9011' }],
+      ],
+      't3-fanout': [['get_population', { city: 'Oslo' }]],
+      't4-aggregate': [['list_transactions', {}]],
+      't5-recovery': [['get_balance', { accountId: 'ACC-1042' }]],
+    };
+    const matches = (v: unknown, s: any): boolean => {
+      const types = Array.isArray(s.type) ? s.type : [s.type];
+      const t = v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
+      if (!types.includes(t) && !(t === 'number' && types.includes('integer'))) return false;
+      if (t === 'array') return (v as unknown[]).every((x) => matches(x, s.items));
+      if (t === 'object') {
+        const o = v as Record<string, unknown>;
+        return Object.keys(o).every((k) => k in s.properties && matches(o[k], s.properties[k])) &&
+          (s.required ?? []).every((k: string) => k in o);
+      }
+      return true;
+    };
+    for (const t of TASKS) {
+      const inst = t.build();
+      for (const [name, input] of samples[t.id]) {
+        const def = inst.tools[name];
+        expect(def.outputSchema, `${t.id}/${name}`).toBeDefined();
+        const out = await def.execute(input, {} as never);
+        expect(matches(out, def.outputSchema), `${t.id}/${name}`).toBe(true);
+      }
+    }
+  });
+  it('build({ outputSchema: false }) strips them (ablation) without changing results', async () => {
+    const a = task('t1-single').build({ outputSchema: false });
+    const b = task('t1-single').build();
+    expect(a.tools.get_temperature.outputSchema).toBeUndefined();
+    expect(await a.tools.get_temperature.execute({ city: 'Boston' }, {} as never)).toEqual(
+      await b.tools.get_temperature.execute({ city: 'Boston' }, {} as never)
+    );
   });
   it('build() gives fresh call logs each time', async () => {
     const a = task('t1-single').build();
@@ -190,6 +232,42 @@ describe('runOne with a scripted fake runTools', () => {
     };
     const rec = await runOne(task('t1-single'), 'code', 'm', 1, deps, opts);
     expect(rec).toMatchObject({ codeSnippets: 2, codeMs: 250, codeErrors: 1 });
+  });
+});
+
+describe('arms', () => {
+  it('defines the four ablation arms', () => {
+    expect(ARMS.map((a) => [a.id, a.outputSchema, a.prompt])).toEqual([
+      ['A', false, 'legacy'],
+      ['B', true, 'legacy'],
+      ['C', false, 'v2'],
+      ['D', true, 'v2'],
+    ]);
+  });
+  it('runOne builds tools per arm and records the arm', async () => {
+    let schema: unknown = 'unset';
+    const deps: RunnerDeps = {
+      runTools(_p, o) {
+        schema = o.tools.get_temperature.outputSchema;
+        return Promise.resolve(fakeResult('58'));
+      },
+    };
+    const rec = await runOne(task('t1-single'), 'code', 'm', 1, deps, { ...opts, arm: ARMS[0] });
+    expect(schema).toBeUndefined();
+    expect(rec.arm).toBe('A');
+    await runOne(task('t1-single'), 'code', 'm', 1, deps, { ...opts, arm: ARMS[3] });
+    expect(schema).toBeDefined();
+  });
+  it('parseArgs reads --arms and aggregate separates arms', () => {
+    expect(parseArgs(['--arms', 'D,A']).arms?.map((a) => a.id)).toEqual(['D', 'A']);
+    expect(() => parseArgs(['--arms', 'Z'])).toThrow(/unknown arm/);
+    const mk = (arm: string, success: boolean): RunRecord => ({
+      task: 't1-single', protocol: 'code', model: 'm', repeat: 1, success, steps: 1, modelCalls: 1, toolCalls: 1,
+      promptTokens: 1, completionTokens: 1, tokensEstimated: false, wallMs: 1, timedOut: false, arm,
+    });
+    const cells = aggregate([mk('A', false), mk('D', true)]);
+    expect(cells.map((c) => [c.arm, c.successes])).toEqual([['A', 0], ['D', 1]]);
+    expect(toMarkdown([mk('A', false), mk('D', true)])).toMatch(/code \(arm D\)/);
   });
 });
 

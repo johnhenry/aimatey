@@ -1,6 +1,6 @@
 /** CLI argument parsing for the tool-protocol benchmark. */
 
-import { PROTOCOLS, type ProtocolName } from './runner.js';
+import { ARMS, PROTOCOLS, type Arm, type ProtocolName } from './runner.js';
 
 export interface BenchArgs {
   models: string[];
@@ -11,6 +11,8 @@ export interface BenchArgs {
   temperature: number;
   tasks?: string[];
   protocols: ProtocolName[];
+  /** `code` ablation arms (in run order); when set, only the `code` protocol runs. */
+  arms?: Arm[];
   out: string;
   resume: boolean;
   /** Only render markdown from an existing results file. */
@@ -64,6 +66,19 @@ export function parseArgs(argv: readonly string[]): BenchArgs {
           }
         }
         args.protocols = list as ProtocolName[];
+        break;
+      }
+      case '--arms': {
+        args.arms = need(i++, flag)
+          .split(',')
+          .map((id) => {
+            const arm = ARMS.find((a) => a.id === id);
+            if (!arm) {
+              throw new Error(`unknown arm '${id}' (expected ${ARMS.map((a) => a.id).join(', ')})`);
+            }
+            return arm;
+          });
+        args.protocols = ['code'];
         break;
       }
       case '--out': args.out = need(i++, flag); break;
