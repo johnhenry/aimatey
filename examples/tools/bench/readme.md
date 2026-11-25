@@ -29,7 +29,7 @@ npx tsx examples/tools/bench/run.ts --report examples/tools/bench/results/qwen2.
 
 Flags: `--model` (repeatable), `--repeats N` (tasks 1-3), `--heavy-repeats N` (tasks 4-5),
 `--timeout-s` per run (default 300), `--max-iterations` (default 8), `--temperature` (default 0.3),
-`--tasks t1,t2`, `--protocols native,text,code`, `--resume` (skip runs already in `--out`),
+`--tasks t1,t2`, `--protocols native,text,code`, `--arms D,A,B,C` (`code` ablation: A = no outputSchema + legacy prompt, B = outputSchema + legacy, C = no outputSchema + prompt v2, D = both; implies `--protocols code`), `--resume` (skip runs already in `--out`),
 `--markdown <file>` with `--report`, `--base-url`, `--hardware`.
 
 The results file is rewritten after every run, so an interrupted run loses at most one run
