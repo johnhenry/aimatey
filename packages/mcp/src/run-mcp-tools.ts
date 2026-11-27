@@ -22,6 +22,9 @@ export interface RunMcpToolsOptions extends Omit<RunToolsOptions, 'tools'> {
 
   /** Only include tools for which this returns true. */
   readonly toolFilter?: (tool: McpToolSchema) => boolean;
+
+  /** Await task-shaped results via `client.callToolTask`; see `McpToolsToDefinitionsOptions`. */
+  readonly preferTasks?: boolean;
 }
 
 /**
@@ -45,7 +48,7 @@ export async function runMcpTools(
   runTools: (options: RunToolsOptions) => Promise<RunToolsResult>,
   options: RunMcpToolsOptions
 ): Promise<RunToolsResult> {
-  const { client, server, toolFilter, signal, ...runToolsOptions } = options;
-  const tools = await mcpToolsToDefinitions(client, { server, signal, toolFilter });
+  const { client, server, toolFilter, preferTasks, signal, ...runToolsOptions } = options;
+  const tools = await mcpToolsToDefinitions(client, { server, signal, toolFilter, preferTasks });
   return runTools({ ...runToolsOptions, signal, tools });
 }
