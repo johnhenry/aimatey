@@ -9,9 +9,22 @@
  * @module
  */
 
-export type { McpClientLike, McpToolSchema, McpContentBlock, McpCallToolResult } from './types.js';
+export type {
+  McpClientLike,
+  McpToolSchema,
+  McpContentBlock,
+  McpCallToolResult,
+  McpTaskHandleLike,
+} from './types.js';
 
-export { mcpToolToIRTool, extractMcpResultText } from './convert.js';
+export { McpInputRequiredError, McpTaskUnresolvedError } from './errors.js';
+
+export {
+  mcpToolToIRTool,
+  extractMcpResultText,
+  isMcpTaskResult,
+  isMcpInputRequiredResult,
+} from './convert.js';
 
 export { mcpToolsToDefinitions, type McpToolsToDefinitionsOptions } from './tool-definitions.js';
 

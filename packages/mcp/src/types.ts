@@ -28,6 +28,10 @@ export interface McpToolSchema {
   };
   /** JSON Schema of `structuredContent`, when the server declares one. */
   readonly outputSchema?: Record<string, unknown>;
+  /** Human-readable display name (MCP `Tool.title`). */
+  readonly title?: string;
+  /** Behavioral hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`, ...). */
+  readonly annotations?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -44,9 +48,35 @@ export interface McpContentBlock {
  * The result of an MCP `tools/call` (raw MCP spec `CallToolResult` shape).
  */
 export interface McpCallToolResult {
-  readonly content: readonly McpContentBlock[];
-  readonly structuredContent?: Record<string, unknown>;
+  /**
+   * Content blocks. Optional: a result may carry only `structuredContent`,
+   * and task-shaped / `input_required` results have none.
+   */
+  readonly content?: readonly McpContentBlock[];
+  /** Any JSON value (SEP-2106): object, array, string, number, boolean or null. */
+  readonly structuredContent?: unknown;
   readonly isError?: boolean;
+  /** Discriminator used by newer protocol revisions: `"task"`, `"input_required"`, `"complete"`. */
+  readonly resultType?: string;
+  /** Task handle fields (tasks extension): present when the server answered with a task. */
+  readonly taskId?: string;
+  readonly status?: string;
+  /** `input_required` fields: what the server wants elicited, and state to echo back. */
+  readonly inputRequests?: unknown;
+  readonly requestState?: unknown;
+  readonly [key: string]: unknown;
+}
+
+/**
+ * A live handle on a task-augmented tool call. Structurally compatible with
+ * `mcp-query`'s `TaskHandle` (`MCPClient.callToolTask(...)` resolves to one).
+ */
+export interface McpTaskHandleLike {
+  readonly taskId?: string;
+  /** Resolves with the final tool result when the task completes; rejects on failure/cancel. */
+  result(): Promise<McpCallToolResult>;
+  /** Ask the server to cancel the task. Called when the abort signal fires. */
+  cancel?(): Promise<void>;
 }
 
 /**
@@ -72,4 +102,21 @@ export interface McpClientLike {
     args: Record<string, unknown>,
     opts?: { readonly server?: string; readonly signal?: AbortSignal }
   ): Promise<McpCallToolResult>;
+
+  /**
+   * Optional: start a task-augmented tool call and return a handle that can
+   * be awaited for the final result (`mcp-query`'s `callToolTask`). Used only
+   * when `preferTasks` is set on `mcpToolsToDefinitions` / `runMcpTools`;
+   * without it, or without this method, a task-shaped `callTool` result
+   * fails with `McpTaskUnresolvedError`. Not used as a fallback after
+   * `callTool`, because that would run the tool a second time.
+   *
+   * Note: `mcp-query` rejects this on connections whose server does not
+   * advertise the tasks extension, which is why it is opt-in.
+   */
+  callToolTask?(
+    name: string,
+    args: Record<string, unknown>,
+    opts?: { readonly server?: string; readonly signal?: AbortSignal }
+  ): Promise<McpTaskHandleLike>;
 }

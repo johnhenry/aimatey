@@ -65,7 +65,12 @@ console.log(result.text);
 `mcpToolsToDefinitions` and `runMcpTools` both accept:
 - `server?: string` — which server to list/call tools against, for multi-server clients
 - `toolFilter?: (tool: McpToolSchema) => boolean` — only include matching tools
-- `signal?: AbortSignal` — forwarded to `callTool`
+- `signal?: AbortSignal` — forwarded to `callTool` (and, with `preferTasks`, used to cancel the task)
+- `preferTasks?: boolean` — route calls through the client's optional `callToolTask(...).result()`
+
+An MCP tool's `title`, `annotations` (e.g. `destructiveHint`) and `outputSchema` are kept on the
+IR tool under `metadata.mcp`, and `toolFilter` receives the full MCP schema, so you can gate
+destructive tools: `toolFilter: (t) => t.annotations?.destructiveHint !== true`.
 
 ## Using your own tools object
 
@@ -124,6 +129,25 @@ no change in `mcp-query` (or `@johnhenry/aimatey-mcp`) to support — only a new
 site. If you inject a different `McpClientLike` implementation (the official SDK wrapped by hand,
 or your own), consult its docs for which revisions it negotiates; `@johnhenry/aimatey-mcp`'s behavior is
 identical either way.
+
+### Tasks and in-band elicitation
+
+Two newer result shapes are the **injected client's** job, not this package's:
+
+- **Tasks** (`io.modelcontextprotocol/tasks`): a server may answer `tools/call` with a task handle
+  (`taskId`, `status`, no `content`) instead of a result. Polling `tasks/get`, honoring the poll
+  interval and cancelling belong to the client. If your client exposes `callToolTask(name, args, opts)`
+  returning a handle with `result()` (and optionally `cancel()`), as `mcp-query` does, pass
+  `preferTasks: true` and this package awaits `result()`, cancelling the task when `signal` aborts.
+  Otherwise a task-shaped result fails with `McpTaskUnresolvedError`. A task-shaped `callTool` result is
+  never re-driven through `callToolTask`, since that would run the tool twice.
+- **In-band elicitation** (`resultType: "input_required"`, `inputRequests`, `requestState`): answering the
+  server's questions and re-sending the call with `requestState` is done by the client's elicitation
+  handler. If the client hands an `input_required` result back, this package throws
+  `McpInputRequiredError` (naming the missing handler); it never prompts anyone itself.
+
+Both errors are thrown from the tool's `execute`, so the tool loop reports them to the model as
+`isError: true` tool results, as it does for an MCP `isError: true` result.
 
 ## License
 
